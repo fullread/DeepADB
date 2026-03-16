@@ -1,0 +1,30 @@
+# Build output
+node_modules/
+build/
+
+# TypeScript compilation artifacts
+*.js
+*.d.ts
+*.js.map
+*.d.ts.map
+!src/**
+
+# Environment
+.env
+
+# Build archives
+*.tar
+*.zip
+*.tar.gz
+*.tgz
+
+# QEMU VM images (belong on device, not in repo)
+vmlinuz-*
+initramfs-*
+*.qcow2
+*.img
+*.raw
+
+# OS artifacts
+.DS_Store
+Thumbs.db
