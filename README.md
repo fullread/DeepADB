@@ -8,57 +8,57 @@ MCP (Model Context Protocol) server providing full Android Debug Bridge (ADB) in
 
 ```
 ┌──────────────────────────────────────────────────┐
-│                   MCP Client                      │
-│             (Claude Code / claude.ai)             │
+│                   MCP Client                     │
+│             (Claude Code / claude.ai)            │
 └──────────────────────┬───────────────────────────┘
                        │ stdio (JSON-RPC) or HTTP/SSE or WebSocket
 ┌──────────────────────▼───────────────────────────┐
-│               DeepADB Server                │
-│                                                   │
-│  ┌─────────────────────────────────────────────┐  │
-│  │           Tool Modules (41)                  │  │
-│  │  device │ shell │ packages │ files │ logs   │  │
-│  │  diagnostics │ ui │ build │ health          │  │
-│  │  wireless │ control │ logcat-watch          │  │
-│  │  forwarding │ screen-record │ emulator      │  │
-│  │  testing │ multi-device │ snapshot          │  │
-│  │  network-capture │ ci │ plugins │ baseband  │  │
-│  │  accessibility │ regression                 │  │
-│  │  device-farm │ registry │ at-commands       │  │
-│  │  screenshot-diff │ workflow                 │  │
-│  │  split-apk │ mirroring │ test-gen          │  │
-│  │  ota-monitor │ ril-intercept               │  │
-│  │  device-profiles │ firmware-analysis        │  │
-│  │  workflow-market │ selinux-audit            │  │
-│  │  thermal-power │ network-discovery          │  │
-│  ├─────────────────────────────────────────────┤  │
-│  │  Resources (4) │ Prompts (4)                │  │
-│  └───────────────────┬─────────────────────────┘  │
-│                      │                             │
-│  ┌───────────────────▼─────────────────────────┐  │
-│  │          ToolContext (unified DI)            │  │
-│  │  server │ bridge │ deviceManager            │  │
-│  │  logger │ security │ config                 │  │
-│  └───────────────────┬─────────────────────────┘  │
-│                      │                             │
-│  ┌───────────────────▼─────────────────────────┐  │
-│  │           Middleware Layer                    │  │
-│  │  OutputProcessor │ SecurityMiddleware        │  │
-│  │  InputSanitizer │ Logger (stderr-safe)       │  │
-│  └───────────────────┬─────────────────────────┘  │
-│                      │                             │
-│  ┌───────────────────▼─────────────────────────┐  │
-│  │         Bridge Layer (auto-detect)           │  │
-│  │                                              │  │
-│  │  ┌─────────────┐    ┌────────────────────┐  │  │
-│  │  │  ADB Bridge  │ OR │  Local Bridge      │  │  │
-│  │  │  (PC mode)   │    │  (on-device mode)  │  │  │
-│  │  │  via adb.exe │    │  via sh/su direct  │  │  │
-│  │  └──────┬───────┘    └────────┬───────────┘  │  │
-│  │         │                     │               │  │
-│  │  Retry │ Timeout │ Cache │ Serial routing    │  │
-│  └─────────┼─────────────────────┼──────────────┘  │
-└────────────┼─────────────────────┼──────────────────┘
+│               DeepADB Server                     │
+│                                                  │
+│  ┌─────────────────────────────────────────────┐ │
+│  │           Tool Modules (41)                 │ │
+│  │  device │ shell │ packages │ files │ logs   │ │
+│  │  diagnostics │ ui │ build │ health          │ │
+│  │  wireless │ control │ logcat-watch          │ │
+│  │  forwarding │ screen-record │ emulator      │ │
+│  │  testing │ multi-device │ snapshot          │ │
+│  │  network-capture │ ci │ plugins │ baseband  │ │
+│  │  accessibility │ regression                 │ │
+│  │  device-farm │ registry │ at-commands       │ │
+│  │  screenshot-diff │ workflow                 │ │
+│  │  split-apk │ mirroring │ test-gen           │ │
+│  │  ota-monitor │ ril-intercept                │ │
+│  │  device-profiles │ firmware-analysis        │ │
+│  │  workflow-market │ selinux-audit            │ │
+│  │  thermal-power │ network-discovery          │ │
+│  ├─────────────────────────────────────────────┤ │
+│  │  Resources (4) │ Prompts (4)                │ │
+│  └───────────────────┬─────────────────────────┘ │
+│                      │                           │
+│  ┌───────────────────▼─────────────────────────┐ │
+│  │          ToolContext (unified DI)           │ │
+│  │  server │ bridge │ deviceManager            │ │
+│  │  logger │ security │ config                 │ │
+│  └───────────────────┬─────────────────────────┘ │
+│                      │                           │
+│  ┌───────────────────▼─────────────────────────┐ │
+│  │           Middleware Layer                  │ │
+│  │  OutputProcessor │ SecurityMiddleware       │ │
+│  │  InputSanitizer │ Logger (stderr-safe)      │ │
+│  └───────────────────┬─────────────────────────┘ │
+│                      │                           │
+│  ┌───────────────────▼─────────────────────────┐ │
+│  │         Bridge Layer (auto-detect)          │ │
+│  │                                             │ │
+│  │  ┌─────────────┐    ┌────────────────────┐  │ │
+│  │  │  ADB Bridge  │ OR │  Local Bridge      │ │ │
+│  │  │  (PC mode)   │    │  (on-device mode)  │ │ │
+│  │  │  via adb.exe │    │  via sh/su direct  │ │ │
+│  │  └──────┬───────┘    └────────┬───────────┘ │ │
+│  │         │                     │             │ │
+│  │  Retry │ Timeout │ Cache │ Serial routing   │ │
+│  └─────────┼─────────────────────┼─────────────┘ │
+└────────────┼─────────────────────┼───────────────┘
              │                     │
      ┌───────▼───────┐    ┌───────▼───────┐
      │  ADB Binary   │    │   sh / su     │
@@ -66,7 +66,7 @@ MCP (Model Context Protocol) server providing full Android Debug Bridge (ADB) in
      └───────┬───────┘    └───────┬───────┘
              │                    │
        ┌─────▼────────────────────▼─────┐
-       │          Android Device         │
+       │          Android Device        │
        └────────────────────────────────┘
 ```
 
