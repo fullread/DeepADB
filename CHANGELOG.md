@@ -2,6 +2,15 @@
 
 All notable changes to DeepADB are documented in this file.
 
+## v1.0.1 — Code Quality Patch
+
+- Fix unused `bridge` parameter in GraphQL `buildResolvers()`
+- Fix unused `deviceManager` parameter in GraphQL `buildFieldResolvers()`
+- Remove unnecessary `async` from 8 synchronous GraphQL field resolvers
+- Add `pretest` script to package.json so `npm test` auto-builds first
+
+---
+
 ## v1.0.0 — Full Release
 
 **147 tools, 4 resources, 4 prompts across 41 modules.**
