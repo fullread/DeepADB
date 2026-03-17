@@ -4,17 +4,25 @@
   "description": "DeepADB — the deepest Android Debug Bridge MCP server. 147 tools across 41 modules for device inspection from UI to baseband.",
   "type": "module",
   "bin": {
-    "deepadb": "./build/index.js"
+    "deepadb": "build/index.js"
   },
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
     "start": "node build/index.js",
+    "pretest": "npm run build",
     "test": "node tests/run-all.mjs",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js"
   },
-  "files": ["build"],
-  "keywords": ["mcp", "adb", "android", "claude"],
+  "files": [
+    "build"
+  ],
+  "keywords": [
+    "mcp",
+    "adb",
+    "android",
+    "claude"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=22.0.0"

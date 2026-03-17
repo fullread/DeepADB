@@ -85,7 +85,7 @@ function parseBatteryDump(raw: string): Record<string, string> {
   return result;
 }
 
-function buildResolvers(bridge: AdbBridge, deviceManager: DeviceManager) {
+function buildResolvers(_bridge: AdbBridge, deviceManager: DeviceManager) {
   return {
     devices: async () => {
       const devices = await deviceManager.listDevices();
@@ -109,28 +109,28 @@ function buildResolvers(bridge: AdbBridge, deviceManager: DeviceManager) {
   };
 }
 
-function buildFieldResolvers(bridge: AdbBridge, deviceManager: DeviceManager) {
+function buildFieldResolvers(bridge: AdbBridge, _deviceManager: DeviceManager) {
   return {
     Device: {
-      model: async (parent: { _serial: string; _props: Record<string, string> }) => {
+      model: (parent: { _serial: string; _props: Record<string, string> }) => {
         return parent._props["ro.product.model"] ?? "unknown";
       },
-      manufacturer: async (parent: { _serial: string; _props: Record<string, string> }) => {
+      manufacturer: (parent: { _serial: string; _props: Record<string, string> }) => {
         return parent._props["ro.product.manufacturer"] ?? "unknown";
       },
-      androidVersion: async (parent: { _serial: string; _props: Record<string, string> }) => {
+      androidVersion: (parent: { _serial: string; _props: Record<string, string> }) => {
         return parent._props["ro.build.version.release"] ?? "unknown";
       },
-      sdkLevel: async (parent: { _serial: string; _props: Record<string, string> }) => {
+      sdkLevel: (parent: { _serial: string; _props: Record<string, string> }) => {
         return parseInt(parent._props["ro.build.version.sdk"] ?? "0", 10) || 0;
       },
-      securityPatch: async (parent: { _serial: string; _props: Record<string, string> }) => {
+      securityPatch: (parent: { _serial: string; _props: Record<string, string> }) => {
         return parent._props["ro.build.version.security_patch"] ?? "unknown";
       },
-      buildId: async (parent: { _serial: string; _props: Record<string, string> }) => {
+      buildId: (parent: { _serial: string; _props: Record<string, string> }) => {
         return parent._props["ro.build.display.id"] ?? "unknown";
       },
-      abi: async (parent: { _serial: string; _props: Record<string, string> }) => {
+      abi: (parent: { _serial: string; _props: Record<string, string> }) => {
         return parent._props["ro.product.cpu.abi"] ?? "unknown";
       },
       battery: async (parent: { _serial: string; _props: Record<string, string> }) => {
@@ -164,7 +164,7 @@ function buildFieldResolvers(bridge: AdbBridge, deviceManager: DeviceManager) {
           networkType: props["gsm.network.type"] ?? "unknown",
         };
       },
-      properties: async (parent: { _serial: string; _props: Record<string, string> }, { keys }: { keys?: string[] }) => {
+      properties: (parent: { _serial: string; _props: Record<string, string> }, { keys }: { keys?: string[] }) => {
         const props = parent._props;
         if (keys) {
           return keys.map((k) => ({ key: k, value: props[k] ?? "" }));
