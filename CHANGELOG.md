@@ -2,6 +2,14 @@
 
 All notable changes to DeepADB are documented in this file.
 
+## v1.0.2 — Version Reporting Fix
+
+- Read version from package.json at runtime instead of hardcoding across 4 files
+- New `VERSION` export in config.ts — single source of truth for McpServer, HTTP/SSE, WebSocket, and GraphQL transports
+- Future version bumps only require editing package.json
+
+---
+
 ## v1.0.1 — Code Quality Patch
 
 - Fix unused `bridge` parameter in GraphQL `buildResolvers()`

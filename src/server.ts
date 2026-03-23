@@ -12,7 +12,7 @@ import { LocalBridge } from "./bridge/local-bridge.js";
 import { DeviceManager } from "./bridge/device-manager.js";
 import { Logger } from "./middleware/logger.js";
 import { SecurityMiddleware } from "./middleware/security.js";
-import { config, validateConfig, isOnDevice } from "./config/config.js";
+import { config, validateConfig, isOnDevice, VERSION } from "./config/config.js";
 import { ToolContext } from "./tool-context.js";
 
 // Tool module registrations
@@ -94,7 +94,7 @@ export async function createServer(): Promise<CreateServerResult> {
 
   const server = new McpServer({
     name: "deepadb",
-    version: "1.0.0",
+    version: VERSION,
   });
 
   // Build unified tool context

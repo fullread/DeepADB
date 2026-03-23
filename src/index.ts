@@ -16,6 +16,7 @@ import { createServer } from "./server.js";
 import { startHttpTransport } from "./http-transport.js";
 import { startWsTransport } from "./ws-transport.js";
 import { startGraphQLApi } from "./graphql-api.js";
+import { VERSION } from "./config/config.js";
 
 async function main(): Promise<void> {
   const { server, logger, bridge, deviceManager } = await createServer();
@@ -39,7 +40,7 @@ async function main(): Promise<void> {
   // GraphQL API runs independently alongside any transport mode
   if (graphqlPort) {
     try {
-      await startGraphQLApi(bridge, deviceManager, { port: graphqlPort, host: httpHost, version: "1.0.0" }, logger);
+      await startGraphQLApi(bridge, deviceManager, { port: graphqlPort, host: httpHost, version: VERSION }, logger);
       console.error(`[DeepADB] GraphQL API running on http://${httpHost}:${graphqlPort}/graphql`);
     } catch (err) {
       console.error(`[DeepADB] GraphQL API failed to start: ${err instanceof Error ? err.message : err}`);
@@ -48,11 +49,11 @@ async function main(): Promise<void> {
 
   if (httpPort) {
     // HTTP/SSE mode — start HTTP server
-    await startHttpTransport(server, { port: httpPort, host: httpHost, version: "1.0.0" }, logger);
+    await startHttpTransport(server, { port: httpPort, host: httpHost, version: VERSION }, logger);
     console.error(`[DeepADB] HTTP/SSE transport running on http://${httpHost}:${httpPort}`);
   } else if (wsPort) {
     // WebSocket mode — requires `ws` npm package
-    await startWsTransport(server, { port: wsPort, host: httpHost, version: "1.0.0" }, logger);
+    await startWsTransport(server, { port: wsPort, host: httpHost, version: VERSION }, logger);
     console.error(`[DeepADB] WebSocket transport running on ws://${httpHost}:${wsPort}/ws`);
   } else {
     // Default: stdio mode

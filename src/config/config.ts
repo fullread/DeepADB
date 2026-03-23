@@ -6,7 +6,23 @@
  */
 
 import { platform } from "os";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
+
+/**
+ * Package version — read from package.json at startup.
+ * Single source of truth: update version in package.json only.
+ * Used by McpServer, HTTP/SSE, WebSocket, and GraphQL transports.
+ */
+const __dirname = dirname(fileURLToPath(import.meta.url));
+let _version = "unknown";
+try {
+  // config.ts builds to build/config/config.js — ../../package.json is the project root
+  const pkg = JSON.parse(readFileSync(join(__dirname, "..", "..", "package.json"), "utf-8"));
+  _version = pkg.version ?? "unknown";
+} catch { /* fallback if package.json not found (e.g., bundled deployment) */ }
+export const VERSION = _version;
 
 export interface DeepADBConfig {
   /** Path to the ADB binary. Auto-detected if not set. */
