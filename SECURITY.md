@@ -1,0 +1,149 @@
+# Security
+
+DeepADB provides deep access to Android devices — shell execution, root commands, file operations, modem AT commands, and network capture. This power is intentional and necessary for its use cases, but it requires understanding the security model.
+
+## Threat Model
+
+DeepADB is a **local development and research tool**. Its threat model assumes:
+
+- **Trusted operator**: The person running DeepADB controls the host machine and the connected Android device(s).
+- **Untrusted input**: MCP clients (Claude, Cursor, etc.) may pass user-supplied parameters that could contain injection attempts.
+- **Trusted transport**: stdio mode communicates over local pipes. HTTP/SSE, WebSocket, and GraphQL transports bind to `127.0.0.1` by default and deny cross-origin requests.
+
+DeepADB is **not designed** for multi-tenant, internet-facing, or shared-server deployments without additional hardening. If you need to expose it over a network, enable the security middleware and restrict CORS origins.
+
+## Security Architecture
+
+### Input Sanitization (always active)
+
+Every tool that interpolates user-supplied parameters into shell commands validates inputs before execution. This is not optional — it runs regardless of security middleware settings.
+
+- **`validateShellArg()`** rejects strings containing shell metacharacters (`;`, `|`, `&`, `$`, backticks, parentheses, etc.) for identifiers like package names, property keys, service names, and setting keys.
+- **`shellEscape()`** wraps file paths in single quotes with proper escaping for the only character that can break single-quote context.
+- **`adb_input`** applies type-specific validation: `tap`/`swipe` accept only numeric coordinates, `keyevent` accepts only alphanumeric keycodes, `text` is shell-escaped.
+- **AT commands** are validated against a separate character set that rejects shell operators while allowing legitimate AT syntax (`+`, `=`, `?`, etc.).
+- **Device node paths** must start with `/dev/` and cannot contain path traversal (`..`).
+
+### Zod Parameter Bounds (always active)
+
+Every `z.number()` parameter across all 147 tools has explicit `.min()/.max()` constraints. This prevents resource exhaustion from extreme values — for example, requesting a 999999-second sleep or a buffer size of 2^31.
+
+### Security Middleware (opt-in enforcement)
+
+Set `DA_SECURITY=true` to enable command filtering and rate limiting:
+
+- **Blocklist**: `DA_BLOCKED_COMMANDS` — comma-separated substrings. Any shell command containing a blocked substring is rejected.
+- **Allowlist**: `DA_ALLOWED_COMMANDS` — if set, only commands matching at least one pattern are permitted.
+- **Rate limiting**: `DA_RATE_LIMIT` — maximum commands per minute (0 = unlimited).
+- **Audit logging**: `DA_AUDIT_LOG` — enabled by default since v1.0.3. Logs all commands to stderr with automatic credential redaction. Set `DA_AUDIT_LOG=false` to disable.
+
+### Privilege Escalation (on-device mode)
+
+When running in Termux, the LocalBridge uses a **frozen 16-command allowlist** to determine which commands get routed through `su`. This allowlist is a `ReadonlySet` wrapped in `Object.freeze()` — it cannot be modified via environment variables, runtime API, or configuration files.
+
+### Process Lifecycle
+
+All modules that spawn child processes (logcat watchers, RIL interceptors, screen mirroring, QEMU VMs, emulators) register with a centralized cleanup registry. SIGINT, SIGTERM, and process exit trigger cleanup of all registered child processes, preventing orphans.
+
+### Network Transport Security
+
+- **stdio** (default): No network exposure. Communication over local pipes only.
+- **HTTP/SSE**: Binds to `127.0.0.1`. CORS denied by default — set `DA_HTTP_CORS_ORIGIN` to explicitly allow a specific origin.
+- **WebSocket**: Same binding and CORS defaults as HTTP/SSE.
+- **GraphQL**: Same binding and CORS defaults. POST body limited to 1 MB.
+
+### External Resource Fetching
+
+The plugin registry and workflow marketplace fetch from configurable URLs. All fetch operations use streaming body reads with a **5 MB size limit** to prevent memory exhaustion. Plugin downloads verify SHA-256 integrity hashes when provided by the registry manifest.
+
+## Recommended Configurations
+
+### Personal development (default)
+
+```bash
+npm start   # stdio mode, audit logging on, security enforcement off
+```
+
+Appropriate when you are the only operator, running locally via Claude Code or similar. Audit logging provides a trail without restricting functionality.
+
+### Shared or demo environments
+
+```bash
+DA_SECURITY=true \
+DA_BLOCKED_COMMANDS="rm -rf,mkfs,dd if=,reboot" \
+DA_RATE_LIMIT=30 \
+npm start
+```
+
+Enables command filtering and rate limiting. Blocks destructive commands while allowing normal inspection tools.
+
+### Network-exposed deployments
+
+```bash
+DA_SECURITY=true \
+DA_HTTP_PORT=3000 \
+DA_HTTP_CORS_ORIGIN="https://your-app.example.com" \
+DA_BLOCKED_COMMANDS="rm -rf,mkfs,dd if=,reboot,su " \
+DA_RATE_LIMIT=20 \
+DA_ALLOWED_COMMANDS="dumpsys,getprop,pm list,screencap,uiautomator" \
+npm start
+```
+
+Locks down to read-only inspection tools via allowlist. Restricts CORS to a specific origin. Rate-limited. Not recommended without additional authentication at the network layer.
+
+## Version Pinning
+
+When installing DeepADB via npm, always pin the version:
+
+```bash
+# Pinned (recommended)
+npm install -g deepadb@1.0.3
+
+# Unpinned (not recommended — vulnerable to supply chain attacks)
+npx -y deepadb
+```
+
+When configuring MCP clients, prefer a local clone over `npx`:
+
+```json
+{
+  "mcpServers": {
+    "deepadb": {
+      "command": "node",
+      "args": ["/path/to/DeepADB/build/index.js"]
+    }
+  }
+}
+```
+
+This runs from a known-good local build rather than fetching the latest version from npm on every invocation.
+
+## Supply Chain
+
+DeepADB has **2 runtime dependencies**:
+
+- `@modelcontextprotocol/sdk` — Anthropic's official MCP SDK
+- `zod` — TypeScript schema validation (used by the MCP SDK)
+
+Optional peer dependencies (`ws` for WebSocket, `graphql` for GraphQL API) are loaded dynamically only when explicitly enabled via environment variables. They are never fetched or executed unless you set `DA_WS_PORT` or `DA_GRAPHQL_PORT`.
+
+## AT Command Safety
+
+The AT command interface (`adb_at_send`, `adb_at_batch`) includes a blocklist of dangerous modem commands that can disable the radio, write IMEI, or factory-reset the modem:
+
+- `AT+CFUN=0` (kill radio)
+- `AT+CFUN=4` (disable TX)
+- `AT+CLCK` (lock SIM)
+- `AT+EGMR` (write IMEI — illegal in many jurisdictions)
+- `AT^RESET`, `AT%RESTART` (modem reset)
+- `AT+NVRAM`, `AT+QPRTPARA` (NVRAM/parameter write)
+
+These are blocked by default. Use `force=true` to override, but understand the consequences.
+
+## Reporting Vulnerabilities
+
+If you discover a security vulnerability in DeepADB, please report it privately via GitHub's security advisory feature:
+
+https://github.com/fullread/DeepADB/security/advisories/new
+
+Do not open a public issue for security vulnerabilities. We will acknowledge receipt within 48 hours and work with you on a fix before public disclosure.

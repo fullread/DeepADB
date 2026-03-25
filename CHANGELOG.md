@@ -2,6 +2,13 @@
 
 All notable changes to DeepADB are documented in this file.
 
+## v1.0.3 — Security Hardening
+
+- Audit logging (`DA_AUDIT_LOG`) now enabled by default — all commands logged to stderr with credential redaction. Set `DA_AUDIT_LOG=false` to disable.
+- Added `SECURITY.md` documenting threat model, security architecture, recommended configurations for personal/shared/network-exposed deployments, version pinning guidance, AT command safety, and vulnerability reporting process
+
+---
+
 ## v1.0.2 — Version Reporting Fix
 
 - Read version from package.json at runtime instead of hardcoding across 4 files

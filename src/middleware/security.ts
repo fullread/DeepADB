@@ -40,7 +40,7 @@ export class SecurityMiddleware {
       blockedCommands: this.parseList(process.env.DA_BLOCKED_COMMANDS),
       allowedCommands: this.parseList(process.env.DA_ALLOWED_COMMANDS),
       rateLimit: parseInt(process.env.DA_RATE_LIMIT ?? "0", 10) || 0,
-      auditLog: process.env.DA_AUDIT_LOG === "true",
+      auditLog: process.env.DA_AUDIT_LOG !== "false",
     };
 
     if (this.config.enabled) {

@@ -515,7 +515,7 @@ All 41 tool modules receive a unified `ToolContext` dependency bundle containing
 | `DA_BLOCKED_COMMANDS` | (none) | Comma-separated list of blocked shell command substrings |
 | `DA_ALLOWED_COMMANDS` | (none) | Comma-separated allowlist (if set, only matching commands run) |
 | `DA_RATE_LIMIT` | `0` | Max commands per minute (0 = unlimited) |
-| `DA_AUDIT_LOG` | `false` | Log all executed commands for audit trail |
+| `DA_AUDIT_LOG` | `true` | Log all executed commands for audit trail (set to `false` to disable) |
 | `DA_PLUGIN_DIR` | `{tempDir}/plugins` | Directory to scan for plugin .js modules at startup |
 | `DA_REGISTRY_URL` | GitHub default | URL of the community plugin registry JSON manifest |
 | `DA_HTTP_PORT` | (disabled) | Set to a port number to enable HTTP/SSE transport mode |
