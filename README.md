@@ -86,7 +86,7 @@ AI Agent (Termux) ←→ MCP (stdio/HTTP) ←→ DeepADB (Termux) ←→ sh/su (
 ```
 When DeepADB runs directly on the Android device (e.g., inside Termux), it auto-detects the environment and switches to `LocalBridge`. Commands execute directly via `sh`/`su` — no ADB server, no USB, no serialization overhead. All 147 tools work identically, with significantly lower latency.
 
-**Validated on hardware:** 175/175 tests pass on-device (Pixel 6a, Android 16, Termux + Magisk + QEMU 10.2.1). Includes 20 QEMU/KVM virtualization tests covering setup detection, disk image lifecycle, resource budget reporting, Alpine Linux VM boot with KVM acceleration, big.LITTLE CPU topology detection, and clean VM shutdown. QEMU tests auto-skip in ADB mode (155 passed, 4 skipped).
+**Validated on hardware:** 203/203 tests pass on-device (Pixel 6a, Android 16, Termux + Magisk + QEMU 10.2.1). Includes 20 QEMU/KVM virtualization tests covering setup detection, disk image lifecycle, resource budget reporting, Alpine Linux VM boot with KVM acceleration, big.LITTLE CPU topology detection, and clean VM shutdown. QEMU tests auto-skip in ADB mode (183 passed, 4 skipped).
 
 **Privilege escalation:** In ADB mode, all shell commands run as uid=2000 (the `shell` user) which has system-level permissions. In Termux, commands run as a regular app user. LocalBridge automatically elevates privileged commands through `su` when root (Magisk) is available:
 - **Command allowlist:** 16 system commands (`settings`, `dumpsys`, `am`, `input`, `screencap`, `screenrecord`, `uiautomator`, `app_process`, `getenforce`, `setenforce`, `cmd`, `pm`, `wm`, `svc`, `ip`, `ifconfig`) are routed through `su -c` to match ADB-mode behavior.
@@ -602,7 +602,7 @@ DeepADB/
 ├── .gitignore
 ├── README.md
 ├── tests/
-│   ├── run-all.mjs              # Run all test suites sequentially with summary
+│   ├── run-all.mjs              # Run all test suites sequentially with summary (tracks skipped counts)
 │   ├── test-hw.mjs              # Hardware core: health, identity, baseband, thermal, profiles (26 tests)
 │   ├── test-shell-files.mjs     # Shell, filesystem, packages, diagnostics (24 tests)
 │   ├── test-ui-control.mjs      # UI hierarchy, screenshots, settings, accessibility (15 tests)
@@ -610,10 +610,11 @@ DeepADB/
 │   ├── test-security.mjs        # Input sanitization, shell injection, AT command safety (25 tests)
 │   ├── test-lifecycle.mjs       # App lifecycle, file push/pull, input, port forwarding, screen recording, test sessions (22 tests)
 │   ├── test-analysis.mjs        # Thermal/snapshot/regression comparison, firmware diff, screenshot diff, test gen, RIL intercept (18 tests)
+│   ├── test-boundaries.mjs      # Zod bounds enforcement, input injection, error paths, sensitive data protection (28 tests)
 │   ├── test-qemu.mjs            # QEMU/KVM setup, image management, VM status (10 on-device tests)
 │   ├── test-qemu-boot.mjs       # QEMU Alpine VM boot, KVM acceleration, topology detection (10 on-device tests)
 │   └── lib/
-│       └── harness.mjs          # Shared test harness (stdio JSON-RPC transport, assertions)
+│       └── harness.mjs          # Shared test harness (stdio JSON-RPC transport, 6 assertion types)
 └── docs/
     └── future-roadmap.md       # Feature history and future ideas
 ```

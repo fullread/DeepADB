@@ -183,6 +183,63 @@ export async function createHarness(suiteName = "Test") {
     }
   }
 
+  /** Test that output does NOT contain a substring (case-insensitive). */
+  async function testNotContains(label, tool, args, forbidden, timeoutMs = 30000) {
+    try {
+      const res = await callTool(tool, args, timeoutMs);
+      const text = getText(res);
+      const found = text.toLowerCase().includes(forbidden.toLowerCase());
+      const err = isError(res);
+      if (err) {
+        printResult(label, res, `expected success without "${forbidden}"`);
+        failed++;
+        failures.push(label);
+      } else if (found) {
+        console.log(`  ✗ ${label} — forbidden string "${forbidden}" found in output`);
+        failed++;
+        failures.push(label);
+      } else {
+        console.log(`  ✓ ${label}`);
+        passed++;
+      }
+      return res;
+    } catch (e) {
+      console.log(`  ✗ ${label} — EXCEPTION: ${e.message}`);
+      failed++;
+      failures.push(label);
+      return null;
+    }
+  }
+
+  /** Test that output matches a regex pattern. */
+  async function testMatch(label, tool, args, pattern, timeoutMs = 30000) {
+    try {
+      const res = await callTool(tool, args, timeoutMs);
+      const text = getText(res);
+      const regex = pattern instanceof RegExp ? pattern : new RegExp(pattern);
+      const matched = regex.test(text);
+      const err = isError(res);
+      if (!err && matched) {
+        console.log(`  ✓ ${label}`);
+        passed++;
+      } else if (err) {
+        printResult(label, res, `expected match for ${pattern}`);
+        failed++;
+        failures.push(label);
+      } else {
+        console.log(`  ✗ ${label} — pattern ${pattern} not matched in output`);
+        failed++;
+        failures.push(label);
+      }
+      return res;
+    } catch (e) {
+      console.log(`  ✗ ${label} — EXCEPTION: ${e.message}`);
+      failed++;
+      failures.push(label);
+      return null;
+    }
+  }
+
   /** Skip a test with a reason. */
   function skip(label, reason) {
     console.log(`  ○ ${label} — SKIPPED: ${reason}`);
@@ -206,5 +263,5 @@ export async function createHarness(suiteName = "Test") {
     return failed;
   }
 
-  return { callTool, getText, isError, test, testContains, testRejects, skip, section, finish };
+  return { callTool, getText, isError, test, testContains, testNotContains, testMatch, testRejects, skip, section, finish };
 }

@@ -34,4 +34,5 @@ if (!onDevice) {
   await h.testContains("Status (resource budget)", "adb_qemu_status", {}, "allocatable");
 }
 
-h.finish();
+const exitCode = h.finish();
+process.exit(exitCode);
