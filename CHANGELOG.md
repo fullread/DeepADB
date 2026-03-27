@@ -2,6 +2,14 @@
 
 All notable changes to DeepADB are documented in this file.
 
+## v1.0.4 — Dependency Security Patch
+
+- Fix CVE-2026-4926 (CVSS 8.7 High): ReDoS vulnerability in `path-to-regexp@8.3.0` — updated to `8.4.0` via lockfile refresh
+- Upgraded `@modelcontextprotocol/sdk` from 1.27.1 to 1.28.0
+- Full dependency audit: 0 vulnerabilities, all transitive dependencies current
+
+---
+
 ## v1.0.3 — Security Hardening
 
 - Audit logging (`DA_AUDIT_LOG`) now enabled by default — all commands logged to stderr with credential redaction. Set `DA_AUDIT_LOG=false` to disable.
