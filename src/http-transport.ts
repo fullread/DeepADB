@@ -16,6 +16,7 @@ import { createServer as createHttpServer, IncomingMessage, ServerResponse } fro
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { Logger } from "./middleware/logger.js";
+import { checkAuth } from "./middleware/auth.js";
 
 export interface HttpTransportOptions {
   port: number;
@@ -42,7 +43,7 @@ export async function startHttpTransport(
       if (allowedOrigin) {
         res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
         res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
       }
 
       if (req.method === "OPTIONS") {
@@ -53,12 +54,15 @@ export async function startHttpTransport(
 
       const url = new URL(req.url ?? "/", `http://${host}:${options.port}`);
 
-      // Health check
+      // Health check (unauthenticated — only returns status info)
       if (url.pathname === "/health" && req.method === "GET") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "ok", transport: "sse", version: options.version ?? "unknown" }));
         return;
       }
+
+      // Bearer token auth — all endpoints below require valid token when DA_AUTH_TOKEN is set
+      if (!checkAuth(req, res)) return;
 
       // SSE endpoint — client subscribes here
       if (url.pathname === "/sse" && req.method === "GET") {

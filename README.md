@@ -520,6 +520,7 @@ All 41 tool modules receive a unified `ToolContext` dependency bundle containing
 | `DA_REGISTRY_URL` | GitHub default | URL of the community plugin registry JSON manifest |
 | `DA_HTTP_PORT` | (disabled) | Set to a port number to enable HTTP/SSE transport mode |
 | `DA_HTTP_HOST` | `127.0.0.1` | Bind address for HTTP/SSE, WebSocket, and GraphQL servers |
+| `DA_AUTH_TOKEN` | (none — open) | Bearer token for network transports. When set, all HTTP/SSE/WS/GraphQL requests require `Authorization: Bearer <token>` header. Health endpoints exempt. |
 | `DA_HTTP_CORS_ORIGIN` | (none — deny) | Allowed CORS origin for HTTP/SSE |
 | `DA_WS_PORT` | (disabled) | Set to a port number to enable WebSocket transport mode (requires `npm install ws`) |
 | `DA_WS_CORS_ORIGIN` | (none — deny) | Allowed CORS origin for WebSocket health endpoint |
@@ -587,6 +588,7 @@ DeepADB/
 │   │   ├── resources.ts        # MCP Resources — device state surfaces (4 resources)
 │   │   └── prompts.ts          # MCP Prompts — workflow templates (4 prompts)
 │   ├── middleware/
+│   │   ├── auth.ts             # Bearer token authentication for network transports (DA_AUTH_TOKEN)
 │   │   ├── output-processor.ts # Contextual truncation, structured parsers, settledValue helper
 │   │   ├── security.ts         # Command filtering, rate limiting, audit logging with redaction
 │   │   ├── sanitize.ts         # Shell injection prevention — validateShellArg/validateShellArgs/shellEscape
@@ -601,6 +603,9 @@ DeepADB/
 ├── tsconfig.json
 ├── .gitignore
 ├── README.md
+├── SECURITY.md                  # Threat model, security architecture, deployment hardening, vulnerability reporting
+├── CHANGELOG.md                 # Version history from v0.1.0 to current
+├── LICENSE                      # MIT license
 ├── tests/
 │   ├── run-all.mjs              # Run all test suites sequentially with summary (tracks skipped counts)
 │   ├── test-hw.mjs              # Hardware core: health, identity, baseband, thermal, profiles (26 tests)
@@ -622,8 +627,8 @@ DeepADB/
 ## Tech Stack
 
 - **Runtime**: Node.js ≥22 (ES2024, ESM)
-- **Language**: TypeScript 5.9 (strict mode, NodeNext module resolution)
-- **MCP SDK**: `@modelcontextprotocol/sdk` ^1.24.0 (v1.x — v2 pre-alpha expected Q1 2026)
+- **Language**: TypeScript 6.0 (strict mode, NodeNext module resolution)
+- **MCP SDK**: `@modelcontextprotocol/sdk` ^1.24.0 (currently resolves to 1.29.0)
 - **Validation**: Zod ^3.25.0
 - **Transport**: stdio (JSON-RPC), HTTP/SSE, WebSocket (optional `ws`), GraphQL API (optional `graphql`)
 

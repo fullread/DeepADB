@@ -19,6 +19,7 @@
 import { createServer as createHttpServer, IncomingMessage, ServerResponse } from "http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Logger } from "./middleware/logger.js";
+import { hasValidToken } from "./middleware/auth.js";
 
 /** MCP Transport interface — matches the SDK's Transport contract. */
 interface McpTransport {
@@ -123,6 +124,14 @@ export async function startWsTransport(
     const allowedOrigin = process.env.DA_WS_CORS_ORIGIN ?? "";
     if (allowedOrigin) {
       res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+      res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    }
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
     }
 
     if (req.url === "/health" && req.method === "GET") {
@@ -143,7 +152,17 @@ export async function startWsTransport(
   const wss = new WssConstructor({ server: httpServer, path: "/ws" });
 
   wss.on("connection", async (ws: unknown, req: unknown) => {
-    const remoteAddr = (req as IncomingMessage).socket.remoteAddress;
+    const incomingReq = req as IncomingMessage;
+    const remoteAddr = incomingReq.socket.remoteAddress;
+
+    // Bearer token auth — reject unauthorized WebSocket connections immediately
+    if (!hasValidToken(incomingReq)) {
+      logger.warn(`WebSocket connection rejected (unauthorized) from ${remoteAddr}`);
+      const socket = ws as { close: (code: number, reason: string) => void };
+      socket.close(4401, "Unauthorized");
+      return;
+    }
+
     logger.info(`WebSocket client connected from ${remoteAddr}`);
 
     const transport = new WebSocketMcpTransport(ws);

@@ -2,6 +2,21 @@
 
 All notable changes to DeepADB are documented in this file.
 
+## v1.0.5 — Transport Security & Auth Documentation
+
+- Bearer token authentication (`DA_AUTH_TOKEN`) documented in README and SECURITY.md — env var table, usage examples, deployment configurations, and plaintext-over-HTTP warning
+- Token comparison hardened with `crypto.timingSafeEqual()` to prevent timing-based side-channel attacks; uses pre-computed buffer with byte-length comparison to handle multi-byte UTF-8 tokens correctly
+- Non-loopback binding warning: startup alerts operators when network transports bind to non-`127.0.0.1` addresses without `DA_AUTH_TOKEN` set, referencing common MCP security findings
+- Auth status logged at startup for network transports (token enabled vs. no auth configured)
+- CORS headers updated to allow `Authorization` header across all transports (HTTP/SSE, WebSocket, GraphQL) with OPTIONS preflight handling
+- Added HTTPS via reverse proxy guidance to SECURITY.md (Caddy and SSH tunnel examples)
+- Upgraded `@modelcontextprotocol/sdk` from 1.28.0 to 1.29.0
+- Upgraded dev dependencies: TypeScript 5.9.3 → 6.0.2, @types/node 22.x → 25.5.0; added `"types": ["node"]` to tsconfig.json for TypeScript 6.0 compatibility
+- Removed unused `checkAuth` import from WebSocket transport
+- Code consistency: non-loopback check uses `isAuthEnabled()` instead of duplicating env var logic
+
+---
+
 ## v1.0.4 — Dependency Security Patch
 
 - Fix CVE-2026-4926 (CVSS 8.7 High): ReDoS vulnerability in `path-to-regexp@8.3.0` — updated to `8.4.0` via lockfile refresh

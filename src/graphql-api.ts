@@ -25,6 +25,7 @@ import { createServer as createHttpServer, IncomingMessage, ServerResponse } fro
 import { AdbBridge } from "./bridge/adb-bridge.js";
 import { DeviceManager } from "./bridge/device-manager.js";
 import { Logger } from "./middleware/logger.js";
+import { checkAuth } from "./middleware/auth.js";
 
 export interface GraphQLOptions {
   port: number;
@@ -241,7 +242,7 @@ export async function startGraphQLApi(
     if (allowedOrigin) {
       res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     }
 
     if (req.method === "OPTIONS") {
@@ -255,6 +256,9 @@ export async function startGraphQLApi(
       res.end(JSON.stringify({ status: "ok", transport: "graphql", version: options.version ?? "unknown" }));
       return;
     }
+
+    // Bearer token auth — all endpoints below require valid token when DA_AUTH_TOKEN is set
+    if (!checkAuth(req, res)) return;
 
     if (req.url?.startsWith("/graphql")) {
       try {

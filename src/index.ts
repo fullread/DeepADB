@@ -17,6 +17,7 @@ import { startHttpTransport } from "./http-transport.js";
 import { startWsTransport } from "./ws-transport.js";
 import { startGraphQLApi } from "./graphql-api.js";
 import { VERSION } from "./config/config.js";
+import { isAuthEnabled } from "./middleware/auth.js";
 
 async function main(): Promise<void> {
   const { server, logger, bridge, deviceManager } = await createServer();
@@ -36,6 +37,39 @@ async function main(): Promise<void> {
   const httpHost = process.env.DA_HTTP_HOST ?? "127.0.0.1";
   const wsPort = parsePort(process.env.DA_WS_PORT);
   const graphqlPort = parsePort(process.env.DA_GRAPHQL_PORT);
+
+  // Warn when binding network transports to non-loopback addresses.
+  // This is the #2 most common MCP security finding (Backslash/AgentSeal research):
+  // servers exposed on 0.0.0.0 without authentication allow anyone on the network
+  // to execute tools, including shell commands, on the host machine.
+  const isLoopback = httpHost === "127.0.0.1" || httpHost === "localhost" || httpHost === "::1";
+  if (!isLoopback && (httpPort || wsPort || graphqlPort) && !isAuthEnabled()) {
+    console.error("╔══════════════════════════════════════════════════════════════╗");
+    console.error("║  ⚠  WARNING: Network-exposed transport without authentication  ║");
+    console.error("╠══════════════════════════════════════════════════════════════╣");
+    console.error(`║  Binding to ${httpHost} — accessible to other machines on the network.`);
+    console.error("║  DeepADB provides shell execution, file access, and root commands.");
+    console.error("║  Anyone who can reach this port can execute tools without auth.");
+    console.error("║                                                                  ║");
+    console.error("║  Recommendations:                                                ║");
+    console.error("║    • Set a bearer token: DA_AUTH_TOKEN=your-secret-token         ║");
+    console.error("║    • Enable security middleware: DA_SECURITY=true                ║");
+    console.error("║    • Set an allowlist: DA_ALLOWED_COMMANDS=dumpsys,getprop,...    ║");
+    console.error("║    • Restrict CORS: DA_HTTP_CORS_ORIGIN=https://your-app.example ║");
+    console.error("║    • Use a reverse proxy with HTTPS in front of DeepADB          ║");
+    console.error("║                                                                  ║");
+    console.error("║  See SECURITY.md for deployment guidance.                        ║");
+    console.error("╚══════════════════════════════════════════════════════════════╝");
+  }
+
+  // Log auth status for network transports
+  if (httpPort || wsPort || graphqlPort) {
+    if (isAuthEnabled()) {
+      console.error("[DeepADB] Bearer token authentication enabled (DA_AUTH_TOKEN set)");
+    } else if (!isLoopback) {
+      console.error("[DeepADB] ⚠ No authentication configured. Set DA_AUTH_TOKEN for bearer token auth.");
+    }
+  }
 
   // GraphQL API runs independently alongside any transport mode
   if (graphqlPort) {

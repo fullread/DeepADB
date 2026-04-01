@@ -52,6 +52,25 @@ All modules that spawn child processes (logcat watchers, RIL interceptors, scree
 - **WebSocket**: Same binding and CORS defaults as HTTP/SSE.
 - **GraphQL**: Same binding and CORS defaults. POST body limited to 1 MB.
 
+### Bearer Token Authentication
+
+When `DA_AUTH_TOKEN` is set, all network transport requests (HTTP/SSE, WebSocket, GraphQL) must include a valid `Authorization: Bearer <token>` header. Requests without a valid token receive a 401 Unauthorized response. WebSocket connections are closed immediately with code 4401. Token comparison uses constant-time `crypto.timingSafeEqual()` to prevent timing-based side-channel attacks.
+
+Health check endpoints (`GET /health`) are exempt from authentication — they only return transport status and version info, no device data.
+
+When `DA_AUTH_TOKEN` is not set, all requests pass through without authentication (backwards compatible). This is appropriate for localhost-only deployments but **must be combined with a token for any network-exposed deployment**.
+
+Example:
+```bash
+# Server
+DA_AUTH_TOKEN=my-secret-token-here DA_HTTP_PORT=3000 npm start
+
+# Client
+curl -H "Authorization: Bearer my-secret-token-here" http://localhost:3000/sse
+```
+
+**Important:** Bearer tokens are transmitted in plain text over HTTP. For deployments beyond localhost, use a reverse proxy with TLS (see below) to prevent token interception on the wire.
+
 ### External Resource Fetching
 
 The plugin registry and workflow marketplace fetch from configurable URLs. All fetch operations use streaming body reads with a **5 MB size limit** to prevent memory exhaustion. Plugin downloads verify SHA-256 integrity hashes when provided by the registry manifest.
@@ -70,17 +89,20 @@ Appropriate when you are the only operator, running locally via Claude Code or s
 
 ```bash
 DA_SECURITY=true \
+DA_AUTH_TOKEN="$(openssl rand -hex 32)" \
 DA_BLOCKED_COMMANDS="rm -rf,mkfs,dd if=,reboot" \
 DA_RATE_LIMIT=30 \
+DA_HTTP_PORT=3000 \
 npm start
 ```
 
-Enables command filtering and rate limiting. Blocks destructive commands while allowing normal inspection tools.
+Enables command filtering, rate limiting, and bearer token authentication. Blocks destructive commands while allowing normal inspection tools. Share the token with authorized clients only.
 
 ### Network-exposed deployments
 
 ```bash
 DA_SECURITY=true \
+DA_AUTH_TOKEN="your-secret-token" \
 DA_HTTP_PORT=3000 \
 DA_HTTP_CORS_ORIGIN="https://your-app.example.com" \
 DA_BLOCKED_COMMANDS="rm -rf,mkfs,dd if=,reboot,su " \
@@ -89,7 +111,25 @@ DA_ALLOWED_COMMANDS="dumpsys,getprop,pm list,screencap,uiautomator" \
 npm start
 ```
 
-Locks down to read-only inspection tools via allowlist. Restricts CORS to a specific origin. Rate-limited. Not recommended without additional authentication at the network layer.
+Locks down to read-only inspection tools via allowlist. Restricts CORS to a specific origin. Rate-limited. Bearer token required for all requests. For HTTPS, place a reverse proxy in front of DeepADB (see below).
+
+### HTTPS via Reverse Proxy
+
+DeepADB does not implement TLS directly — certificate management is better handled by purpose-built tools. For HTTPS, use a reverse proxy:
+
+**Caddy (automatic HTTPS):**
+```
+your-domain.example.com {
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+**SSH tunnel (quick remote access):**
+```bash
+ssh -L 3000:127.0.0.1:3000 user@remote-host
+```
+
+Both approaches encrypt the bearer token in transit without requiring DeepADB to manage certificates.
 
 ## Version Pinning
 
@@ -97,7 +137,7 @@ When installing DeepADB via npm, always pin the version:
 
 ```bash
 # Pinned (recommended)
-npm install -g deepadb@1.0.4
+npm install -g deepadb@1.0.5
 
 # Unpinned (not recommended — vulnerable to supply chain attacks)
 npx -y deepadb
