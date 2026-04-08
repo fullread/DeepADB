@@ -453,12 +453,12 @@ Targeted analysis of error handling gaps, cleanup registration coverage, JSON.pa
 
 ## Future Ideas
 
-With v1.0.0 completing the OS security, thermal profiling, and network discovery layers, 13 audit passes closing all 45 identified issues, and on-device validation reaching 154/155 tests, the core roadmap is substantially complete at 142 tools across 40 modules. Every `z.number()` parameter has explicit `.min()/.max()` bounds. Every user-input-to-shell path has validation. Every LocalBridge subcommand has an explicit handler with behavioral parity. Every duplicated helper has been extracted to a shared module. All HTTP fetch paths use streaming body reads with size limits. All process cleanup flows through a single centralized registry. All environment variable port parsing validates range and NaN. Remaining items:
+With v1.0.5 completing bearer token authentication, transport security hardening, and 21 audit passes closing all 75 identified issues, the core roadmap is substantially complete at 147 tools across 41 modules. 203/203 tests passing on-device (Pixel 6a, Android 16) and 183/183 in ADB mode. Every `z.number()` parameter has explicit `.min()/.max()` bounds. Every user-input-to-shell path has validation. Every LocalBridge subcommand has an explicit handler with behavioral parity. Every duplicated helper has been extracted to a shared module. All HTTP fetch paths use streaming body reads with size limits. All process cleanup flows through a single centralized registry. All environment variable port parsing validates range and NaN. All network transports support bearer token auth with timing-safe comparison. Remaining items:
 
-### On-Device Validation ✓ COMPLETE (175/175)
-Termux v0.119.0-beta.3 + Node.js v24.14.0 + git installed on Pixel 6a via ADB. DeepADB deployed, `npm install` run, full test suite executed in `DA_LOCAL=true` mode.
+### On-Device Validation ✓ COMPLETE (203/203)
+Termux v0.119.0-beta.3 + Node.js v25.8.2 + git installed on Pixel 6a via ADB. DeepADB deployed, `npm install` run, full test suite executed in `DA_LOCAL=true` mode.
 
-**Result progression:** 112 → 115 (Magisk su) → 135 (command elevation) → 151 (path elevation + pull fix) → 152 (regex fix) → 153 (ip/ifconfig elevation) → 154 (emulator graceful detection) → 155 (screenshot diff pixel-level fix) → 165 (QEMU/KVM test suite) → 175 (QEMU VM boot tests).
+**Result progression:** 112 → 115 (Magisk su) → 135 (command elevation) → 151 (path elevation + pull fix) → 152 (regex fix) → 153 (ip/ifconfig elevation) → 154 (emulator graceful detection) → 155 (screenshot diff pixel-level fix) → 165 (QEMU/KVM test suite) → 175 (QEMU VM boot tests) → 203 (v1.0.3 boundary tests + test expansion).
 
 **LocalBridge privilege escalation** — the key enhancement enabling on-device parity:
 - Frozen `ELEVATED_COMMANDS` allowlist: 16 system commands auto-elevated via `su -c` when root available (`settings`, `dumpsys`, `am`, `input`, `screencap`, `screenrecord`, `uiautomator`, `app_process`, `getenforce`, `setenforce`, `cmd`, `pm`, `wm`, `svc`, `ip`, `ifconfig`)
@@ -469,7 +469,7 @@ Termux v0.119.0-beta.3 + Node.js v24.14.0 + git installed on Pixel 6a via ADB. D
 - Emulator tools detect on-device mode, report KVM/QEMU availability instead of crashing
 - Thermal compare null pointer fix (`?? 0` fallbacks)
 
-**The 1 remaining failure** was `Screenshot diff (immediate)` — a timing race where the navigation bar clock ticked between consecutive captures. This has been resolved by replacing byte-level comparison with true pixel-level PNG decoding and adding a `tolerancePercent` parameter. Verified 165/165 on-device (including 10 QEMU/KVM tests) with the updated build deployed to Pixel 6a.
+**The 1 remaining failure** was `Screenshot diff (immediate)` — a timing race where the navigation bar clock ticked between consecutive captures. This has been resolved by replacing byte-level comparison with true pixel-level PNG decoding and adding a `tolerancePercent` parameter. Verified 203/203 on-device (including 20 QEMU/KVM tests) with the updated build deployed to Pixel 6a.
 
 ### On-Device QEMU/KVM Emulation — Session 1 ✓ COMPLETE
 The Pixel 6a exposes `/dev/kvm` with world-readable permissions, enabling hardware-assisted virtualization. Termux offers QEMU 10.2.1 (`qemu-system-aarch64-headless`) that uses KVM for near-native performance. This enables running guest Android VMs directly on the device — a capability unique to DeepADB.
@@ -516,7 +516,7 @@ Test suite: `test-qemu-boot.mjs` (10 tests) — pre-flight checks, VM boot, stat
 - Comparative testing workflows — run same test suite against host and guest simultaneously
 
 ### MCP SDK v2 Migration
-The MCP TypeScript SDK v2 stable release was anticipated for Q1 2026 but may slip to Q2 2026. v1.x (currently 1.27.1) remains the recommended version for production. v1.x will receive bug fixes and security updates for at least 6 months after v2 ships.
+The MCP TypeScript SDK v2 stable release has not yet shipped as of April 2026. v1.x (currently 1.29.0) remains the recommended version for production. v1.x will receive bug fixes and security updates for at least 6 months after v2 ships.
 
 **What changes in v2:**
 - Import paths reorganize from `@modelcontextprotocol/sdk/server/mcp.js` to `@modelcontextprotocol/server`
@@ -529,13 +529,13 @@ The MCP TypeScript SDK v2 stable release was anticipated for Q1 2026 but may sli
 - `server.ts`, `index.ts`: update imports from `@modelcontextprotocol/sdk` to `@modelcontextprotocol/server`
 - `http-transport.ts`: replace `SSEServerTransport` with Streamable HTTP transport (or use `@modelcontextprotocol/node` middleware)
 - `ws-transport.ts`: evaluate whether Streamable HTTP subsumes the WebSocket transport use case
-- All 40 tool modules: no changes expected (tool registration API is unchanged)
+- All 41 tool modules: no changes expected (tool registration API is unchanged)
 - `package.json`: update dependency, potentially add middleware packages
 
-**Migration should be planned once v2 reaches stable release.** The current v1.27.x codebase is fully current within the v1 line.
+**Migration should be planned once v2 reaches stable release.** The current v1.29.x codebase is fully current within the v1 line.
 
 ### Pre-Release Comprehensive Code Audit
-Before public release, a fresh multi-pass code audit is required — particularly after any new feature implementation (QEMU/KVM emulation, MCP SDK v2 migration). The prior 13-pass audit (45 findings) established invariants and patterns, but new code paths introduced by future features will need the same rigor applied.
+Before any major feature implementation (MCP SDK v2 migration, new tool modules), a fresh multi-pass code audit is required. The 21-pass audit (75 findings) established invariants and patterns that must be maintained in new code paths.
 
 **Audit scope:**
 - Shell injection surface review on any new `su -c` or `bridge.shell()` call sites
@@ -549,7 +549,7 @@ Before public release, a fresh multi-pass code audit is required — particularl
 - Code quality — duplicated logic extracted to shared modules, consistent naming, no dead code
 - Documentation consistency — README, roadmap, and inline JSDoc all reflect actual behavior
 
-**Approach:** Distinct analytical lens per pass (same methodology as the original 13-pass audit). Each pass reads every modified file end-to-end with a specific focus. Findings fixed and tested before the next pass. Zero-regression discipline: 155/155 ADB mode + 154/155 on-device after every fix.
+**Approach:** Distinct analytical lens per pass (same methodology as the 21-pass audit). Each pass reads every modified file end-to-end with a specific focus. Findings fixed and tested before the next pass. Zero-regression discipline: 183/183 ADB mode + 203/203 on-device after every fix.
 
 ### Screenshot Diff Flaky Test ✓ RESOLVED
 The `Screenshot diff (immediate)` test was failing intermittently in both ADB mode and on-device mode.

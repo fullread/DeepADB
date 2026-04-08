@@ -2,6 +2,17 @@
 
 All notable changes to DeepADB are documented in this file.
 
+## v1.0.6 — Dependency Security Patch
+
+- Patched 6 moderate vulnerabilities in transitive dependencies of `@modelcontextprotocol/sdk`:
+  - `hono` 4.12.9 → 4.12.12: cookie name validation bypass (GHSA-26pp-8wgv-hjvm), cookie name prefix bypass (GHSA-r5rp-j6wh-rvv4), IPv4-mapped IPv6 bypass in ipRestriction (GHSA-xpcf-pg52-r92g), path traversal in toSSG (GHSA-xf4j-xp2r-rqqx), middleware bypass via repeated slashes (GHSA-wmmm-f939-6g9c)
+  - `@hono/node-server` 1.19.11 → 1.19.13: middleware bypass via repeated slashes in serveStatic (GHSA-92pp-h63x-v22m)
+- Lockfile-only change — no source code modifications, no API changes
+- Full dependency audit: 0 vulnerabilities, all transitive dependencies current
+- Updated future roadmap documentation to reflect current state (203/203 tests, 21 audit passes, 75 findings)
+
+---
+
 ## v1.0.5 — Transport Security & Auth Documentation
 
 - Bearer token authentication (`DA_AUTH_TOKEN`) documented in README and SECURITY.md — env var table, usage examples, deployment configurations, and plaintext-over-HTTP warning
