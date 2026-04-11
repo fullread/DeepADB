@@ -17,7 +17,7 @@ import { startHttpTransport } from "./http-transport.js";
 import { startWsTransport } from "./ws-transport.js";
 import { startGraphQLApi } from "./graphql-api.js";
 import { VERSION } from "./config/config.js";
-import { isAuthEnabled } from "./middleware/auth.js";
+import { isAuthEnabled, validateTokenStrength } from "./middleware/auth.js";
 
 async function main(): Promise<void> {
   const { server, logger, bridge, deviceManager } = await createServer();
@@ -66,6 +66,7 @@ async function main(): Promise<void> {
   if (httpPort || wsPort || graphqlPort) {
     if (isAuthEnabled()) {
       console.error("[DeepADB] Bearer token authentication enabled (DA_AUTH_TOKEN set)");
+      validateTokenStrength();
     } else if (!isLoopback) {
       console.error("[DeepADB] ⚠ No authentication configured. Set DA_AUTH_TOKEN for bearer token auth.");
     }

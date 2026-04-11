@@ -16,6 +16,7 @@ if (!onDevice) {
   h.skip("QEMU Setup", "on-device only");
   h.skip("Image Management", "on-device only");
   h.skip("VM Status", "on-device only");
+  h.skip("Guest Connectivity", "on-device only");
 } else {
   h.section("QEMU Setup");
   await h.testContains("QEMU Setup (detect)", "adb_qemu_setup", { install: false }, "KVM");
@@ -32,6 +33,11 @@ if (!onDevice) {
   h.section("VM Status");
   await h.testContains("Status (no VMs)", "adb_qemu_status", {}, "Running VMs: 0");
   await h.testContains("Status (resource budget)", "adb_qemu_status", {}, "allocatable");
+
+  h.section("Guest Connectivity (error paths — no running VM)");
+  await h.testRejects("Connect non-existent VM", "adb_qemu_connect", { name: "nonexistent" });
+  await h.testRejects("Disconnect non-existent VM", "adb_qemu_disconnect", { name: "nonexistent" });
+  await h.testRejects("Guest shell non-existent VM", "adb_qemu_guest_shell", { name: "nonexistent", command: "echo test" });
 }
 
 const exitCode = h.finish();

@@ -57,6 +57,7 @@ import { registerWorkflowMarketTools } from "./tools/workflow-market.js";
 import { registerSelinuxAuditTools } from "./tools/selinux-audit.js";
 import { registerThermalPowerTools } from "./tools/thermal-power.js";
 import { registerNetworkDiscoveryTools } from "./tools/network-discovery.js";
+import { registerWirelessFirmwareTools } from "./tools/wireless-firmware.js";
 
 // Resource and prompt registrations
 import { registerResources } from "./tools/resources.js";
@@ -100,7 +101,7 @@ export async function createServer(): Promise<CreateServerResult> {
   // Build unified tool context
   const ctx: ToolContext = { server, bridge, deviceManager, logger, security, config };
 
-  // Register all tool modules (41 modules)
+  // Register all tool modules (42 modules)
   registerDeviceTools(ctx);
   registerShellTools(ctx);
   registerPackageTools(ctx);
@@ -142,6 +143,7 @@ export async function createServer(): Promise<CreateServerResult> {
   registerSelinuxAuditTools(ctx);
   registerThermalPowerTools(ctx);
   registerNetworkDiscoveryTools(ctx);
+  registerWirelessFirmwareTools(ctx);
 
   // Register MCP resources and prompts
   registerResources(ctx);

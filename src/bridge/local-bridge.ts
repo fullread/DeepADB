@@ -12,7 +12,8 @@
  * Environment detection: see config.ts isOnDevice().
  */
 
-import { execFile, ExecFileOptions, spawn, ChildProcess } from "child_process";
+import { execFile, ExecFileOptions, spawn, spawnSync, ChildProcess } from "child_process";
+import { existsSync } from "fs";
 import { AdbBridge, AdbResult, AdbExecOptions, AdbError } from "./adb-bridge.js";
 import { config } from "../config/config.js";
 import { Logger } from "../middleware/logger.js";
@@ -27,6 +28,35 @@ export class LocalBridge extends AdbBridge {
    * Probed lazily on first command that needs elevation.
    */
   private rootAvailable: boolean | null = null;
+
+  /**
+   * Guest devices connected via ADB (e.g., QEMU VMs).
+   * When a command targets one of these serials, LocalBridge routes it through
+   * the real `adb` binary instead of executing locally.
+   *
+   * SECURITY: Only populated by qemu.ts connect/disconnect flow, which validates
+   * that serials are strictly `localhost:<port>` from running VMs.
+   * No external host connections are ever registered.
+   */
+  private static guestDevices = new Set<string>();
+
+  /** Cached ADB binary path. undefined = not yet checked, null = not found. */
+  private adbBinaryPath: string | null | undefined = undefined;
+
+  /** Register a guest device serial for ADB routing. Called by qemu.ts on connect. */
+  static registerGuestDevice(serial: string): void {
+    LocalBridge.guestDevices.add(serial);
+  }
+
+  /** Unregister a guest device serial. Called by qemu.ts on disconnect/stop. */
+  static unregisterGuestDevice(serial: string): void {
+    LocalBridge.guestDevices.delete(serial);
+  }
+
+  /** Check if a serial belongs to a registered guest device. */
+  static isGuestDevice(serial: string | undefined): boolean {
+    return serial !== undefined && LocalBridge.guestDevices.has(serial);
+  }
 
   /**
    * Android system commands that require shell-user (uid=2000) or root privileges.
@@ -98,6 +128,114 @@ export class LocalBridge extends AdbBridge {
   }
 
   /**
+   * Find the `adb` binary for guest device communication.
+   * Result is cached after first probe.
+   *
+   * SECURITY: Path is discovered from the system, never user-supplied.
+   */
+  private findAdbBinaryPath(): string | null {
+    if (this.adbBinaryPath !== undefined) return this.adbBinaryPath;
+
+    try {
+      const result = spawnSync("which", ["adb"], { timeout: 3000 });
+      if (result.status === 0 && result.stdout) {
+        const path = result.stdout.toString().trim();
+        if (path.length > 0) {
+          this.adbBinaryPath = path;
+          return path;
+        }
+      }
+    } catch { /* which not available */ }
+
+    // Fallback: standard Termux location
+    const termuxAdb = "/data/data/com.termux/files/usr/bin/adb";
+    if (existsSync(termuxAdb)) {
+      this.adbBinaryPath = termuxAdb;
+      return termuxAdb;
+    }
+
+    this.adbBinaryPath = null;
+    return null;
+  }
+
+  /**
+   * Execute a command on a guest device via the real ADB binary.
+   * Called when the target device serial matches a registered guest.
+   *
+   * Reconstructs the full ADB command: `adb -s <serial> <subcommand> <args...>`
+   * This is the same execution path as AdbBridge.exec(), but using the
+   * locally-installed adb binary instead of the host's ADB.
+   *
+   * SECURITY: The serial comes from the guest device registry (populated only
+   * by qemu.ts with validated localhost:<port> values). Args are passed as
+   * an array to execFile (no shell expansion).
+   */
+  private execViaAdb(args: string[], options: AdbExecOptions): Promise<AdbResult> {
+    const adbPath = this.findAdbBinaryPath();
+    if (!adbPath) {
+      return Promise.reject(new AdbError(
+        "ADB binary not found — required for guest device communication. Install with: pkg install android-tools",
+        { stdout: "", stderr: "", exitCode: 1, timedOut: false, bufferExceeded: false, device: options.device ?? "guest" }
+      ));
+    }
+
+    const timeout = options.timeout || config.commandTimeout;
+    const fullArgs: string[] = [];
+    if (options.device) {
+      fullArgs.push("-s", options.device);
+    }
+    fullArgs.push(...args);
+
+    this.localLogger.debug(`adb guest: ${adbPath} ${fullArgs.join(" ").substring(0, 200)}`);
+
+    return new Promise<AdbResult>((resolve, reject) => {
+      const execOptions: ExecFileOptions = {
+        timeout,
+        maxBuffer: config.maxOutputSize * 2,
+      };
+
+      execFile(adbPath, fullArgs, execOptions, (error, stdout, stderr) => {
+        const bufferExceeded = error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
+          || error?.message?.includes("maxBuffer") === true;
+        const timedOut = error?.killed === true && !bufferExceeded;
+
+        const exitCode = error?.code != null
+          ? (typeof error.code === "number" ? error.code : 1)
+          : 0;
+
+        const result: AdbResult = {
+          stdout: stdout?.toString() ?? "",
+          stderr: stderr?.toString() ?? "",
+          exitCode,
+          timedOut,
+          bufferExceeded,
+          device: options.device ?? "guest",
+        };
+
+        if (timedOut) {
+          reject(new AdbError(`Guest command timed out after ${timeout}ms`, result));
+          return;
+        }
+
+        if (bufferExceeded) {
+          resolve(result);
+          return;
+        }
+
+        if (exitCode !== 0 && !options.ignoreExitCode) {
+          reject(new AdbError(
+            `Guest command failed (exit ${exitCode}): ${result.stderr || result.stdout}`.trim(),
+            result
+          ));
+          return;
+        }
+
+        resolve(result);
+      });
+    });
+  }
+
+  /**
    * Android filesystem paths that require elevated access in on-device mode.
    * Commands referencing these paths need su to bypass scoped storage restrictions.
    * In ADB mode (uid=2000), these paths are accessible by default.
@@ -133,6 +271,14 @@ export class LocalBridge extends AdbBridge {
    * tool calls to exec() flow through here.
    */
   override async exec(args: string[], options: AdbExecOptions = {}): Promise<AdbResult> {
+    // Guest device routing: if the target device is a registered QEMU guest,
+    // route through the real ADB binary instead of local execution.
+    // This enables multi-device tools to transparently operate on both
+    // the host device (local) and guest VMs (via ADB).
+    if (options.device && LocalBridge.isGuestDevice(options.device)) {
+      return this.execViaAdb(args, options);
+    }
+
     const subcommand = args[0];
     const hasRoot = await this.checkRootAvailable();
 
@@ -310,9 +456,11 @@ export class LocalBridge extends AdbBridge {
 
   /**
    * Synthesize an `adb devices -l` response for DeviceManager.
-   * Reads device properties once and caches them.
+   * Reads device properties once and caches the local device line.
+   * When guest VMs are connected via ADB, merges their status into the list.
    */
   private async syntheticDeviceList(): Promise<AdbResult> {
+    // Build local device line (cached — host device props don't change)
     if (!this.deviceInfoCache) {
       try {
         const [modelRes, productRes] = await Promise.allSettled([
@@ -323,12 +471,42 @@ export class LocalBridge extends AdbBridge {
         const model = modelRes.status === "fulfilled" ? modelRes.value.stdout.trim().replace(/\s+/g, "_") : "Android";
         const product = productRes.status === "fulfilled" ? productRes.value.stdout.trim() : "unknown";
 
-        this.deviceInfoCache = `List of devices attached\nlocal          device product:${product} model:${model} transport_id:0\n`;
+        this.deviceInfoCache = `local          device product:${product} model:${model} transport_id:0`;
       } catch {
-        this.deviceInfoCache = "List of devices attached\nlocal          device product:unknown model:Android transport_id:0\n";
+        this.deviceInfoCache = "local          device product:unknown model:Android transport_id:0";
       }
     }
-    return this.makeResult(this.deviceInfoCache);
+
+    let deviceLines = this.deviceInfoCache;
+
+    // If guest VMs are connected, query ADB for their device lines
+    if (LocalBridge.guestDevices.size > 0) {
+      const adbPath = this.findAdbBinaryPath();
+      if (adbPath) {
+        try {
+          const result = spawnSync(adbPath, ["devices", "-l"], { timeout: 5000 });
+          if (result.status === 0 && result.stdout) {
+            const adbOutput = result.stdout.toString();
+            const adbLines = adbOutput.split("\n").slice(1) // Skip "List of devices attached" header
+              .map(l => l.trim())
+              .filter(l => l.length > 0);
+
+            // Only include lines matching registered guest serials
+            for (const line of adbLines) {
+              const serial = line.split(/\s+/)[0];
+              if (serial && LocalBridge.guestDevices.has(serial)) {
+                deviceLines += "\n" + line;
+              }
+            }
+          }
+        } catch {
+          // ADB query failed — still return local device
+          this.localLogger.debug("syntheticDeviceList: ADB query for guest devices failed");
+        }
+      }
+    }
+
+    return this.makeResult(`List of devices attached\n${deviceLines}\n`);
   }
 
   /** Create a successful AdbResult from a string. */

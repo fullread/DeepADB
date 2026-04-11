@@ -174,4 +174,210 @@ export function registerMultiDeviceTools(ctx: ToolContext): void {
       }
     }
   );
+
+  /**
+   * Predefined comparative test profiles.
+   * Each profile is a set of shell commands with labels, grouped by category.
+   * Commands must be safe, read-only operations suitable for automated execution.
+   */
+  const TEST_PROFILES: Record<string, { description: string; checks: { label: string; command: string }[] }> = {
+    firmware: {
+      description: "Compare firmware components across devices",
+      checks: [
+        { label: "Baseband version", command: "getprop gsm.version.baseband" },
+        { label: "Bootloader", command: "getprop ro.bootloader" },
+        { label: "Kernel version", command: "uname -r" },
+        { label: "Security patch", command: "getprop ro.build.version.security_patch" },
+        { label: "Android version", command: "getprop ro.build.version.release" },
+        { label: "Build fingerprint", command: "getprop ro.build.fingerprint" },
+        { label: "Build ID", command: "getprop ro.build.id" },
+        { label: "Vendor security patch", command: "getprop ro.vendor.build.security_patch" },
+      ],
+    },
+    security: {
+      description: "Compare security configuration across devices",
+      checks: [
+        { label: "SELinux mode", command: "getenforce" },
+        { label: "Verified boot state", command: "getprop ro.boot.verifiedbootstate" },
+        { label: "Flash lock", command: "getprop ro.boot.flash.locked" },
+        { label: "Secure boot", command: "getprop ro.boot.secure_boot" },
+        { label: "Security patch", command: "getprop ro.build.version.security_patch" },
+        { label: "Encryption state", command: "getprop ro.crypto.state" },
+        { label: "DM-verity mode", command: "getprop ro.boot.veritymode" },
+        { label: "Build type", command: "getprop ro.build.type" },
+      ],
+    },
+    network: {
+      description: "Compare network and radio state across devices",
+      checks: [
+        { label: "Network type", command: "getprop gsm.network.type" },
+        { label: "Operator", command: "getprop gsm.operator.alpha" },
+        { label: "SIM state", command: "getprop gsm.sim.state" },
+        { label: "WiFi interface", command: "getprop wifi.interface" },
+        { label: "Radio technology", command: "getprop ro.telephony.default_network" },
+        { label: "Multisim config", command: "getprop persist.radio.multisim.config" },
+      ],
+    },
+    identity: {
+      description: "Compare device identity and hardware across devices",
+      checks: [
+        { label: "Model", command: "getprop ro.product.model" },
+        { label: "Device codename", command: "getprop ro.product.device" },
+        { label: "Chipset", command: "getprop ro.hardware.chipname" },
+        { label: "Platform", command: "getprop ro.board.platform" },
+        { label: "SOC model", command: "getprop ro.soc.model" },
+        { label: "SDK version", command: "getprop ro.build.version.sdk" },
+        { label: "Architecture", command: "getprop ro.product.cpu.abi" },
+        { label: "RAM", command: "cat /proc/meminfo | head -1" },
+      ],
+    },
+  };
+
+  ctx.server.tool(
+    "adb_multi_test",
+    "Run a comparative test workflow across all connected devices (host + QEMU guests). Executes a predefined diagnostic profile or custom command list on every device in parallel, compares results per-check, and reports matches and differences. Profiles: 'firmware' (baseband, bootloader, kernel, security patch), 'security' (SELinux, verified boot, encryption), 'network' (radio, WiFi, SIM), 'identity' (model, chipset, architecture), 'full' (all profiles). Custom commands also supported.",
+    {
+      profile: z.enum(["firmware", "security", "network", "identity", "full"]).optional()
+        .describe("Predefined test profile to run. 'full' runs all profiles."),
+      commands: z.array(z.object({
+        label: z.string().describe("Human-readable label for this check"),
+        command: z.string().describe("Shell command to execute"),
+      })).max(50).optional()
+        .describe("Custom checks to run (max 50). Each has a label and command."),
+      devices: z.array(z.string()).optional()
+        .describe("Device serials to target (omit for all online devices)"),
+      timeout: z.number().min(1000).max(60000).optional().default(10000)
+        .describe("Timeout per command per device in ms (1s-60s, default 10s)"),
+    },
+    async ({ profile, commands, devices, timeout }) => {
+      try {
+        if (!profile && !commands) {
+          // List available profiles
+          const profileList = Object.entries(TEST_PROFILES)
+            .map(([name, p]) => `  ${name}: ${p.description} (${p.checks.length} checks)`)
+            .join("\n");
+          return {
+            content: [{
+              type: "text",
+              text: `Specify a profile or custom commands.\n\nAvailable profiles:\n${profileList}\n  full: Run all profiles combined\n\nExample: adb_multi_test profile="firmware"\nCustom: adb_multi_test commands=[{label: "Uptime", command: "uptime"}]`,
+            }],
+          };
+        }
+
+        // Build the check list
+        let checks: { label: string; command: string }[] = [];
+        if (profile === "full") {
+          for (const p of Object.values(TEST_PROFILES)) {
+            checks.push(...p.checks);
+          }
+        } else if (profile) {
+          checks = TEST_PROFILES[profile].checks;
+        }
+        if (commands) {
+          checks.push(...commands);
+        }
+
+        // Security check all commands
+        for (const check of checks) {
+          const blocked = ctx.security.checkCommand(check.command);
+          if (blocked) {
+            return { content: [{ type: "text", text: `Blocked command in check "${check.label}": ${blocked}` }], isError: true };
+          }
+        }
+
+        // Resolve target devices
+        const allDevices = await ctx.deviceManager.listDevices();
+        const online = allDevices.filter((d) => d.state === "device");
+        const targets = devices
+          ? online.filter((d) => devices.includes(d.serial))
+          : online;
+
+        if (targets.length === 0) {
+          return { content: [{ type: "text", text: "No matching online devices found." }], isError: true };
+        }
+
+        const sections: string[] = [];
+        const profileName = profile === "full" ? "Full Diagnostic" : profile ? TEST_PROFILES[profile].description : "Custom";
+        sections.push(`=== Comparative Test: ${profileName} ===`);
+        sections.push(`Devices: ${targets.map(d => d.model ? `${d.serial} (${d.model})` : d.serial).join(", ")}`);
+        sections.push(`Checks: ${checks.length}`);
+
+        let matches = 0;
+        let differences = 0;
+        let errors = 0;
+
+        // Run each check across all devices
+        for (const check of checks) {
+          const results = await Promise.allSettled(
+            targets.map(async (d) => {
+              const result = await ctx.bridge.shell(check.command, {
+                device: d.serial, timeout, ignoreExitCode: true,
+              });
+              return { serial: d.serial, model: d.model, output: result.stdout.trim() };
+            })
+          );
+
+          const succeeded = results
+            .filter((r) => r.status === "fulfilled")
+            .map((r) => (r as PromiseFulfilledResult<{ serial: string; model?: string; output: string }>).value);
+
+          const failed = results.filter((r) => r.status === "rejected");
+
+          if (succeeded.length === 0) {
+            sections.push(`\n✗ ${check.label}: All devices failed`);
+            errors += targets.length;
+            continue;
+          }
+
+          errors += failed.length;
+
+          // Compare outputs
+          const allSame = succeeded.length >= 2 && succeeded.every((r) => r.output === succeeded[0].output);
+
+          if (allSame) {
+            matches++;
+            const value = succeeded[0].output || "(empty)";
+            // Truncate long identical values
+            const display = value.length > 120 ? value.substring(0, 120) + "..." : value;
+            sections.push(`\n✓ ${check.label}: MATCH — ${display}`);
+          } else if (succeeded.length === 1) {
+            matches++;
+            sections.push(`\n✓ ${check.label}: ${succeeded[0].output || "(empty)"}`);
+          } else {
+            differences++;
+            sections.push(`\n✗ ${check.label}: DIFFERS`);
+            for (const r of succeeded) {
+              const label = r.model ? `${r.serial} (${r.model})` : r.serial;
+              const value = r.output || "(empty)";
+              const display = value.length > 200 ? value.substring(0, 200) + "..." : value;
+              sections.push(`  ${label}: ${display}`);
+            }
+          }
+
+          if (failed.length > 0) {
+            for (let i = 0; i < results.length; i++) {
+              if (results[i].status === "rejected") {
+                const reason = (results[i] as PromiseRejectedResult).reason;
+                const label = targets[i].model ? `${targets[i].serial} (${targets[i].model})` : targets[i].serial;
+                sections.push(`  ${label}: Error — ${reason instanceof Error ? reason.message : reason}`);
+              }
+            }
+          }
+        }
+
+        // Summary
+        sections.push(`\n${"─".repeat(50)}`);
+        sections.push(`Summary: ${checks.length} checks, ${matches} match${matches !== 1 ? "es" : ""}, ${differences} difference${differences !== 1 ? "s" : ""}, ${errors} error${errors !== 1 ? "s" : ""}`);
+        if (differences === 0 && errors === 0 && targets.length >= 2) {
+          sections.push("✓ All checks consistent across devices");
+        } else if (differences > 0) {
+          sections.push("⚠ Differences detected — review per-check details above");
+        }
+
+        return { content: [{ type: "text", text: sections.join("\n") }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
+      }
+    }
+  );
 }

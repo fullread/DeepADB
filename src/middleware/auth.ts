@@ -27,9 +27,62 @@ const AUTH_TOKEN = process.env.DA_AUTH_TOKEN ?? "";
 /** Pre-computed buffer for constant-time comparison (avoids re-allocation per request). */
 const AUTH_TOKEN_BUF = Buffer.from(AUTH_TOKEN);
 
+/** Minimum recommended token length in characters. Shorter tokens are warned at startup. */
+const MIN_TOKEN_LENGTH = 32;
+
 /** Whether token auth is enabled. */
 export function isAuthEnabled(): boolean {
   return AUTH_TOKEN.length > 0;
+}
+
+/**
+ * Validate token strength at startup. Logs warnings for weak tokens.
+ * Called once from index.ts when network transports are enabled.
+ *
+ * Checks:
+ * 1. Minimum length (32 chars = 128+ bits for hex, 192+ bits for base64)
+ * 2. Entropy estimation — reject tokens with very low character diversity
+ * 3. Common weak patterns (all same character, sequential digits, dictionary-like)
+ */
+export function validateTokenStrength(): void {
+  if (!AUTH_TOKEN) return;
+
+  const warnings: string[] = [];
+
+  // Check 1: Minimum length
+  if (AUTH_TOKEN.length < MIN_TOKEN_LENGTH) {
+    warnings.push(`Token is ${AUTH_TOKEN.length} characters — minimum recommended is ${MIN_TOKEN_LENGTH}.`);
+    warnings.push(`Generate a strong token: openssl rand -hex 32`);
+    warnings.push(`Or with Node.js: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`);
+  }
+
+  // Check 2: Character diversity — estimate entropy
+  const uniqueChars = new Set(AUTH_TOKEN).size;
+  const entropyRatio = uniqueChars / AUTH_TOKEN.length;
+  if (AUTH_TOKEN.length >= 8 && entropyRatio < 0.3) {
+    warnings.push(`Token has very low character diversity (${uniqueChars} unique characters in ${AUTH_TOKEN.length} total).`);
+  }
+
+  // Check 3: Common weak patterns
+  if (/^(.)\1+$/.test(AUTH_TOKEN)) {
+    warnings.push("Token is a single repeated character — this is trivially guessable.");
+  } else if (/^(0123456789|abcdefgh|password|secret|token|changeme|test)/i.test(AUTH_TOKEN)) {
+    warnings.push("Token appears to use a common weak pattern.");
+  }
+
+  if (warnings.length > 0) {
+    console.error("╔══════════════════════════════════════════════════════════════╗");
+    console.error("║  ⚠  WARNING: DA_AUTH_TOKEN may be weak                        ║");
+    console.error("╠══════════════════════════════════════════════════════════════╣");
+    for (const w of warnings) {
+      console.error(`║  ${w}`);
+    }
+    console.error("║                                                                  ║");
+    console.error("║  A strong token should be at least 32 random hex characters:     ║");
+    console.error("║    openssl rand -hex 32                                          ║");
+    console.error("║    node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\" ║");
+    console.error("╚══════════════════════════════════════════════════════════════╝");
+  }
 }
 
 /**

@@ -125,6 +125,7 @@ await h.testContains("RIL stop", "adb_ril_stop",
 h.section("AT Modem Detection");
 
 await h.testContains("AT detect (Shannon)", "adb_at_detect", {}, "shannon");
+await h.testContains("AT cross-validate", "adb_at_cross_validate", { timeout: 8000 }, "Cross-Validation", 60000);
 
 // ── Grant Permission ───────────────────────────────────────
 

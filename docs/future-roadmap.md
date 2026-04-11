@@ -453,7 +453,7 @@ Targeted analysis of error handling gaps, cleanup registration coverage, JSON.pa
 
 ## Future Ideas
 
-With v1.0.5 completing bearer token authentication, transport security hardening, and 21 audit passes closing all 75 identified issues, the core roadmap is substantially complete at 147 tools across 41 modules. 203/203 tests passing on-device (Pixel 6a, Android 16) and 183/183 in ADB mode. Every `z.number()` parameter has explicit `.min()/.max()` bounds. Every user-input-to-shell path has validation. Every LocalBridge subcommand has an explicit handler with behavioral parity. Every duplicated helper has been extracted to a shared module. All HTTP fetch paths use streaming body reads with size limits. All process cleanup flows through a single centralized registry. All environment variable port parsing validates range and NaN. All network transports support bearer token auth with timing-safe comparison. Remaining items:
+With v1.0.7 completing wireless firmware tools (WiFi/Bluetooth/NFC/GPS), AT cross-validation, comparative testing workflows, QEMU guest ADB connectivity, multi-device integration, and 21 audit passes closing all 75 identified issues, the core roadmap is substantially complete at 156 tools across 42 modules. 203/203 tests passing on-device (Pixel 6a, Android 16) and 183/183 in ADB mode. Every `z.number()` parameter has explicit `.min()/.max()` bounds. Every user-input-to-shell path has validation. Every LocalBridge subcommand has an explicit handler with behavioral parity. Every duplicated helper has been extracted to a shared module. All HTTP fetch paths use streaming body reads with size limits. All process cleanup flows through a single centralized registry. All environment variable port parsing validates range and NaN. All network transports support bearer token auth with timing-safe comparison. Remaining items:
 
 ### On-Device Validation ✓ COMPLETE (203/203)
 Termux v0.119.0-beta.3 + Node.js v25.8.2 + git installed on Pixel 6a via ADB. DeepADB deployed, `npm install` run, full test suite executed in `DA_LOCAL=true` mode.
@@ -510,10 +510,22 @@ Key implementation details:
 
 Test suite: `test-qemu-boot.mjs` (10 tests) — pre-flight checks, VM boot, status verification (resource accounting, port mapping, KVM), shutdown, orphan verification. Auto-skips in ADB mode.
 
-**Remaining (Session 3):**
-- ADB connectivity to guest — `adb connect localhost:<port>`, guest device appearing in `adb_devices`
-- Multi-device integration — host + guest as separate devices in DeepADB's multi-device tools
-- Comparative testing workflows — run same test suite against host and guest simultaneously
+**Remaining (Session 3) ✓ PARTIALLY COMPLETE — Guest ADB Connectivity:**
+Three new tools added in v1.0.6:
+- `adb_qemu_connect` — connect to guest ADB (localhost-only, port validated against running VMs)
+- `adb_qemu_disconnect` — disconnect from guest ADB
+- `adb_qemu_guest_shell` — execute shell commands on guest via ADB (security middleware enforced)
+- Enhanced `adb_qemu_stop` with auto-disconnect, `adb_qemu_status` with connection state display
+
+**Remaining (Session 4) ✓ COMPLETE — Multi-Device Integration:**
+Enhanced `LocalBridge` with transparent guest device routing in v1.0.6:
+- Guest device registry (static set, populated only by qemu.ts connect/disconnect)
+- `exec()` intercept: commands targeting registered guest serials route through real ADB binary
+- `syntheticDeviceList()` merges ADB-connected guest device lines into device list
+- Existing `adb_multi_shell`, `adb_multi_install`, `adb_multi_compare` tools now operate transparently across host + guest VMs with zero tool module changes
+
+**Remaining (future):**
+- ~~Comparative testing workflows — automated test suite execution against host and guest simultaneously~~ ✓ **COMPLETE in v1.0.7** — `adb_multi_test` with predefined profiles (firmware/security/network/identity/full) and custom command support, parallel execution across all devices including QEMU guests
 
 ### MCP SDK v2 Migration
 The MCP TypeScript SDK v2 stable release has not yet shipped as of April 2026. v1.x (currently 1.29.0) remains the recommended version for production. v1.x will receive bug fixes and security updates for at least 6 months after v2 ships.
@@ -588,9 +600,10 @@ Firmware analysis expanded from 3 chipset families to 7, with multi-component di
 
 **Remaining investigation areas for future work:**
 - Survey additional baseband formats from untested devices — particularly rare Unisoc variants, HiSilicon encoded strings, and Intel XMM sub-versions
-- Extend to non-baseband firmware components: WiFi/Bluetooth firmware (`vendor.bluetooth.firmware.version`, `vendor.wifi.firmware.version`), NFC controller firmware, sensor hub firmware, DSP firmware
+- ~~Extend to non-baseband firmware components: WiFi/Bluetooth firmware, NFC controller firmware~~ ✓ **COMPLETE in v1.0.7** — new `wireless-firmware.ts` module with `adb_wifi_firmware`, `adb_bluetooth_firmware`, `adb_nfc_firmware`; remaining: sensor hub firmware, DSP firmware
+- ~~GNSS/GPS firmware and capabilities~~ ✓ **COMPLETE in v1.0.7** — `adb_gps_firmware` with Broadcom BCM4776 identification, 7-constellation support, dual-frequency L1+L5 detection, raw measurement capabilities, A-GPS/SUPL configuration; remaining: sensor hub firmware, DSP firmware
 - Explore parsing vendor-specific partition metadata (`/dev/block/by-name/modem`) for deeper identification
-- AT command cross-validation — use `ATI`/`AT+CGMR`/`AT+DEVCONINFO` responses to supplement property-based detection
+- ~~AT command cross-validation~~ ✓ **COMPLETE in v1.0.7** — `adb_at_cross_validate` sends ATI/AT+CGMR/AT+CGMM (+ AT+DEVCONINFO for Shannon), cross-references against getprop, flags discrepancies as potential firmware tampering
 - Carrier-specific firmware variant detection (Samsung CSC codes, carrier firmware bundles)
 - CVE database integration — map parsed firmware versions to known baseband vulnerability advisories
 - Firmware rollback detection — compare current firmware against known-good versions to detect downgrades indicating tampering

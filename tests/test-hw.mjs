@@ -44,5 +44,14 @@ await h.testContains("Profile Detect → Dual SIM", "adb_profile_detect", {}, "D
 await h.testContains("Profile Detect → Bluejay", "adb_profile_detect", {}, "bluejay");
 await h.test("Profile List", "adb_profile_list");
 
+h.section("Wireless Firmware");
+await h.testContains("WiFi Firmware", "adb_wifi_firmware", {}, "WiFi Firmware");
+await h.testContains("WiFi (no MAC by default)", "adb_wifi_firmware", {}, "WiFi");
+await h.testContains("Bluetooth Firmware", "adb_bluetooth_firmware", {}, "Bluetooth Firmware");
+await h.testContains("NFC Firmware", "adb_nfc_firmware", {}, "NFC Firmware");
+await h.testContains("GPS Firmware → Broadcom", "adb_gps_firmware", {}, "Broadcom");
+await h.testContains("GPS Firmware → Constellations", "adb_gps_firmware", {}, "GPS");
+await h.testContains("Firmware Probe → Wireless", "adb_firmware_probe", {}, "Wireless Firmware");
+
 const exitCode = h.finish();
 process.exit(exitCode);

@@ -26,7 +26,7 @@ Every tool that interpolates user-supplied parameters into shell commands valida
 
 ### Zod Parameter Bounds (always active)
 
-Every `z.number()` parameter across all 147 tools has explicit `.min()/.max()` constraints. This prevents resource exhaustion from extreme values — for example, requesting a 999999-second sleep or a buffer size of 2^31.
+Every `z.number()` parameter across all 156 tools has explicit `.min()/.max()` constraints. This prevents resource exhaustion from extreme values — for example, requesting a 999999-second sleep or a buffer size of 2^31.
 
 ### Security Middleware (opt-in enforcement)
 
@@ -62,12 +62,23 @@ When `DA_AUTH_TOKEN` is not set, all requests pass through without authenticatio
 
 Example:
 ```bash
+# Generate a strong token (256 bits of entropy)
+export DA_AUTH_TOKEN="$(openssl rand -hex 32)"
+
+# Alternative without openssl (Node.js)
+export DA_AUTH_TOKEN="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")"
+
 # Server
-DA_AUTH_TOKEN=my-secret-token-here DA_HTTP_PORT=3000 npm start
+DA_AUTH_TOKEN=$DA_AUTH_TOKEN DA_HTTP_PORT=3000 npm start
 
 # Client
-curl -H "Authorization: Bearer my-secret-token-here" http://localhost:3000/sse
+curl -H "Authorization: Bearer $DA_AUTH_TOKEN" http://localhost:3000/sse
 ```
+
+**Token strength requirements:**
+- Minimum recommended length: 32 characters (128+ bits of entropy for hex)
+- DeepADB warns at startup if the token is shorter than 32 characters, uses repeated characters, or matches common weak patterns
+- Use `openssl rand -hex 32` or `crypto.randomBytes(32)` — do not use dictionary words or predictable values
 
 **Important:** Bearer tokens are transmitted in plain text over HTTP. For deployments beyond localhost, use a reverse proxy with TLS (see below) to prevent token interception on the wire.
 
@@ -137,7 +148,7 @@ When installing DeepADB via npm, always pin the version:
 
 ```bash
 # Pinned (recommended)
-npm install -g deepadb@1.0.6
+npm install -g deepadb@1.0.7
 
 # Unpinned (not recommended — vulnerable to supply chain attacks)
 npx -y deepadb

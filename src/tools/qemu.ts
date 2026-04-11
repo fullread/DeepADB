@@ -17,11 +17,12 @@
 import { z } from "zod";
 import { join, resolve, basename } from "path";
 import { mkdirSync, existsSync, readdirSync, statSync, unlinkSync } from "fs";
-import { spawn, spawnSync, ChildProcess } from "child_process";
+import { execFile, spawn, spawnSync, ChildProcess } from "child_process";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { isOnDevice } from "../config/config.js";
 import { registerCleanup, unregisterCleanup } from "../middleware/cleanup.js";
+import { LocalBridge } from "../bridge/local-bridge.js";
 
 /** Maximum concurrent QEMU VMs to prevent resource exhaustion. */
 const MAX_VMS = 3;
@@ -180,6 +181,10 @@ interface QemuVmInfo {
   /** Path to QEMU's pidfile for cleanup. */
   pidFile: string | null;
   rootElevated: boolean;
+  /** Whether we have an active ADB connection to the guest. */
+  connected: boolean;
+  /** Guest ADB serial string, e.g., "localhost:5556". Only set when connected. */
+  guestSerial: string | null;
 }
 
 const runningVms = new Map<string, QemuVmInfo>();
@@ -203,11 +208,63 @@ function verifyContainment(filePath: string, imageDir: string): boolean {
   return resolved.startsWith(resolvedDir + "/") || resolved.startsWith(resolvedDir + "\\");
 }
 
-/** Register cleanup to kill all QEMU VMs on process exit. */
+/**
+ * Find the `adb` binary in the system PATH.
+ * Required for guest ADB connectivity (connecting to VMs).
+ * Returns null if not found — the tool will suggest installation instructions.
+ *
+ * SECURITY: The path is discovered from the system, never user-supplied.
+ * Only standard Termux locations are checked.
+ */
+function findAdbBinary(): string | null {
+  try {
+    const result = spawnSync("which", ["adb"], { timeout: 3000 });
+    if (result.status === 0 && result.stdout) {
+      const path = result.stdout.toString().trim();
+      if (path.length > 0 && existsSync(path)) return path;
+    }
+  } catch { /* which not available or failed */ }
+
+  // Fallback: common Termux location
+  const termuxAdb = "/data/data/com.termux/files/usr/bin/adb";
+  if (existsSync(termuxAdb)) return termuxAdb;
+
+  return null;
+}
+
+/**
+ * Execute an ADB command directly using the system adb binary.
+ * Bypasses the bridge (which uses LocalBridge in on-device mode) because
+ * guest ADB connectivity requires the actual ADB client/server protocol.
+ *
+ * SECURITY: Only called with internally-constructed arguments (never raw user input).
+ * Host/port values are derived from the runningVms map, not user-supplied.
+ */
+function execAdb(adbPath: string, args: string[], timeout = 15000): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  return new Promise((resolve) => {
+    execFile(adbPath, args, { timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+      resolve({
+        stdout: stdout?.toString() ?? "",
+        stderr: stderr?.toString() ?? "",
+        exitCode: error?.code != null ? (typeof error.code === "number" ? error.code : 1) : 0,
+      });
+    });
+  });
+}
+
+/** Register cleanup to disconnect and kill all QEMU VMs on process exit. */
 function updateCleanup(): void {
   if (runningVms.size > 0) {
     registerCleanup("qemu-vms", () => {
+      const adbPath = findAdbBinary();
       for (const [, vm] of runningVms) {
+        // Disconnect guest ADB before killing QEMU (best-effort, sync)
+        if (vm.connected && vm.guestSerial && adbPath) {
+          try {
+            spawnSync(adbPath, ["disconnect", vm.guestSerial], { timeout: 3000 });
+          } catch { /* best-effort */ }
+          LocalBridge.unregisterGuestDevice(vm.guestSerial);
+        }
         try { vm.process.kill("SIGKILL"); } catch { /* ignore */ }
         // Root-elevated: kill actual QEMU child by stored PID
         if (vm.rootElevated && vm.qemuPid) {
@@ -707,6 +764,8 @@ export function registerQemuTools(ctx: ToolContext): void {
           qemuPid: null,
           pidFile: pidFilePath,
           rootElevated: useKvm,
+          connected: false,
+          guestSerial: null,
         };
 
         runningVms.set(safeName, vmInfo);
@@ -727,6 +786,14 @@ export function registerQemuTools(ctx: ToolContext): void {
 
         proc.on("exit", (code) => {
           ctx.logger.info(`[qemu:${safeName}] Exited (code: ${code})`);
+          const exitedVm = runningVms.get(safeName);
+          if (exitedVm) {
+            if (exitedVm.guestSerial) {
+              LocalBridge.unregisterGuestDevice(exitedVm.guestSerial);
+            }
+            exitedVm.connected = false;
+            exitedVm.guestSerial = null;
+          }
           runningVms.delete(safeName);
           updateCleanup();
         });
@@ -803,6 +870,20 @@ export function registerQemuTools(ctx: ToolContext): void {
 
         if (!vm) {
           return { content: [{ type: "text", text: `VM '${safeName}' is not running.` }], isError: true };
+        }
+
+        // Disconnect guest ADB before killing QEMU (prevents stale ADB entries)
+        if (vm.connected && vm.guestSerial) {
+          const adbPath = findAdbBinary();
+          if (adbPath) {
+            try {
+              await execAdb(adbPath, ["disconnect", vm.guestSerial], 5000);
+              ctx.deviceManager.invalidateCache();
+            } catch { /* best-effort */ }
+          }
+          LocalBridge.unregisterGuestDevice(vm.guestSerial);
+          vm.connected = false;
+          vm.guestSerial = null;
         }
 
         try {
@@ -890,6 +971,11 @@ export function registerQemuTools(ctx: ToolContext): void {
             sections.push(`  Image: ${basename(vm.imagePath)}`);
             sections.push(`  Resources: ${vm.memoryMb} MB RAM, ${vm.cpus} CPU(s)`);
             sections.push(`  ADB: localhost:${vm.adbPort} → guest:5555`);
+            if (vm.connected && vm.guestSerial) {
+              sections.push(`  Guest ADB: ✓ connected (serial: ${vm.guestSerial})`);
+            } else {
+              sections.push(`  Guest ADB: not connected (use adb_qemu_connect)`);
+            }
             sections.push(`  Uptime: ${uptimeMin}m ${uptimeSec}s`);
           }
         }
@@ -903,6 +989,208 @@ export function registerQemuTools(ctx: ToolContext): void {
         }
 
         return { content: [{ type: "text", text: sections.join("\n") }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
+      }
+    }
+  );
+
+  ctx.server.tool(
+    "adb_qemu_connect",
+    "Connect to a running QEMU VM's ADB service, making the guest appear as a device for DeepADB tools. Requires the guest OS to have an ADB daemon running (e.g., Android guest with USB debugging enabled). Requires the 'adb' binary (install with: pkg install android-tools). Connections are restricted to localhost only — no remote host connections allowed.",
+    {
+      name: z.string().describe("VM name to connect to (must be running)"),
+      timeout: z.number().min(3000).max(30000).optional().default(10000)
+        .describe("Connection timeout in milliseconds (3s-30s). Default 10s."),
+    },
+    async ({ name, timeout }) => {
+      try {
+        if (!isOnDevice()) {
+          return { content: [{ type: "text", text: "QEMU tools are only available in on-device mode." }], isError: true };
+        }
+
+        const safeName = sanitizeName(name);
+        const vm = runningVms.get(safeName);
+
+        if (!vm) {
+          return { content: [{ type: "text", text: `VM '${safeName}' is not running.` }], isError: true };
+        }
+
+        if (vm.connected) {
+          return { content: [{ type: "text", text: `VM '${safeName}' is already connected (serial: ${vm.guestSerial}).` }] };
+        }
+
+        // Find ADB binary
+        const adbPath = findAdbBinary();
+        if (!adbPath) {
+          return {
+            content: [{
+              type: "text",
+              text: "ADB binary not found. Install with: pkg install android-tools\nThen retry: adb_qemu_connect",
+            }],
+            isError: true,
+          };
+        }
+
+        // SECURITY: Only connect to localhost — never to external hosts.
+        // The port is derived from the running VM's configuration, not user input.
+        const guestSerial = `localhost:${vm.adbPort}`;
+
+        // Ensure ADB server is running
+        await execAdb(adbPath, ["start-server"], 10000);
+
+        // Connect to guest ADB
+        const connectResult = await execAdb(adbPath, ["connect", guestSerial], timeout);
+        const output = (connectResult.stdout + connectResult.stderr).trim();
+
+        // Check for success patterns
+        const isConnected = output.includes("connected to") || output.includes("already connected");
+
+        if (isConnected) {
+          vm.connected = true;
+          vm.guestSerial = guestSerial;
+          LocalBridge.registerGuestDevice(guestSerial);
+          ctx.deviceManager.invalidateCache();
+
+          // Verify the guest appears in device list
+          const devicesResult = await execAdb(adbPath, ["devices", "-l"], 5000);
+          const guestLine = devicesResult.stdout.split("\n")
+            .find(line => line.includes(guestSerial));
+
+          const sections: string[] = [];
+          sections.push(`✓ Connected to VM '${safeName}' guest ADB`);
+          sections.push(`Guest serial: ${guestSerial}`);
+          if (guestLine) {
+            sections.push(`Device status: ${guestLine.trim()}`);
+          }
+          sections.push(`\nRun commands on guest: adb_qemu_guest_shell name="${safeName}" command="getprop ro.build.display.id"`);
+          sections.push(`Disconnect: adb_qemu_disconnect name="${safeName}"`);
+
+          return { content: [{ type: "text", text: sections.join("\n") }] };
+        }
+
+        return {
+          content: [{
+            type: "text",
+            text: `Failed to connect to VM '${safeName}' on ${guestSerial}.\n${output}\n\nEnsure the guest OS has an ADB daemon running (e.g., Android with USB debugging enabled).`,
+          }],
+          isError: true,
+        };
+      } catch (error) {
+        return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
+      }
+    }
+  );
+
+  ctx.server.tool(
+    "adb_qemu_disconnect",
+    "Disconnect from a QEMU VM's ADB service. Removes the guest from the device list.",
+    {
+      name: z.string().describe("VM name to disconnect from"),
+    },
+    async ({ name }) => {
+      try {
+        if (!isOnDevice()) {
+          return { content: [{ type: "text", text: "QEMU tools are only available in on-device mode." }], isError: true };
+        }
+
+        const safeName = sanitizeName(name);
+        const vm = runningVms.get(safeName);
+
+        if (!vm) {
+          return { content: [{ type: "text", text: `VM '${safeName}' is not running.` }], isError: true };
+        }
+
+        if (!vm.connected || !vm.guestSerial) {
+          return { content: [{ type: "text", text: `VM '${safeName}' is not connected.` }] };
+        }
+
+        const adbPath = findAdbBinary();
+        if (!adbPath) {
+          // Can't disconnect without ADB, but clear state anyway
+          LocalBridge.unregisterGuestDevice(vm.guestSerial);
+          vm.connected = false;
+          vm.guestSerial = null;
+          return { content: [{ type: "text", text: `Cleared connection state for '${safeName}' (ADB binary not found).` }] };
+        }
+
+        const serial = vm.guestSerial;
+        await execAdb(adbPath, ["disconnect", serial], 5000);
+        vm.connected = false;
+        vm.guestSerial = null;
+        LocalBridge.unregisterGuestDevice(serial);
+        ctx.deviceManager.invalidateCache();
+
+        return { content: [{ type: "text", text: `✓ Disconnected from VM '${safeName}' (was ${serial}).` }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
+      }
+    }
+  );
+
+  ctx.server.tool(
+    "adb_qemu_guest_shell",
+    "Execute a shell command on a QEMU guest VM via ADB. The VM must be connected first (use adb_qemu_connect). The guest serial is derived internally — no user-supplied host/IP reaches the ADB binary. Subject to the same security middleware checks as adb_shell.",
+    {
+      name: z.string().describe("VM name (must be connected via adb_qemu_connect)"),
+      command: z.string().describe("Shell command to execute on the guest"),
+      timeout: z.number().min(1000).max(60000).optional().default(15000)
+        .describe("Command timeout in milliseconds (1s-60s). Default 15s."),
+    },
+    async ({ name, command, timeout }) => {
+      try {
+        if (!isOnDevice()) {
+          return { content: [{ type: "text", text: "QEMU tools are only available in on-device mode." }], isError: true };
+        }
+
+        // Security: command goes through the same security middleware as adb_shell
+        const blocked = ctx.security.checkCommand(command);
+        if (blocked) {
+          return { content: [{ type: "text", text: blocked }], isError: true };
+        }
+
+        const safeName = sanitizeName(name);
+        const vm = runningVms.get(safeName);
+
+        if (!vm) {
+          return { content: [{ type: "text", text: `VM '${safeName}' is not running.` }], isError: true };
+        }
+
+        if (!vm.connected || !vm.guestSerial) {
+          return {
+            content: [{
+              type: "text",
+              text: `VM '${safeName}' is not connected. Run adb_qemu_connect first.`,
+            }],
+            isError: true,
+          };
+        }
+
+        const adbPath = findAdbBinary();
+        if (!adbPath) {
+          return { content: [{ type: "text", text: "ADB binary not found. Install with: pkg install android-tools" }], isError: true };
+        }
+
+        // SECURITY: The serial is derived from the running VM's internal state (localhost:<port>).
+        // It is NEVER constructed from user input. This prevents injection of arbitrary
+        // host addresses into the adb command.
+        const result = await execAdb(adbPath, ["-s", vm.guestSerial, "shell", command], timeout);
+
+        if (result.exitCode !== 0 && result.stderr.includes("device offline")) {
+          if (vm.guestSerial) LocalBridge.unregisterGuestDevice(vm.guestSerial);
+          vm.connected = false;
+          vm.guestSerial = null;
+          return {
+            content: [{
+              type: "text",
+              text: `Guest '${safeName}' is offline (ADB connection lost). Reconnect with adb_qemu_connect.`,
+            }],
+            isError: true,
+          };
+        }
+
+        const output = result.stdout.trim() || result.stderr.trim() || "(no output)";
+        return { content: [{ type: "text", text: OutputProcessor.process(output) }] };
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
       }

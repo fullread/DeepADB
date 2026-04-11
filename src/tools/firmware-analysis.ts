@@ -401,6 +401,26 @@ export function registerFirmwareAnalysisTools(ctx: ToolContext): void {
           sections.push(...extras);
         }
 
+        // ── WiFi / Bluetooth / NFC firmware summary ──
+        const wifiFw = props["vendor.wifi.firmware.version"] ?? props["wifi.firmware.version"] ?? "";
+        const wifiHw = props["ro.hardware.wifi"] ?? "";
+        const btFw = props["vendor.bluetooth.firmware.version"] ?? props["bluetooth.firmware.version"] ?? "";
+        const btHw = props["ro.hardware.bt"] ?? "";
+        const nfcHw = props["ro.hardware.nfc"] ?? props["ro.hardware.nfc_nci"] ?? "";
+
+        sections.push(`\n── Wireless Firmware ──`);
+        if (wifiHw) sections.push(`WiFi hardware: ${wifiHw}`);
+        if (wifiFw) sections.push(`WiFi firmware: ${wifiFw}`);
+        if (btHw) sections.push(`Bluetooth hardware: ${btHw}`);
+        if (btFw) sections.push(`Bluetooth firmware: ${btFw}`);
+        if (nfcHw) sections.push(`NFC hardware: ${nfcHw}`);
+        const gpsHw = props["ro.hardware.gps"] ?? "";
+        if (gpsHw) sections.push(`GPS hardware: ${gpsHw}`);
+        if (!wifiFw && !wifiHw && !btFw && !btHw && !nfcHw && !gpsHw) {
+          sections.push(`No wireless firmware properties exposed via getprop on this device`);
+        }
+        sections.push(`(Use adb_wifi_firmware, adb_bluetooth_firmware, adb_nfc_firmware, adb_gps_firmware for detailed info via dumpsys)`);
+
         return { content: [{ type: "text", text: sections.join("\n") }] };
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };

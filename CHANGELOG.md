@@ -2,14 +2,57 @@
 
 All notable changes to DeepADB are documented in this file.
 
-## v1.0.6 — Dependency Security Patch
+## v1.0.7 — Wireless Firmware, QEMU Guest Connectivity & Dependency Security Patch
+
+### Wireless Firmware Tools (4 new tools, 1 new module — 156 tools across 42 modules)
+
+- **`adb_wifi_firmware`** — WiFi chipset and firmware identification: driver version, firmware version, supported bands (2.4/5/6 GHz), WiFi standard detection (5/6/6E/7), current connection info (SSID, RSSI, link speed, frequency). MAC address opt-in only (permanent hardware identifier).
+- **`adb_bluetooth_firmware`** — Bluetooth firmware and chipset identification: firmware version, BT version (4.0–5.4 from LMP), adapter state, LE capabilities (2M PHY, Coded PHY, extended advertising, LE Audio), active profiles (A2DP/HFP/HID/PAN/MAP), bonded device count. MAC/name opt-in only.
+- **`adb_nfc_firmware`** — NFC controller firmware identification: controller type (NXP/Broadcom/Samsung/ST), firmware version, NCI version, supported technologies (NFC-A/B/F/V, MIFARE), secure element availability (eSE/UICC), HCE support.
+- **`adb_gps_firmware`** — GNSS/GPS chipset and firmware identification: hardware model (manufacturer, chip, firmware), supported constellations (GPS/GLONASS/Galileo/BeiDou/QZSS/NavIC/SBAS), signal types with frequencies, dual-frequency (L1+L5) detection, raw GNSS measurement capabilities (pseudorange access for spoofing detection), A-GPS modes (MSB/MSA — cellular-routed assisted GPS relevant to IMSI catcher research), SUPL server configuration, carrier phase measurements, navigation message decoding.
+- Enhanced `adb_firmware_probe` with WiFi/Bluetooth/NFC/GPS firmware summary section and cross-references to detailed tools
+
+### QEMU Session 3 — Guest ADB Connectivity (3 new tools)
+
+- **`adb_qemu_connect`** — Connect to a running VM's guest ADB service. Restricted to `localhost` only — no remote host connections. Port derived from running VM state, never user input.
+- **`adb_qemu_disconnect`** — Disconnect from a guest VM's ADB service. Auto-clears connection state.
+- **`adb_qemu_guest_shell`** — Execute shell commands on a guest VM via ADB. Subject to the same security middleware as `adb_shell`. Guest serial derived internally — no user-supplied host/IP reaches the ADB binary.
+
+### AT Cross-Validation (1 new tool)
+
+- **`adb_at_cross_validate`** — Cross-validate baseband firmware by comparing direct modem AT command responses (ATI, AT+CGMR, AT+CGMM) against Android system properties (gsm.version.baseband, ro.hardware.chipname). Shannon-specific AT+DEVCONINFO support. Flags discrepancies as potential firmware tampering, incomplete OTA updates, or property spoofing. Performs 4 validation checks: firmware revision consistency, modem identity vs chipset family, model identification, and expected vs running baseband. Requires root.
+
+### Comparative Testing Workflows (1 new tool)
+
+- **`adb_multi_test`** — Run comparative test workflows across all connected devices (host + QEMU guests). Supports predefined diagnostic profiles: `firmware` (baseband, bootloader, kernel, security patch, build fingerprint), `security` (SELinux, verified boot, encryption, flash lock), `network` (radio type, operator, SIM state, WiFi), `identity` (model, chipset, architecture, RAM), and `full` (all profiles combined). Also accepts custom command lists (max 50 checks). Runs each check in parallel across all devices, compares outputs per-check, and produces a structured match/difference report. All commands go through security middleware.
+
+### QEMU Enhancements
+- Enhanced `adb_qemu_stop` to auto-disconnect guest ADB before killing QEMU process
+- Enhanced `adb_qemu_status` to show per-VM ADB connection state
+- Enhanced process cleanup to disconnect all connected VMs before killing on exit
+- VM exit handler clears connection state when QEMU process exits unexpectedly
+
+### Multi-Device Integration (QEMU Session 4)
+
+- Enhanced `LocalBridge` with guest device routing — commands targeting a connected QEMU guest are transparently routed through the real ADB binary instead of local execution
+- Added guest device registry (`registerGuestDevice`/`unregisterGuestDevice`) with static set — only populated by QEMU connect/disconnect flow with validated `localhost:<port>` serials
+- Enhanced `syntheticDeviceList()` to merge ADB-connected guest devices into the device list, enabling existing `adb_multi_shell`, `adb_multi_install`, and `adb_multi_compare` tools to operate transparently across host + guest VMs
+- Zero changes to any of the 42 tool modules — multi-device integration is entirely bridge-level
+
+### Security Hardening
+
+- Bearer token strength validation at startup: warns if `DA_AUTH_TOKEN` is shorter than 32 characters, has low character diversity, uses repeated characters, or matches common weak patterns (e.g., "password", "changeme", "test")
+- Updated SECURITY.md with explicit minimum token length requirement (32 characters), `node -e` alternative for environments without openssl, and token strength guidance
+
+### Dependency Security Patch
 
 - Patched 6 moderate vulnerabilities in transitive dependencies of `@modelcontextprotocol/sdk`:
   - `hono` 4.12.9 → 4.12.12: cookie name validation bypass (GHSA-26pp-8wgv-hjvm), cookie name prefix bypass (GHSA-r5rp-j6wh-rvv4), IPv4-mapped IPv6 bypass in ipRestriction (GHSA-xpcf-pg52-r92g), path traversal in toSSG (GHSA-xf4j-xp2r-rqqx), middleware bypass via repeated slashes (GHSA-wmmm-f939-6g9c)
   - `@hono/node-server` 1.19.11 → 1.19.13: middleware bypass via repeated slashes in serveStatic (GHSA-92pp-h63x-v22m)
-- Lockfile-only change — no source code modifications, no API changes
-- Full dependency audit: 0 vulnerabilities, all transitive dependencies current
-- Updated future roadmap documentation to reflect current state (203/203 tests, 21 audit passes, 75 findings)
+- Lockfile-only change — no API changes
+- Full dependency audit: 0 vulnerabilities
+- Updated `@types/node` 25.5.0 → 25.5.2, `path-to-regexp` 8.4.0 → 8.4.2 (transitive)
+- Updated future roadmap documentation to reflect current state
 
 ---
 

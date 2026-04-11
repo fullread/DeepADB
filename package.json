@@ -1,7 +1,7 @@
 {
   "name": "deepadb",
-  "version": "1.0.6",
-  "description": "DeepADB — the deepest Android Debug Bridge MCP server. 147 tools across 41 modules for device inspection from UI to baseband.",
+  "version": "1.0.7",
+  "description": "DeepADB — the deepest Android Debug Bridge MCP server. 156 tools across 42 modules for device inspection from UI to baseband.",
   "type": "module",
   "bin": {
     "deepadb": "build/index.js"
@@ -32,7 +32,7 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0",
+    "@types/node": "^25.6.0",
     "typescript": "^6.0.2"
   }
 }

@@ -39,6 +39,16 @@ await h.testContains("Start VM", "adb_qemu_start", {
 console.log("  ... waiting 10s for kernel boot ...");
 await new Promise(r => setTimeout(r, 10000));
 
+h.section("Guest ADB Connectivity (Alpine — no adbd)");
+// Alpine Linux has no ADB daemon — connect should fail gracefully, not crash
+await h.testRejects("Connect to Alpine (no adbd)", "adb_qemu_connect", { name: "alpine-test", timeout: 3000 });
+// Status should still show not connected after failed attempt
+await h.testContains("Status shows not connected", "adb_qemu_status", {}, "not connected");
+// Disconnect from VM that was never successfully connected
+await h.testContains("Disconnect unconnected VM", "adb_qemu_disconnect", { name: "alpine-test" }, "not connected");
+// Guest shell requires connection first
+await h.testRejects("Guest shell unconnected", "adb_qemu_guest_shell", { name: "alpine-test", command: "echo test" });
+
 h.section("VM Status Verification");
 await h.testContains("VM listed in status", "adb_qemu_status", {}, "alpine-test");
 await h.testContains("Resource accounting", "adb_qemu_status", {}, "512 MB RAM");

@@ -443,4 +443,204 @@ export function registerAtCommandTools(ctx: ToolContext): void {
       }
     }
   );
+
+  ctx.server.tool(
+    "adb_at_cross_validate",
+    "Cross-validate baseband firmware by comparing AT command responses (direct modem interrogation) against Android system properties (getprop). Discrepancies may indicate firmware tampering, incomplete OTA updates, or property spoofing. Sends ATI (identification), AT+CGMR (firmware revision), and AT+CGMM (model) to the modem and compares with gsm.version.baseband, ro.hardware.chipname, and related properties. Requires root.",
+    {
+      port: z.string().optional().describe("Modem device node (auto-detects if omitted)"),
+      timeout: z.number().min(1000).max(30000).optional().default(5000).describe("Response timeout per command in ms"),
+      device: z.string().optional().describe("Device serial"),
+    },
+    async ({ port, timeout, device }) => {
+      try {
+        const resolved = await ctx.deviceManager.resolveDevice(device);
+        const serial = resolved.serial;
+        const props = await ctx.deviceManager.getDeviceProps(serial);
+        const family = detectChipsetFamily(props);
+
+        const sections: string[] = [];
+        sections.push("=== AT Cross-Validation: Modem vs Properties ===");
+        sections.push(`Device: ${props["ro.product.model"] ?? "unknown"} (${serial})`);
+        sections.push(`Chipset family: ${family}`);
+
+        // ── Auto-detect port if not specified ──
+        let targetPort = port;
+        if (!targetPort) {
+          const paths = MODEM_PATHS[family] ?? MODEM_PATHS.generic;
+          const existCmd = paths.map((p) => `test -e ${p} && echo "EXISTS:${p}"`).join("; ");
+          const existResult = await ctx.bridge.rootShell(existCmd, {
+            device: serial, timeout: 5000, ignoreExitCode: true,
+          });
+          const existing = existResult.stdout.split("\n")
+            .filter((l) => l.startsWith("EXISTS:"))
+            .map((l) => l.replace("EXISTS:", "").trim());
+          if (existing.length > 0) {
+            targetPort = existing[0];
+          }
+        }
+
+        sections.push(`AT port: ${targetPort ?? "not available"}`);
+
+        // ── Gather AT command responses ──
+        const atResults: Record<string, string> = {};
+
+        if (targetPort) {
+          const atCommands: [string, string][] = [
+            ["ATI", "Identification"],
+            ["AT+CGMR", "Firmware Revision"],
+            ["AT+CGMM", "Model"],
+          ];
+
+          // Shannon-specific: AT+DEVCONINFO for extended device info
+          if (family === "shannon") {
+            atCommands.push(["AT+DEVCONINFO", "Device Config (Shannon)"]);
+          }
+
+          sections.push("\n── AT Command Responses ──");
+          for (const [cmd, label] of atCommands) {
+            const { response, error } = await sendAtCommand(ctx, serial, targetPort, cmd, timeout);
+            if (error) {
+              sections.push(`${label} (${cmd}): Error — ${error}`);
+            } else {
+              const clean = response
+                .split("\n")
+                .filter(l => l.trim().length > 0 && !l.includes("OK") && !l.trim().startsWith(cmd))
+                .map(l => l.trim())
+                .join(" | ");
+              sections.push(`${label} (${cmd}): ${clean || "(empty response)"}`);
+              atResults[cmd] = clean;
+            }
+            await new Promise((r) => setTimeout(r, 300));
+          }
+        } else {
+          sections.push("\n── AT Command Responses ──");
+          sections.push("No modem device node found — AT port auto-detection requires root and direct modem node access.");
+          sections.push("This is expected in ADB mode. Use on-device mode (Termux) for full AT cross-validation.");
+          sections.push("Alternatively, specify 'port' manually (e.g., '/dev/umts_router0' for Shannon).");
+          sections.push("\nFalling back to property-only analysis...");
+        }
+
+        // ── Gather property-based firmware info ──
+        const propBaseline: Record<string, string> = {};
+        const propKeys: [string, string][] = [
+          ["gsm.version.baseband", "Baseband version"],
+          ["gsm.version.ril-impl", "RIL implementation"],
+          ["ro.hardware.chipname", "Chipset name"],
+          ["ro.board.platform", "Platform"],
+          ["ro.baseband", "Baseband tag"],
+          ["ro.build.expect.baseband", "Expected baseband"],
+        ];
+
+        sections.push("\n── System Property Baseline ──");
+        for (const [key, label] of propKeys) {
+          const val = props[key] ?? "";
+          if (val) {
+            sections.push(`${label} (${key}): ${val}`);
+            propBaseline[key] = val;
+          }
+        }
+
+        // ── Cross-validation analysis ──
+        sections.push("\n── Cross-Validation Results ──");
+        let discrepancies = 0;
+        let checks = 0;
+
+        // Check 1: AT+CGMR firmware revision vs gsm.version.baseband
+        if (atResults["AT+CGMR"] && propBaseline["gsm.version.baseband"]) {
+          checks++;
+          const atFw = atResults["AT+CGMR"].toLowerCase();
+          const propFw = propBaseline["gsm.version.baseband"].toLowerCase();
+          // Check if either contains the other, or if they share significant substrings
+          const atTokens = atFw.split(/[\s|,_-]+/).filter(t => t.length > 3);
+          const propTokens = propFw.split(/[\s|,_-]+/).filter(t => t.length > 3);
+          const overlap = atTokens.filter(t => propTokens.some(p => p.includes(t) || t.includes(p)));
+
+          if (atFw.includes(propFw) || propFw.includes(atFw) || overlap.length >= 2) {
+            sections.push("✓ Firmware revision: AT+CGMR consistent with gsm.version.baseband");
+          } else if (overlap.length >= 1) {
+            sections.push("⚠ Firmware revision: Partial match — AT+CGMR and gsm.version.baseband share some tokens but differ");
+            sections.push(`  AT+CGMR: ${atResults["AT+CGMR"]}`);
+            sections.push(`  getprop: ${propBaseline["gsm.version.baseband"]}`);
+            sections.push(`  Overlap: ${overlap.join(", ")}`);
+          } else {
+            discrepancies++;
+            sections.push("✗ DISCREPANCY: Firmware revision mismatch between AT+CGMR and gsm.version.baseband");
+            sections.push(`  AT+CGMR: ${atResults["AT+CGMR"]}`);
+            sections.push(`  getprop: ${propBaseline["gsm.version.baseband"]}`);
+            sections.push("  ⚠ This may indicate firmware tampering, incomplete OTA, or property spoofing");
+          }
+        }
+
+        // Check 2: ATI identification vs chipset family
+        if (atResults["ATI"]) {
+          checks++;
+          const atiLower = atResults["ATI"].toLowerCase();
+          let expectedFamily = "";
+          if (family === "shannon") expectedFamily = "samsung|shannon|exynos|slsi";
+          else if (family === "qualcomm") expectedFamily = "qualcomm|qcom|snapdragon";
+          else if (family === "mediatek") expectedFamily = "mediatek|mtk";
+          else if (family === "unisoc") expectedFamily = "unisoc|spreadtrum";
+          else if (family === "hisilicon") expectedFamily = "hisilicon|kirin|huawei";
+          else if (family === "intel") expectedFamily = "intel|xmm";
+
+          if (expectedFamily) {
+            const familyRegex = new RegExp(expectedFamily, "i");
+            if (familyRegex.test(atiLower) || atiLower.includes(family)) {
+              sections.push(`✓ Modem identity: ATI confirms ${family} chipset family`);
+            } else {
+              // Not necessarily a discrepancy — ATI format varies widely
+              sections.push(`⚠ Modem identity: ATI response doesn't explicitly mention ${family} — may use vendor-specific format`);
+              sections.push(`  ATI: ${atResults["ATI"]}`);
+            }
+          }
+        }
+
+        // Check 3: AT+CGMM model vs expected baseband
+        if (atResults["AT+CGMM"] && propBaseline["ro.build.expect.baseband"]) {
+          checks++;
+          const atModel = atResults["AT+CGMM"].toLowerCase();
+          const expected = propBaseline["ro.build.expect.baseband"].toLowerCase();
+          // Extract model identifier from expected baseband string
+          const modelMatch = expected.match(/^([a-z]\d{4}\w*)/i);
+          if (modelMatch && atModel.includes(modelMatch[1].toLowerCase())) {
+            sections.push("✓ Modem model: AT+CGMM consistent with ro.build.expect.baseband");
+          } else if (modelMatch) {
+            sections.push(`⚠ Modem model: AT+CGMM doesn't contain expected model identifier '${modelMatch[1]}'`);
+            sections.push(`  AT+CGMM: ${atResults["AT+CGMM"]}`);
+          }
+        }
+
+        // Check 4: Expected vs actual baseband (property-level consistency)
+        if (propBaseline["ro.build.expect.baseband"] && propBaseline["gsm.version.baseband"]) {
+          checks++;
+          if (propBaseline["ro.build.expect.baseband"] === propBaseline["gsm.version.baseband"]) {
+            sections.push("✓ Property consistency: ro.build.expect.baseband matches gsm.version.baseband");
+          } else {
+            discrepancies++;
+            sections.push("✗ DISCREPANCY: Expected baseband doesn't match running baseband");
+            sections.push(`  Expected: ${propBaseline["ro.build.expect.baseband"]}`);
+            sections.push(`  Running:  ${propBaseline["gsm.version.baseband"]}`);
+            sections.push("  ⚠ This may indicate a pending OTA, partial update, or firmware downgrade");
+          }
+        }
+
+        // ── Summary ──
+        sections.push(`\n── Summary ──`);
+        sections.push(`Checks performed: ${checks}`);
+        sections.push(`Discrepancies found: ${discrepancies}`);
+        if (discrepancies === 0 && checks > 0) {
+          sections.push("✓ All cross-validation checks passed — modem reports are consistent with system properties");
+        } else if (discrepancies > 0) {
+          sections.push("⚠ Discrepancies detected — investigate firmware integrity");
+        } else {
+          sections.push("No checks could be performed — AT port may not be responding or properties are missing");
+        }
+
+        return { content: [{ type: "text", text: sections.join("\n") }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
+      }
+    }
+  );
 }
