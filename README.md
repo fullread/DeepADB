@@ -642,6 +642,7 @@ DeepADB/
 │       └── config.ts           # Configuration, env vars, startup validation
 ├── package.json
 ├── tsconfig.json
+├── server.json                  # MCP Registry metadata (io.github.fullread/deepadb)
 ├── .gitignore
 ├── README.md
 ├── SECURITY.md                  # Threat model, security architecture, deployment hardening, vulnerability reporting

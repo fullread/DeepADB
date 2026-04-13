@@ -28,3 +28,6 @@ initramfs-*
 # OS artifacts
 .DS_Store
 Thumbs.db
+
+# MCP Registry publisher binary
+mcp-publisher.exe

@@ -2,6 +2,17 @@
 
 All notable changes to DeepADB are documented in this file.
 
+## v1.1.0 — MCP Registry Integration
+
+### MCP Registry Support
+- Added `server.json` metadata file for the official MCP Registry (`registry.modelcontextprotocol.io`)
+- Added `mcpName` field (`io.github.fullread/deepadb`) to `package.json` for npm package validation
+- Server namespace: `io.github.fullread/deepadb` — authenticated via GitHub ownership
+- Registry metadata points to the npm package for distribution, with stdio transport
+
+### Housekeeping
+- Updated `.gitignore` to exclude `mcp-publisher.exe` binary
+
 ## v1.0.9 — Input Completeness, UI Efficiency, Screen Control & Permission Management
 
 ### New Tools (6 new tools — 180 tools across 43 modules)
