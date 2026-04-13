@@ -2,6 +2,41 @@
 
 All notable changes to DeepADB are documented in this file.
 
+## v1.0.8 — Input Gestures, UI Automation & Device Awareness
+
+### Input Gestures, UI Automation, Efficiency, Device Awareness & Crash Analysis (18 new tools, 1 new module — 174 tools across 43 modules)
+
+**Batch 1 — Input Gestures (7 tools):**
+- **`adb_input_drag`** — Drag from point A to point B using Android's `draganddrop` command with swipe fallback for older devices. Configurable duration.
+- **`adb_input_long_press`** — Long press at coordinates with configurable hold duration. Triggers context menus, selection mode, and drag handles.
+- **`adb_input_double_tap`** — Double tap with configurable interval between taps. Triggers zoom, text selection, and double-tap gestures.
+- **`adb_input_text`** — Dedicated text input with `%s` space encoding and shell escaping for special characters.
+- **`adb_open_url`** — Open a URL on the device via `android.intent.action.VIEW` intent.
+- **`adb_orientation`** — Get or set screen orientation: auto-rotate, portrait, landscape, reverse portrait, reverse landscape.
+- **`adb_clipboard`** — Read or write the device clipboard. Multiple fallback methods for cross-version compatibility.
+
+**Batch 2 — UI Automation Helpers (4 tools):**
+- **`adb_tap_element`** — Find a UI element by text, resource-id, or content-description, then tap its center. Atomic search+tap in one call.
+- **`adb_wait_element`** — Poll UI hierarchy until an element appears or disappears. Configurable timeout and polling interval.
+- **`adb_wait_stable`** — Poll until consecutive UI dumps produce identical structure. Detects when screen transitions and animations are complete.
+- **`adb_scroll_until`** — Scroll repeatedly until a target element is found in the UI hierarchy. Configurable direction, max scrolls, and optional auto-tap when found.
+
+**Batch 3 — Efficiency Features (2 tools):**
+- **`adb_screenshot_compressed`** — Capture screenshot with size/quality metadata for token-efficient LLM workflows.
+- **`adb_batch_actions`** — Execute up to 50 input actions (tap, swipe, long_press, double_tap, keyevent, text, drag, back, home, sleep) in a single tool call. All actions validated through security middleware.
+
+**Architecture:**
+- Extracted `parseUiNodes` and `UiElement` to shared `ui-dump.ts` middleware — eliminates duplication between `ui.ts` and the new `input-gestures.ts` module.
+
+**Device Awareness (3 tools):**
+- **`adb_screen_size`** — Screen resolution and display density: physical width, height (pixels), DPI, aspect ratio, DP width. Detects override sizes/densities.
+- **`adb_device_state`** — Combined snapshot in one call: battery level/status/temperature, network type, WiFi state, screen on/off, orientation lock, foreground activity. Uses `Promise.allSettled` for resilience.
+- **`adb_notifications`** — Parse active notifications from `dumpsys notification --noredact`. Extracts package, title, text, importance, channel, flags, and timestamp. Supports package filter and max results.
+
+**Crash Analysis & Debugging (2 tools):**
+- **`adb_crash_logs`** — Read ANR (Application Not Responding) traces and tombstone crash dumps from the device. Supports ANR-only, tombstones-only, or both. Shows directory listing and most recent trace/tombstone content.
+- **`adb_heap_dump`** — Capture a heap dump from a running process for memory analysis. Triggers `am dumpheap`, pulls the .hprof file locally, and cleans up the remote temp file.
+
 ## v1.0.7 — Wireless Firmware, QEMU Guest Connectivity & Dependency Security Patch
 
 ### Wireless Firmware Tools (4 new tools, 1 new module — 156 tools across 42 modules)

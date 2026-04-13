@@ -64,3 +64,60 @@ export async function captureUiDump(
     await bridge.shell(`rm '${shellEscape(path)}'`, { device: serial, ignoreExitCode: true }).catch(() => {});
   }
 }
+
+/** Parsed UI element from uiautomator dump. */
+export interface UiElement {
+  resourceId: string;
+  text: string;
+  contentDesc: string;
+  className: string;
+  clickable: boolean;
+  scrollable: boolean;
+  focusable: boolean;
+  enabled: boolean;
+  bounds: { left: number; top: number; right: number; bottom: number; centerX: number; centerY: number };
+}
+
+/** Parse <node> elements from uiautomator XML dump. */
+export function parseUiNodes(xml: string, clickableOnly: boolean): UiElement[] {
+  const elements: UiElement[] = [];
+  const nodeRegex = /<node\s+([^>]+)\/?>/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = nodeRegex.exec(xml)) !== null) {
+    const attrs = match[1];
+
+    const clickable = getAttr(attrs, "clickable") === "true";
+    const scrollable = getAttr(attrs, "scrollable") === "true";
+    const focusable = getAttr(attrs, "focusable") === "true";
+
+    if (clickableOnly && !clickable && !scrollable) continue;
+
+    const boundsStr = getAttr(attrs, "bounds");
+    const boundsMatch = boundsStr.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
+    if (!boundsMatch) continue;
+
+    const left = parseInt(boundsMatch[1], 10);
+    const top = parseInt(boundsMatch[2], 10);
+    const right = parseInt(boundsMatch[3], 10);
+    const bottom = parseInt(boundsMatch[4], 10);
+
+    elements.push({
+      resourceId: getAttr(attrs, "resource-id"),
+      text: getAttr(attrs, "text"),
+      contentDesc: getAttr(attrs, "content-desc"),
+      className: getAttr(attrs, "class").replace("android.widget.", "").replace("android.view.", ""),
+      clickable,
+      scrollable,
+      focusable,
+      enabled: getAttr(attrs, "enabled") !== "false",
+      bounds: {
+        left, top, right, bottom,
+        centerX: Math.round((left + right) / 2),
+        centerY: Math.round((top + bottom) / 2),
+      },
+    });
+  }
+
+  return elements;
+}

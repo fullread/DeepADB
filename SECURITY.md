@@ -26,7 +26,7 @@ Every tool that interpolates user-supplied parameters into shell commands valida
 
 ### Zod Parameter Bounds (always active)
 
-Every `z.number()` parameter across all 156 tools has explicit `.min()/.max()` constraints. This prevents resource exhaustion from extreme values — for example, requesting a 999999-second sleep or a buffer size of 2^31.
+Every `z.number()` parameter across all 174 tools has explicit `.min()/.max()` constraints. This prevents resource exhaustion from extreme values — for example, requesting a 999999-second sleep or a buffer size of 2^31.
 
 ### Security Middleware (opt-in enforcement)
 

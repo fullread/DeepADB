@@ -1,13 +1,13 @@
 /**
- * Diagnostics Tools — dumpsys, battery, network, telephony state.
- * Useful for device inspection, performance profiling, and radio diagnostics.
+ * Diagnostics Tools — dumpsys, battery, network, telephony state,
+ * bug reports, crash logs, heap dumps, and device reboot.
  */
 
 import { z } from "zod";
 import { join } from "path";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArg } from "../middleware/sanitize.js";
+import { validateShellArg, shellEscape } from "../middleware/sanitize.js";
 
 export function registerDiagnosticTools(ctx: ToolContext): void {
 
@@ -183,6 +183,119 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
             text: `Bug report captured: ${localPath}${output ? "\n" + output : ""}`,
           }],
         };
+      } catch (error) {
+        return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
+      }
+    }
+  );
+
+  // ── Debugging & Crash Analysis ────────────────────────────────────
+
+  ctx.server.tool(
+    "adb_crash_logs",
+    "Read ANR (Application Not Responding) traces and tombstone crash dumps from the device. Requires root access for /data/anr/ and /data/tombstones/. Returns the most recent entries.",
+    {
+      type: z.enum(["anr", "tombstones", "both"]).optional().default("both")
+        .describe("Type of crash data to retrieve (default: both)"),
+      maxEntries: z.number().int().min(1).max(20).optional().default(5)
+        .describe("Maximum entries to return per type (1-20, default 5)"),
+      device: z.string().optional().describe("Device serial"),
+    },
+    async ({ type, maxEntries, device }) => {
+      try {
+        const resolved = await ctx.deviceManager.resolveDevice(device);
+        const serial = resolved.serial;
+        const sections: string[] = [];
+
+        if (type === "anr" || type === "both") {
+          const anrList = await ctx.bridge.shell(
+            `ls -lt /data/anr/ 2>/dev/null | head -${maxEntries + 1}`,
+            { device: serial, timeout: 5000, ignoreExitCode: true }
+          );
+          if (anrList.stdout.trim()) {
+            sections.push("=== ANR Traces (/data/anr/) ===");
+            sections.push(anrList.stdout.trim());
+            // Get content of most recent trace
+            const latest = await ctx.bridge.shell(
+              "cat /data/anr/traces.txt 2>/dev/null | head -200",
+              { device: serial, timeout: 10000, ignoreExitCode: true }
+            );
+            if (latest.stdout.trim()) {
+              sections.push("\n--- Latest trace (first 200 lines) ---");
+              sections.push(latest.stdout.trim());
+            }
+          } else {
+            sections.push("=== ANR Traces === (none found)");
+          }
+        }
+
+        if (type === "tombstones" || type === "both") {
+          const tombList = await ctx.bridge.shell(
+            `ls -lt /data/tombstones/ 2>/dev/null | head -${maxEntries + 1}`,
+            { device: serial, timeout: 5000, ignoreExitCode: true }
+          );
+          if (tombList.stdout.trim()) {
+            sections.push("\n=== Tombstones (/data/tombstones/) ===");
+            sections.push(tombList.stdout.trim());
+            // Get header of most recent tombstone
+            const files = await ctx.bridge.shell(
+              `ls -t /data/tombstones/ 2>/dev/null | head -1`,
+              { device: serial, timeout: 3000, ignoreExitCode: true }
+            );
+            const latest = files.stdout.trim();
+            if (latest) {
+              const content = await ctx.bridge.shell(
+                `head -100 '/data/tombstones/${shellEscape(latest)}'`,
+                { device: serial, timeout: 10000, ignoreExitCode: true }
+              );
+              if (content.stdout.trim()) {
+                sections.push(`\n--- ${latest} (first 100 lines) ---`);
+                sections.push(content.stdout.trim());
+              }
+            }
+          } else {
+            sections.push("\n=== Tombstones === (none found)");
+          }
+        }
+
+        return { content: [{ type: "text", text: sections.join("\n") || "No crash data found" }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
+      }
+    }
+  );
+
+  ctx.server.tool(
+    "adb_heap_dump",
+    "Capture a heap dump from a running process for memory analysis. Triggers `am dumpheap` and pulls the resulting .hprof file. Requires the target process PID or package name.",
+    {
+      target: z.string().describe("Process PID (number) or package name (e.g., com.example.app)"),
+      filename: z.string().optional().describe("Output filename (default: heap_<target>_<timestamp>.hprof)"),
+      device: z.string().optional().describe("Device serial"),
+    },
+    async ({ target, filename, device }) => {
+      try {
+        validateShellArg(target, "target");
+        const resolved = await ctx.deviceManager.resolveDevice(device);
+        const serial = resolved.serial;
+        const remoteDir = "/data/local/tmp";
+        const timestamp = Date.now();
+        const remotePath = `${remoteDir}/DA_heap_${timestamp}.hprof`;
+        const fname = (filename ?? `heap_${target.replace(/\./g, "_")}_${timestamp}.hprof`).replace(/[^a-zA-Z0-9._-]/g, "_");
+        const localPath = join(ctx.config.tempDir, fname);
+
+        try {
+          await ctx.bridge.shell(
+            `am dumpheap '${shellEscape(target)}' '${remotePath}'`,
+            { device: serial, timeout: 60000 }
+          );
+          // Wait for dump to complete (am dumpheap is async)
+          await new Promise((r) => setTimeout(r, 3000));
+          await ctx.bridge.exec(["pull", remotePath, localPath], { device: serial, timeout: 60000 });
+          return { content: [{ type: "text", text: `Heap dump saved: ${localPath}\nTarget: ${target}` }] };
+        } finally {
+          await ctx.bridge.shell(`rm -f '${remotePath}'`, { device: serial, ignoreExitCode: true }).catch(() => {});
+        }
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
       }

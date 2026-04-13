@@ -58,6 +58,7 @@ import { registerSelinuxAuditTools } from "./tools/selinux-audit.js";
 import { registerThermalPowerTools } from "./tools/thermal-power.js";
 import { registerNetworkDiscoveryTools } from "./tools/network-discovery.js";
 import { registerWirelessFirmwareTools } from "./tools/wireless-firmware.js";
+import { registerInputGestureTools } from "./tools/input-gestures.js";
 
 // Resource and prompt registrations
 import { registerResources } from "./tools/resources.js";
@@ -101,7 +102,7 @@ export async function createServer(): Promise<CreateServerResult> {
   // Build unified tool context
   const ctx: ToolContext = { server, bridge, deviceManager, logger, security, config };
 
-  // Register all tool modules (42 modules)
+  // Register all tool modules (43 modules)
   registerDeviceTools(ctx);
   registerShellTools(ctx);
   registerPackageTools(ctx);
@@ -144,6 +145,7 @@ export async function createServer(): Promise<CreateServerResult> {
   registerThermalPowerTools(ctx);
   registerNetworkDiscoveryTools(ctx);
   registerWirelessFirmwareTools(ctx);
+  registerInputGestureTools(ctx);
 
   // Register MCP resources and prompts
   registerResources(ctx);
@@ -152,7 +154,7 @@ export async function createServer(): Promise<CreateServerResult> {
   // Load external plugins (async — scans plugin directory)
   await loadPlugins(ctx);
 
-  logger.info("DeepADB MCP server initialized — 41 tool modules, 4 resources, 4 prompts. Ready.");
+  logger.info("DeepADB MCP server initialized — 43 tool modules, 4 resources, 4 prompts. Ready.");
 
   return { server, logger, bridge, deviceManager };
 }

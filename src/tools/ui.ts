@@ -7,7 +7,7 @@ import { join, basename } from "path";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { shellEscape } from "../middleware/sanitize.js";
-import { captureUiDump, UI_ATTR_REGEXES } from "../middleware/ui-dump.js";
+import { captureUiDump, parseUiNodes, UiElement } from "../middleware/ui-dump.js";
 import { isOnDevice } from "../config/config.js";
 
 function sanitizeFilename(name: string): string {
@@ -229,19 +229,6 @@ export function registerUiTools(ctx: ToolContext): void {
 
 // ── UI Hierarchy Helpers ──────────────────────────────────────────────
 
-/** Parsed UI element from uiautomator dump. */
-interface UiElement {
-  resourceId: string;
-  text: string;
-  contentDesc: string;
-  className: string;
-  clickable: boolean;
-  scrollable: boolean;
-  focusable: boolean;
-  enabled: boolean;
-  bounds: { left: number; top: number; right: number; bottom: number; centerX: number; centerY: number };
-}
-
 /** Format a UI element for output. `showFlags` includes interaction flags (for dump); omit for find (shows tap coords instead). */
 function formatElement(el: UiElement, index: number, showFlags: boolean): string {
   const parts = [`[${index}]`];
@@ -264,57 +251,4 @@ function formatElement(el: UiElement, index: number, showFlags: boolean): string
   }
 
   return parts.join(" | ");
-}
-
-const ATTR_REGEXES = UI_ATTR_REGEXES;
-
-/** Parse <node> elements from uiautomator XML dump. */
-function parseUiNodes(xml: string, clickableOnly: boolean): UiElement[] {
-  const elements: UiElement[] = [];
-  const nodeRegex = /<node\s+([^>]+)\/?>/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = nodeRegex.exec(xml)) !== null) {
-    const attrs = match[1];
-    const get = (name: string): string => {
-      const regex = ATTR_REGEXES[name];
-      if (!regex) return "";
-      const m = attrs.match(regex);
-      return m ? m[1] : "";
-    };
-
-    const clickable = get("clickable") === "true";
-    const scrollable = get("scrollable") === "true";
-    const focusable = get("focusable") === "true";
-
-    if (clickableOnly && !clickable && !scrollable) continue;
-
-    // Parse bounds="[left,top][right,bottom]"
-    const boundsStr = get("bounds");
-    const boundsMatch = boundsStr.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
-    if (!boundsMatch) continue;
-
-    const left = parseInt(boundsMatch[1], 10);
-    const top = parseInt(boundsMatch[2], 10);
-    const right = parseInt(boundsMatch[3], 10);
-    const bottom = parseInt(boundsMatch[4], 10);
-
-    elements.push({
-      resourceId: get("resource-id"),
-      text: get("text"),
-      contentDesc: get("content-desc"),
-      className: get("class").replace("android.widget.", "").replace("android.view.", ""),
-      clickable,
-      scrollable,
-      focusable,
-      enabled: get("enabled") !== "false",
-      bounds: {
-        left, top, right, bottom,
-        centerX: Math.round((left + right) / 2),
-        centerY: Math.round((top + bottom) / 2),
-      },
-    });
-  }
-
-  return elements;
 }
