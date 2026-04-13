@@ -2,6 +2,61 @@
 
 All notable changes to DeepADB are documented in this file.
 
+## v1.0.9 — Input Completeness, UI Efficiency, Screen Control & Permission Management
+
+### New Tools (6 new tools — 180 tools across 43 modules)
+
+**`adb_input_fling`** — High-velocity fling gesture for triggering scroll momentum on lists, launchers, and paged views. Distinct from swipe by duration: 20–200ms (default 50ms) creates the velocity needed for momentum scrolling. Also available as a `fling` action type in `adb_batch_actions`. Added to `input-gestures.ts`.
+
+**`adb_revoke_permission`** — Revoke a runtime permission from a package via `pm revoke`. Counterpart to the existing `adb_grant_permission`. Useful for resetting permission state to test first-run flows and denial handling. Input validated via `validateShellArgs` on both `packageName` and `permission`. Added to `packages.ts`.
+
+**`adb_list_permissions`** — List all declared and granted permissions for a package. Parses `dumpsys package` install-time and runtime permission blocks with current grant state. Filterable by `all` / `granted` / `denied`. Reports granted count vs total and permission type (install/runtime) with ✓/✗ indicators. Added to `packages.ts`.
+
+**`adb_screencap_annotated`** — Screenshot with UI element bounding boxes and numbered labels composited directly onto the PNG using a zero-dependency pure-TypeScript PNG pipeline (decode → draw → encode). Accepts `clickableOnly` (default true). Returns annotated PNG path plus a text legend. Color palette cycles through 8 distinguishable colors with auto-contrasted white/black digit labels. Added to `ui.ts`.
+
+**`adb_screen_state`** — Combined screen state in one call: foreground activity, screen dimensions and density, orientation, battery level/status/temp, and a TSV node list of interactive elements. Replaces the common `adb_current_activity` + `adb_screen_size` + `adb_device_state` + `adb_ui_dump` sequence with a single round-trip. Uses `Promise.allSettled` for resilience. Added to `ui.ts`.
+
+**`adb_input_pinch`** — Multi-touch pinch (zoom out) or spread (zoom in) gesture with layered injection architecture. Two fingers move symmetrically around a configurable center point with adjustable start/end radius, duration, axis angle, and interpolation steps. Primary method: parallel `input swipe` with shell backgrounding (universal, no root required). Advanced method: atomic binary writes of raw Linux Multi-Touch Type B protocol events (`ABS_MT_SLOT`, `ABS_MT_TRACKING_ID`, `ABS_MT_POSITION_X/Y`, `SYN_REPORT`) to the touchscreen device node via `xxd -r -p` (root required). Each frame's events are written as a single binary blob to ensure Android's `MultiTouchInputMapper` receives all slot updates atomically — individual `sendevent` calls are too slow (~5-10ms per fork) and cause the InputReader to miss the gesture. Auto-detection probes `getevent -p` to discover the touchscreen device node, coordinate ranges, slot count, and pressure range — cached for the session. `method` parameter: `auto` (default — uses sendevent when root available), `swipe` (force parallel swipes), `sendevent` (force raw MT). Also available as a `pinch` action type in `adb_batch_actions` (uses swipe method). Hardware-verified on Pixel 6a FTS touchscreen (1080×2400, 10-slot MT Type B) — both pinch/zoom-out and spread/zoom-in produce visible map zoom in Google Maps. Added to `input-gestures.ts`.
+
+### Enhancements to Existing Tools
+
+**`adb_screen`** — Added `lock` action, improved `unlock`, and added `pin` parameter for full credential-based unlock.
+
+Lock: checks `mWakefulness` via `dumpsys power`. If already off, still checks keyguard state via `dumpsys window` and returns `"Screen: already locked (keyguard active)"`. If awake, sends `KEYCODE_SLEEP`, waits 1.5s for the sleep token to appear, then returns `"Screen: locked (keyguard active)"` or `"Screen: sleep sent"` depending on verified state.
+
+Unlock: sends `KEYCODE_WAKEUP` then `wm dismiss-keyguard`. Reports honestly — `"Screen: unlocked (keyguard dismissed)"` or `"Screen: awake — keyguard still active (PIN/pattern/biometric required)"`. If `pin` is supplied and the keyguard survives dismiss, performs the full credential entry sequence: derives proportional swipe coordinates from `wm size`, swipes up to reveal the PIN keypad, types the PIN via `input text`, confirms with `KEYCODE_ENTER`, then re-checks keyguard state and returns `"Screen: unlocked (PIN accepted, keyguard dismissed)"` or `"Screen: PIN entered — keyguard still active (wrong PIN or biometric required)"`.
+
+Key finding from live hardware research: `mWakefulness=Awake` and `mResumedActivity` are both unreliable keyguard indicators — the keyguard is a window overlay above the activity stack and the launcher can show as resumed while the keyguard is blocking everything. `dumpsys window | grep keyguard` (sleep token presence) is the correct signal for all lock/unlock state decisions. (`control.ts`)
+
+**`adb_ui_dump`** — Added `format` parameter: `text` (default), `tsv` (compact tab-separated: `index\ttext\tresource_id\tcontent_desc\tcenter_x\tcenter_y\tclickable\tscrollable` — order-of-magnitude token reduction for automation loops), `xml` (raw uiautomator XML). Tabs in text/content_desc fields are escaped to spaces to preserve TSV structure. (`ui.ts`)
+
+**`adb_batch_actions`** — Added `fling` as a supported action type. Args: `x1 y1 x2 y2 [durationMs]` — same as swipe but defaults to 50ms duration. Numeric-only validation, goes through existing security middleware. (`input-gestures.ts`)
+
+### New Infrastructure
+
+**`src/middleware/png-utils.ts`** — New shared middleware module providing zero-dependency PNG utilities:
+- `decodePngPixels()` — moved and exported from `screenshot-diff.ts`; handles RGBA (colorType 6) and RGB (colorType 2), all 5 PNG filter types
+- `encodePng()` — filter-0 (None) scanlines + level-1 deflate; CRC32 chunk integrity
+- `drawRect()` — inward-thickness rectangle border on a pixel buffer
+- `drawLabel()` — filled number label with 5×7 pixel font and ITU-R BT.601 auto-contrasted foreground
+- `ELEMENT_COLORS` — 8-color cycling palette
+
+**`src/tools/screenshot-diff.ts`** — Refactored to import `decodePngPixels` from `png-utils.ts`. Removed private copy and local `inflateSync` import. Zero behavioral change.
+
+### Test Suite (235 ADB-mode / 257 on-device tests)
+- `test-analysis.mjs`: Permission Management section — grant, list (all), list (granted filter), revoke, re-grant cleanup (5 tests)
+- `test-ui-control.mjs`: Screen lock/wake/unlock cycle, unlock-without-PIN advisory path, UI Dump TSV/XML formats, annotated screenshot, fling gesture, fling batch action type, screen state, multi-touch pinch/spread/auto/horizontal-angle, batch pinch type, pre-flight keyguard guard for recovery from prior failed runs (14 new tests, 5 conditional on `DA_TEST_PIN` for the lock/unlock cycle)
+- `test-boundaries.mjs`: Pinch Zod boundary validation — startRadius below min, durationMs above max, steps above max (3 new tests)
+- Lock/wake/unlock tests skip cleanly when `DA_TEST_PIN` is not set. With PIN supplied, `adb_screen { action: "unlock", pin }` handles the full sequence internally — the test simply calls the tool and asserts `"PIN accepted"` in the response
+- Wake assertions tightened from `"Screen:"` to `"wake sent"` for specificity
+- Multi-touch tests open Google Maps at a known location to provide a zoomable surface for pinch/spread verification
+- On-device validated: 257/257 with `DA_TEST_PIN` on Pixel 6a (Termux + Magisk + QEMU 10.2.1)
+
+### Security Hardening
+- **`adb_screen` PIN shell injection** (finding #76) — The `pin` parameter was passed unsanitized to `input text`, allowing shell injection via crafted PIN values. Fixed with three layers: Zod `.trim().regex(/^[a-zA-Z0-9]+$/)` rejects non-alphanumeric input at the schema level, `shellEscape()` wraps the value in the shell command, and `shellEscape` import added to `control.ts`. The `.trim()` handles cmd.exe trailing-space edge case when `DA_TEST_PIN` is set via `set VAR=value && command`.
+- **`adb_input_pinch` event device node injection** (finding #76b) — The touchscreen device node path from `getevent -p` was used unvalidated and unquoted in the `xxd -r -p > <node>` shell command. While the value comes from system output (not user input), defense-in-depth requires validation. Fixed with `/dev/` prefix check, shell metacharacter rejection (`["'\`$\\!;|&(){}<>\n\r]`), path traversal (`..`) rejection, and single-quote wrapping in the shell command.
+- **PNG decoder hardening** (3 findings in `png-utils.ts`) — (a) PNG signature only checked 2 of 8 bytes — a non-PNG binary starting with `\x89\x50` would pass validation. Fixed with full 8-byte magic number check. (b) No dimension bounds on IHDR width/height — a crafted PNG claiming extreme dimensions (e.g. 100000×100000) would trigger a multi-gigabyte `Buffer.alloc()` OOM crash. Fixed with `MAX_DIM = 10000` ceiling per axis. (c) `inflateSync` called without `maxOutputLength` — a decompression bomb (tiny compressed payload decompressing to gigabytes) would exhaust memory before the size check. Fixed with `maxOutputLength` computed from validated IHDR dimensions, aborting decompression immediately if output exceeds expected pixel data size.
+
 ## v1.0.8 — Input Gestures, UI Automation & Device Awareness
 
 ### Input Gestures, UI Automation, Efficiency, Device Awareness & Crash Analysis (18 new tools, 1 new module — 174 tools across 43 modules)

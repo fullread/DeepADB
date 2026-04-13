@@ -3,7 +3,7 @@
  * DeepADB — MCP Server for Android Debug Bridge
  *
  * Entry point. Supports three transport modes (mutually exclusive):
- *   - stdio (default) — JSON-RPC over stdin/stdout for Claude Code
+ *   - stdio (default) — JSON-RPC over stdin/stdout for MCP clients (Claude Code, etc.)
  *   - HTTP/SSE — Set DA_HTTP_PORT to enable browser-based MCP clients
  *   - WebSocket — Set DA_WS_PORT to enable bidirectional streaming (requires `ws` package)
  *

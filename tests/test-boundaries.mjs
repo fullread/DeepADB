@@ -71,6 +71,20 @@ await h.testRejects("Network scan port below min (0)",
 await h.testRejects("Network scan port above max (99999)",
   "adb_network_scan", { ports: [99999] });
 
+h.section("Zod Boundary — Pinch Gesture");
+
+// adb_input_pinch startRadius: .min(10).max(2000)
+await h.testRejects("Pinch startRadius below min (5)",
+  "adb_input_pinch", { cx: 540, cy: 1200, startRadius: 5, endRadius: 100 });
+
+// adb_input_pinch durationMs: .min(100).max(5000)
+await h.testRejects("Pinch durationMs above max (6000)",
+  "adb_input_pinch", { cx: 540, cy: 1200, startRadius: 300, endRadius: 100, durationMs: 6000 });
+
+// adb_input_pinch steps: .min(5).max(60)
+await h.testRejects("Pinch steps above max (100)",
+  "adb_input_pinch", { cx: 540, cy: 1200, startRadius: 300, endRadius: 100, steps: 100 });
+
 // ══════════════════════════════════════════════════════════
 // Input Injection via adb_input
 // The text type should be shell-escaped, not injected

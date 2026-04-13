@@ -1,7 +1,7 @@
 /**
  * Output Processor — Truncation, formatting, structured parsing, and binary handling.
  * 
- * Sits between raw ADB output and what gets returned to Claude.
+ * Sits between raw ADB output and what gets returned to the MCP client.
  * Prevents context window blowout from verbose commands.
  */
 

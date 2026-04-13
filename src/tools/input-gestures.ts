@@ -54,6 +54,32 @@ export function registerInputGestureTools(ctx: ToolContext): void {
   );
 
   ctx.server.tool(
+    "adb_input_fling",
+    "Perform a high-velocity fling gesture. Like swipe but with a short duration to create scroll momentum on lists, launchers, and paged views. Useful for fast-scrolling through long lists, dismissing notifications, or triggering velocity-sensitive behaviors.",
+    {
+      x1: z.number().int().min(0).max(9999).describe("Start X coordinate"),
+      y1: z.number().int().min(0).max(9999).describe("Start Y coordinate"),
+      x2: z.number().int().min(0).max(9999).describe("End X coordinate"),
+      y2: z.number().int().min(0).max(9999).describe("End Y coordinate"),
+      durationMs: z.number().int().min(20).max(200).optional().default(50)
+        .describe("Fling duration in ms (20-200, default 50). Shorter = more velocity"),
+      device: z.string().optional().describe("Device serial"),
+    },
+    async ({ x1, y1, x2, y2, durationMs, device }) => {
+      try {
+        const resolved = await ctx.deviceManager.resolveDevice(device);
+        await ctx.bridge.shell(
+          `input swipe ${x1} ${y1} ${x2} ${y2} ${durationMs}`,
+          { device: resolved.serial, timeout: durationMs + 3000, ignoreExitCode: true }
+        );
+        return { content: [{ type: "text", text: `Fling: (${x1},${y1}) → (${x2},${y2}) over ${durationMs}ms` }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
+      }
+    }
+  );
+
+  ctx.server.tool(
     "adb_input_long_press",
     "Long press at a point on screen. Triggers context menus, selection mode, drag handles, and other long-press behaviors. Implemented as a zero-distance swipe with configurable hold duration.",
     {
@@ -589,13 +615,13 @@ export function registerInputGestureTools(ctx: ToolContext): void {
 
   ctx.server.tool(
     "adb_batch_actions",
-    "Execute multiple input actions in a single tool call. Reduces ADB round-trips for multi-step UI interactions. Each action runs sequentially with an optional delay between them. Supported action types: tap, swipe, long_press, double_tap, keyevent, text, drag, back, home, sleep.",
+    "Execute multiple input actions in a single tool call. Reduces ADB round-trips for multi-step UI interactions. Each action runs sequentially with an optional delay between them. Supported action types: tap, swipe, fling, long_press, double_tap, keyevent, text, drag, pinch, back, home, sleep.",
     {
       actions: z.array(z.object({
-        type: z.enum(["tap", "swipe", "long_press", "double_tap", "keyevent", "text", "drag", "back", "home", "sleep"])
+        type: z.enum(["tap", "swipe", "fling", "long_press", "double_tap", "keyevent", "text", "drag", "pinch", "back", "home", "sleep"])
           .describe("Action type"),
         args: z.string().optional()
-          .describe("Action arguments: tap='x y', swipe='x1 y1 x2 y2 [ms]', long_press='x y [ms]', double_tap='x y', keyevent='KEYCODE_*', text='string', drag='x1 y1 x2 y2 [ms]', sleep='ms', back/home=none"),
+          .describe("Action arguments: tap='x y', swipe='x1 y1 x2 y2 [ms]', fling='x1 y1 x2 y2 [ms]', long_press='x y [ms]', double_tap='x y', keyevent='KEYCODE_*', text='string', drag='x1 y1 x2 y2 [ms]', pinch='cx cy startRadius endRadius [durationMs]', sleep='ms', back/home=none"),
       })).min(1).max(50).describe("Array of actions to execute (1-50)"),
       delayMs: z.number().int().min(0).max(5000).optional().default(100)
         .describe("Delay between actions in ms (0-5000, default 100)"),
@@ -626,6 +652,15 @@ export function registerInputGestureTools(ctx: ToolContext): void {
                 if (!/^[\d\s]+$/.test(args)) throw new Error(`Invalid swipe args: "${args}"`);
                 cmd = `input swipe ${args}`;
                 break;
+              case "fling": {
+                if (!/^[\d\s]+$/.test(args)) throw new Error(`Invalid fling args: "${args}"`);
+                const fl = args.trim().split(/\s+/);
+                if (fl.length < 4) throw new Error("fling needs: x1 y1 x2 y2 [durationMs]");
+                // Default to 50ms for fling velocity; user-supplied 5th arg overrides
+                const flDur = fl[4] ?? "50";
+                cmd = `input swipe ${fl[0]} ${fl[1]} ${fl[2]} ${fl[3]} ${flDur}`;
+                break;
+              }
               case "long_press": {
                 if (!/^[\d\s]+$/.test(args)) throw new Error(`Invalid long_press args: "${args}"`);
                 const lp = args.split(/\s+/);
@@ -654,6 +689,24 @@ export function registerInputGestureTools(ctx: ToolContext): void {
                 if (!/^[\d\s]+$/.test(args)) throw new Error(`Invalid drag args: "${args}"`);
                 cmd = `input draganddrop ${args}`;
                 break;
+              case "pinch": {
+                if (!/^[\d\s]+$/.test(args)) throw new Error(`Invalid pinch args: "${args}"`);
+                const pp = args.trim().split(/\s+/).map(Number);
+                if (pp.length < 4) throw new Error("pinch needs: cx cy startRadius endRadius [durationMs]");
+                const [pcx, pcy, psr, per] = pp;
+                const pdur = pp[4] ?? 500;
+                const prad = (90 * Math.PI) / 180; // vertical axis
+                const pf1sx = Math.round(pcx + psr * Math.cos(prad));
+                const pf1sy = Math.round(pcy + psr * Math.sin(prad));
+                const pf1ex = Math.round(pcx + per * Math.cos(prad));
+                const pf1ey = Math.round(pcy + per * Math.sin(prad));
+                const pf2sx = Math.round(pcx - psr * Math.cos(prad));
+                const pf2sy = Math.round(pcy - psr * Math.sin(prad));
+                const pf2ex = Math.round(pcx - per * Math.cos(prad));
+                const pf2ey = Math.round(pcy - per * Math.sin(prad));
+                cmd = `input swipe ${pf1sx} ${pf1sy} ${pf1ex} ${pf1ey} ${pdur} & input swipe ${pf2sx} ${pf2sy} ${pf2ex} ${pf2ey} ${pdur}`;
+                break;
+              }
               case "back":
                 cmd = "input keyevent KEYCODE_BACK";
                 break;
@@ -894,6 +947,249 @@ export function registerInputGestureTools(ctx: ToolContext): void {
         }).join("\n\n");
 
         return { content: [{ type: "text", text: `${notifications.length} notification(s)${filter ? ` matching "${filter}"` : ""}:\n\n${output}` }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
+      }
+    }
+  );
+
+  // ── Multi-Touch: Pinch/Spread Gesture ─────────────────────────────────
+
+  /**
+   * Discover the primary touchscreen input device and its MT axis ranges.
+   * Parses `getevent -p` output to find a device with ABS_MT_POSITION_X/Y
+   * and INPUT_PROP_DIRECT. Caches the result for the session.
+   */
+  let cachedTouchDevice: {
+    eventNode: string;
+    maxX: number;
+    maxY: number;
+    maxSlot: number;
+    maxPressure: number;
+  } | null | undefined = undefined;
+
+  async function detectTouchDevice(
+    bridge: ToolContext["bridge"],
+    serial: string,
+  ): Promise<typeof cachedTouchDevice> {
+    if (cachedTouchDevice !== undefined) return cachedTouchDevice;
+
+    try {
+      const result = await bridge.rootShell("getevent -p", {
+        device: serial, timeout: 5000, ignoreExitCode: true,
+      });
+      const output = result.stdout;
+      // Split into device blocks
+      const blocks = output.split(/(?=add device \d+:)/);
+      for (const block of blocks) {
+        // Must be INPUT_PROP_DIRECT (touch screen, not touchpad)
+        if (!block.includes("INPUT_PROP_DIRECT")) continue;
+
+        const nodeMatch = block.match(/add device \d+:\s+(\S+)/);
+        if (!nodeMatch) continue;
+
+        // Must have ABS_MT_POSITION_X (0035) and ABS_MT_POSITION_Y (0036)
+        const xMatch = block.match(/0035\s+:\s+value \d+, min (\d+), max (\d+)/);
+        const yMatch = block.match(/0036\s+:\s+value \d+, min (\d+), max (\d+)/);
+        if (!xMatch || !yMatch) continue;
+
+        // Optional: ABS_MT_SLOT (002f), ABS_MT_PRESSURE (003a)
+        const slotMatch = block.match(/002f\s+:\s+value \d+, min \d+, max (\d+)/);
+        const pressMatch = block.match(/003a\s+:\s+value \d+, min \d+, max (\d+)/);
+
+        cachedTouchDevice = {
+          eventNode: nodeMatch[1],
+          maxX: parseInt(xMatch[2], 10),
+          maxY: parseInt(yMatch[2], 10),
+          maxSlot: slotMatch ? parseInt(slotMatch[1], 10) : 1,
+          maxPressure: pressMatch ? parseInt(pressMatch[1], 10) : 50,
+        };
+        return cachedTouchDevice;
+      }
+    } catch { /* getevent requires root — expected to fail without it */ }
+
+    cachedTouchDevice = null;
+    return null;
+  }
+
+  ctx.server.tool(
+    "adb_input_pinch",
+    "Perform a multi-touch pinch (zoom out) or spread (zoom in) gesture. Two fingers move symmetrically toward or away from a center point. Uses parallel swipe injection by default (universal, no root); when root is available, can use raw sendevent for true multi-touch MT protocol injection. The 'auto' method selects the best available approach.",
+    {
+      cx: z.number().int().min(0).max(9999).describe("Center X coordinate of the pinch gesture"),
+      cy: z.number().int().min(0).max(9999).describe("Center Y coordinate of the pinch gesture"),
+      startRadius: z.number().int().min(10).max(2000).describe("Starting distance (px) from center to each finger"),
+      endRadius: z.number().int().min(10).max(2000).describe("Ending distance (px) from center to each finger. Smaller than startRadius = pinch/zoom-out, larger = spread/zoom-in"),
+      durationMs: z.number().int().min(100).max(5000).optional().default(500)
+        .describe("Gesture duration in ms (100-5000, default 500)"),
+      angle: z.number().min(0).max(360).optional().default(90)
+        .describe("Angle in degrees for the pinch axis (0=horizontal, 90=vertical, default 90)"),
+      steps: z.number().int().min(5).max(60).optional().default(20)
+        .describe("Interpolation steps for sendevent method (5-60, default 20). More steps = smoother gesture"),
+      method: z.enum(["auto", "swipe", "sendevent"]).optional().default("auto")
+        .describe("Injection method: 'auto' (sendevent if root, else swipe), 'swipe' (parallel swipes, universal), 'sendevent' (raw MT protocol, requires root)"),
+      device: z.string().optional().describe("Device serial"),
+    },
+    async ({ cx, cy, startRadius, endRadius, durationMs, angle, steps, method, device }) => {
+      try {
+        const resolved = await ctx.deviceManager.resolveDevice(device);
+        const serial = resolved.serial;
+
+        // Convert angle to radians for finger position calculation
+        const rad = (angle * Math.PI) / 180;
+
+        // Calculate finger positions at start and end
+        const f1StartX = Math.round(cx + startRadius * Math.cos(rad));
+        const f1StartY = Math.round(cy + startRadius * Math.sin(rad));
+        const f1EndX   = Math.round(cx + endRadius * Math.cos(rad));
+        const f1EndY   = Math.round(cy + endRadius * Math.sin(rad));
+
+        const f2StartX = Math.round(cx - startRadius * Math.cos(rad));
+        const f2StartY = Math.round(cy - startRadius * Math.sin(rad));
+        const f2EndX   = Math.round(cx - endRadius * Math.cos(rad));
+        const f2EndY   = Math.round(cy - endRadius * Math.sin(rad));
+
+        // Determine method
+        let useMethod = method;
+        if (useMethod === "auto") {
+          // Check root + touchscreen availability
+          const touchDev = await detectTouchDevice(ctx.bridge, serial);
+          useMethod = touchDev ? "sendevent" : "swipe";
+        }
+
+        if (useMethod === "sendevent") {
+          // ── sendevent: true multi-touch MT Type B protocol via atomic binary writes ──
+          // Each frame (events between SYN_REPORTs) is written as a single binary blob
+          // to the touchscreen device node via `xxd -r -p`. This ensures Android's
+          // MultiTouchInputMapper receives all slot updates atomically, which is required
+          // for reliable multi-pointer gesture recognition. Individual `sendevent` calls
+          // are too slow (~5-10ms per fork) and cause the InputReader to miss the gesture.
+          const touchDev = await detectTouchDevice(ctx.bridge, serial);
+          if (!touchDev) {
+            return {
+              content: [{ type: "text", text: "sendevent method requires root and a detected touchscreen. Use method='swipe' instead." }],
+              isError: true,
+            };
+          }
+
+          const node = touchDev.eventNode;
+          // Validate event node path — defense-in-depth even though it comes from getevent -p
+          if (!node.startsWith("/dev/") || /["'`$\\!;|&(){}<>\n\r]/.test(node) || node.includes("..")) {
+            return {
+              content: [{ type: "text", text: `Invalid touchscreen device node: ${node}` }],
+              isError: true,
+            };
+          }
+          const pressure = Math.min(50, touchDev.maxPressure);
+          const sleepPerStep = (durationMs / steps / 1000).toFixed(4);
+
+          // Encode a single struct input_event (24 bytes on ARM64) as hex.
+          // struct input_event { long tv_sec, long tv_usec, u16 type, u16 code, s32 value }
+          // Timestamps set to 0 — kernel's evdev_write() fills them from system clock.
+          const ev = (type: number, code: number, value: number): string => {
+            const ts = "00000000000000000000000000000000"; // 16 bytes zeros (tv_sec + tv_usec)
+            const t0 = (type & 0xff).toString(16).padStart(2, "0");
+            const t1 = ((type >> 8) & 0xff).toString(16).padStart(2, "0");
+            const c0 = (code & 0xff).toString(16).padStart(2, "0");
+            const c1 = ((code >> 8) & 0xff).toString(16).padStart(2, "0");
+            const uv = value < 0 ? value + 0x100000000 : value;
+            const v0 = (uv & 0xff).toString(16).padStart(2, "0");
+            const v1 = ((uv >> 8) & 0xff).toString(16).padStart(2, "0");
+            const v2 = ((uv >> 16) & 0xff).toString(16).padStart(2, "0");
+            const v3 = ((uv >> 24) & 0xff).toString(16).padStart(2, "0");
+            return ts + t0 + t1 + c0 + c1 + v0 + v1 + v2 + v3;
+          };
+
+          // Helper: write a complete frame (all events + SYN_REPORT) atomically
+          const writeFrame = (events: string): string =>
+            `echo '${events}' | xxd -r -p > '${node}'`;
+
+          const cmds: string[] = [];
+
+          // Frame 1: Initial touch down — both fingers + SYN_REPORT
+          let downFrame = "";
+          downFrame += ev(3, 47, 0);        // ABS_MT_SLOT 0
+          downFrame += ev(3, 57, 1000);     // ABS_MT_TRACKING_ID finger 1
+          downFrame += ev(3, 53, f1StartX); // ABS_MT_POSITION_X
+          downFrame += ev(3, 54, f1StartY); // ABS_MT_POSITION_Y
+          downFrame += ev(3, 48, 50);       // ABS_MT_TOUCH_MAJOR
+          downFrame += ev(3, 58, pressure); // ABS_MT_PRESSURE
+          downFrame += ev(3, 47, 1);        // ABS_MT_SLOT 1
+          downFrame += ev(3, 57, 1001);     // ABS_MT_TRACKING_ID finger 2
+          downFrame += ev(3, 53, f2StartX); // ABS_MT_POSITION_X
+          downFrame += ev(3, 54, f2StartY); // ABS_MT_POSITION_Y
+          downFrame += ev(3, 48, 50);       // ABS_MT_TOUCH_MAJOR
+          downFrame += ev(3, 58, pressure); // ABS_MT_PRESSURE
+          downFrame += ev(1, 330, 1);       // BTN_TOUCH down
+          downFrame += ev(0, 0, 0);         // SYN_REPORT
+          cmds.push(writeFrame(downFrame));
+
+          // Move frames — interpolate both fingers toward/away from center
+          for (let i = 1; i <= steps; i++) {
+            const t = i / steps;
+            const x1 = Math.round(f1StartX + (f1EndX - f1StartX) * t);
+            const y1 = Math.round(f1StartY + (f1EndY - f1StartY) * t);
+            const x2 = Math.round(f2StartX + (f2EndX - f2StartX) * t);
+            const y2 = Math.round(f2StartY + (f2EndY - f2StartY) * t);
+
+            let moveFrame = "";
+            moveFrame += ev(3, 47, 0);   // SLOT 0
+            moveFrame += ev(3, 53, x1);  // POSITION_X
+            moveFrame += ev(3, 54, y1);  // POSITION_Y
+            moveFrame += ev(3, 47, 1);   // SLOT 1
+            moveFrame += ev(3, 53, x2);  // POSITION_X
+            moveFrame += ev(3, 54, y2);  // POSITION_Y
+            moveFrame += ev(0, 0, 0);    // SYN_REPORT
+
+            cmds.push(`sleep ${sleepPerStep}`);
+            cmds.push(writeFrame(moveFrame));
+          }
+
+          // Final frame: release both fingers
+          let upFrame = "";
+          upFrame += ev(3, 47, 0);    // SLOT 0
+          upFrame += ev(3, 57, -1);   // TRACKING_ID -1 = finger up
+          upFrame += ev(3, 47, 1);    // SLOT 1
+          upFrame += ev(3, 57, -1);   // TRACKING_ID -1 = finger up
+          upFrame += ev(1, 330, 0);   // BTN_TOUCH up
+          upFrame += ev(0, 0, 0);     // SYN_REPORT
+          cmds.push(writeFrame(upFrame));
+
+          // Execute as a single batched shell command via root
+          const script = cmds.join("; ");
+          await ctx.bridge.rootShell(script, {
+            device: serial,
+            timeout: durationMs + 5000,
+            ignoreExitCode: true,
+          });
+
+          const gesture = endRadius < startRadius ? "pinch" : "spread";
+          return {
+            content: [{
+              type: "text",
+              text: `${gesture} (sendevent): center (${cx},${cy}), radius ${startRadius}→${endRadius}px, ${durationMs}ms, ${steps} steps, ${angle}° axis\nDevice: ${node} (${touchDev.maxX}×${touchDev.maxY})\nFinger 1: (${f1StartX},${f1StartY})→(${f1EndX},${f1EndY})\nFinger 2: (${f2StartX},${f2StartY})→(${f2EndX},${f2EndY})`,
+            }],
+          };
+        }
+
+        // ── swipe: parallel input swipe with backgrounding ──
+        // Two concurrent single-touch swipes that converge/diverge
+        const cmd = `input swipe ${f1StartX} ${f1StartY} ${f1EndX} ${f1EndY} ${durationMs} & ` +
+                    `input swipe ${f2StartX} ${f2StartY} ${f2EndX} ${f2EndY} ${durationMs}`;
+
+        await ctx.bridge.shell(cmd, {
+          device: serial,
+          timeout: durationMs + 5000,
+          ignoreExitCode: true,
+        });
+
+        const gesture = endRadius < startRadius ? "pinch" : "spread";
+        return {
+          content: [{
+            type: "text",
+            text: `${gesture} (swipe): center (${cx},${cy}), radius ${startRadius}→${endRadius}px, ${durationMs}ms, ${angle}° axis\nFinger 1: (${f1StartX},${f1StartY})→(${f1EndX},${f1EndY})\nFinger 2: (${f2StartX},${f2StartY})→(${f2EndX},${f2EndY})`,
+          }],
+        };
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
       }

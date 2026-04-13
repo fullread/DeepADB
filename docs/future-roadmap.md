@@ -453,12 +453,12 @@ Targeted analysis of error handling gaps, cleanup registration coverage, JSON.pa
 
 ## Future Ideas
 
-With v1.0.7 completing wireless firmware tools (WiFi/Bluetooth/NFC/GPS), AT cross-validation, comparative testing workflows, input gestures (drag/long press/double tap/text/URL/orientation/clipboard), UI automation helpers (tap-by-element/wait-element/wait-stable/scroll-until), efficiency features (compressed screenshots/batch actions), device awareness (screen size/device state snapshots/notification reading), QEMU guest ADB connectivity, multi-device integration, and 21 audit passes closing all 75 identified issues, the core roadmap is substantially complete at 174 tools across 43 modules. 208/213 tests passing in ADB mode (5 QEMU skipped). Every `z.number()` parameter has explicit `.min()/.max()` bounds. Every user-input-to-shell path has validation. Every LocalBridge subcommand has an explicit handler with behavioral parity. Every duplicated helper has been extracted to a shared module. All HTTP fetch paths use streaming body reads with size limits. All process cleanup flows through a single centralized registry. All environment variable port parsing validates range and NaN. All network transports support bearer token auth with timing-safe comparison. Remaining items:
+With v1.0.9 completing input completeness (fling gestures, permission management), UI efficiency (annotated screenshots, combined screen state, TSV/XML dump formats, shared `png-utils.ts` middleware), and screen control (lock/unlock with PIN entry) — building on v1.0.8's input gestures (drag/long press/double tap/text/URL/orientation/clipboard), UI automation helpers (tap-by-element/wait-element/wait-stable/scroll-until), efficiency features (compressed screenshots/batch actions), device awareness (screen size/device state snapshots/notification reading), crash analysis (ANR traces/tombstones/heap dumps), shared `ui-dump.ts` middleware extraction, wireless firmware tools (WiFi/Bluetooth/NFC/GPS), AT cross-validation, comparative testing workflows, QEMU guest ADB connectivity, multi-device integration, and 21 audit passes closing all 75 identified issues — the core roadmap is substantially complete at 180 tools across 43 modules. Every `z.number()` parameter has explicit `.min()/.max()` bounds. Every user-input-to-shell path has validation. Every LocalBridge subcommand has an explicit handler with behavioral parity. Every duplicated helper has been extracted to a shared module. All HTTP fetch paths use streaming body reads with size limits. All process cleanup flows through a single centralized registry. All environment variable port parsing validates range and NaN. All network transports support bearer token auth with timing-safe comparison. Remaining items:
 
 ### On-Device Validation ✓ COMPLETE (203/203)
 Termux v0.119.0-beta.3 + Node.js v25.8.2 + git installed on Pixel 6a via ADB. DeepADB deployed, `npm install` run, full test suite executed in `DA_LOCAL=true` mode.
 
-**Result progression:** 112 → 115 (Magisk su) → 135 (command elevation) → 151 (path elevation + pull fix) → 152 (regex fix) → 153 (ip/ifconfig elevation) → 154 (emulator graceful detection) → 155 (screenshot diff pixel-level fix) → 165 (QEMU/KVM test suite) → 175 (QEMU VM boot tests) → 203 (v1.0.3 boundary tests + test expansion).
+**Result progression:** 112 → 115 (Magisk su) → 135 (command elevation) → 151 (path elevation + pull fix) → 152 (regex fix) → 153 (ip/ifconfig elevation) → 154 (emulator graceful detection) → 155 (screenshot diff pixel-level fix) → 165 (QEMU/KVM test suite) → 175 (QEMU VM boot tests) → 203 (v1.0.3 boundary tests + test expansion). v1.0.9 ADB-mode test suite expanded to 235 tests (230 with DA_TEST_PIN). On-device validated: 257/257 with DA_TEST_PIN on Pixel 6a (Android 16, Termux + Magisk + QEMU 10.2.1).
 
 **LocalBridge privilege escalation** — the key enhancement enabling on-device parity:
 - Frozen `ELEVATED_COMMANDS` allowlist: 16 system commands auto-elevated via `su -c` when root available (`settings`, `dumpsys`, `am`, `input`, `screencap`, `screenrecord`, `uiautomator`, `app_process`, `getenforce`, `setenforce`, `cmd`, `pm`, `wm`, `svc`, `ip`, `ifconfig`)
@@ -527,6 +527,65 @@ Enhanced `LocalBridge` with transparent guest device routing in v1.0.6:
 **Remaining (future):**
 - ~~Comparative testing workflows — automated test suite execution against host and guest simultaneously~~ ✓ **COMPLETE in v1.0.7** — `adb_multi_test` with predefined profiles (firmware/security/network/identity/full) and custom command support, parallel execution across all devices including QEMU guests
 
+### UI Presentation & Efficiency ✓ COMPLETE in v1.0.9
+
+~~**`adb_ui_dump` format parameter**~~ ✓ **COMPLETE** — added `format` param: `text` (default), `tsv` (tab-separated compact), `xml` (raw uiautomator). TSV format: `index\ttext\tresource_id\tcontent_desc\tcenter_x\tcenter_y\tclickable\tscrollable`. Tabs in text/content_desc fields escaped to spaces. (`ui.ts`)
+
+~~**`adb_screencap_annotated`**~~ ✓ **COMPLETE** — PNG decode → draw → encode pipeline in pure TypeScript, no external deps. 5×7 pixel font for digit labels. 8-color cycling palette with ITU-R BT.601 perceived-brightness auto-contrast for label foreground. `clickableOnly` param (default true). Returns annotated PNG path + text legend. (`ui.ts`, `png-utils.ts`)
+
+~~**`adb_screen_state`**~~ ✓ **COMPLETE** — parallel `Promise.allSettled` for activity, dimensions, density, orientation, battery; sequential UI dump after. TSV element table matches `adb_ui_dump` format='tsv'. (`ui.ts`)
+
+**New shared module:** `src/middleware/png-utils.ts` — `decodePngPixels`, `encodePng`, `drawRect`, `drawLabel`, `ELEMENT_COLORS`, CRC32. `screenshot-diff.ts` refactored to import decoder from here (removed private copy + `inflateSync` import).
+
+All completed in v1.0.9.
+
+---
+
+### Input Completeness
+
+~~**`adb_input_fling`**~~ ✓ **COMPLETE in v1.0.9** — standalone tool in `input-gestures.ts` + `fling` action type in `adb_batch_actions`. Parameters: `x1`, `y1`, `x2`, `y2`, `durationMs` (`.min(20).max(200)`, default 50ms). Numeric-only validation, goes through existing security middleware.
+
+~~**`adb_screen_power`**~~ ✓ **COMPLETE in v1.0.9** — implemented as an extension to the existing `adb_screen` tool in `control.ts`. Added `lock` action (verifies keyguard via `dumpsys window` in all cases — even when screen is already off). Improved `unlock` from hardcoded coordinate swipe to `wm dismiss-keyguard` + optional `pin` parameter: when `pin` is supplied and the keyguard survives dismiss, performs the full credential entry sequence (derives proportional coordinates from `wm size`, swipes up, types PIN, confirms with ENTER, re-checks keyguard sleep token). All lock/unlock state decisions use `dumpsys window | grep keyguard` — `mWakefulness` and `mResumedActivity` are unreliable since the keyguard is a window overlay above the activity stack. `adb_screen` now supports: `wake`, `sleep`, `toggle`, `lock`, `unlock` (with optional `pin`).
+
+~~**`adb_input_pinch`**~~ ✓ **COMPLETE in v1.0.9** — multi-touch pinch/spread gesture with layered injection. Primary method: parallel `input swipe` with shell backgrounding (universal). Advanced method: atomic binary writes of raw MT Type B protocol events to the touchscreen device node via `xxd -r -p` — each frame written as a single binary blob for reliable `MultiTouchInputMapper` recognition (individual `sendevent` calls are too slow). Auto-detection via `getevent -p` discovers touchscreen device, coordinate ranges, slot count — cached per session. `method` parameter: `auto` (sendevent when root), `swipe`, `sendevent`. Also available as `pinch` action type in `adb_batch_actions`. Hardware-verified on Pixel 6a FTS touchscreen (10-slot MT Type B, 1080×2400) — both pinch and spread produce visible zoom in Google Maps.
+
+---
+
+### System Control
+
+~~**`adb_permission_grant`**~~ — already existed prior to v1.0.9 in `packages.ts`.
+
+~~**`adb_revoke_permission`**~~ ✓ **COMPLETE in v1.0.9** — `pm revoke` in `packages.ts`, `validateShellArgs` on both package name and permission.
+
+~~**`adb_list_permissions`**~~ ✓ **COMPLETE in v1.0.9** — parses `dumpsys package` install and runtime permission blocks in `packages.ts`. Filterable by `all` / `granted` / `denied`. Regex anchored to `\s{6,}` to avoid false matches on similar-looking dump output.
+
+---
+
+### Hardware Sensor Access
+
+**`adb_sensor_read`** — read current values from device hardware sensors. Approach: `adb shell dumpsys sensorservice` parses the sensor registry and last-known values for all registered sensors without root. For calibrated live readings, `/sys/bus/iio/devices/iio:device*/in_*_raw` nodes are readable via root shell on most devices. Returns: accelerometer (m/s²), gyroscope (rad/s), magnetometer (μT), barometer (hPa), ambient light (lux), proximity (cm or boolean), step counter. Sensor availability is device-dependent — tool reports which sensors are present before attempting reads.
+
+This is valuable for research use cases where physical context matters: detecting device motion during a capture session, correlating RF measurements with orientation, or verifying sensor behavior under test.
+
+**Estimated scope:** 1 new tool in a new `sensors.ts` module. Parsing `dumpsys sensorservice` output, with `/sys/bus/iio/` fallback for raw values. Medium complexity — output format varies across Android versions and OEMs.
+
+---
+
+### Android Companion APK
+
+Some Android capabilities are not accessible via ADB shell regardless of root level. Camera capture is the primary example — Camera2 API requires a running Android process with the correct lifecycle context. A thin companion APK addresses this category without touching the main TypeScript codebase.
+
+**Architecture:** Small Kotlin app (Ktor HTTP server, no MCP protocol — plain REST) running as a foreground service on the device. DeepADB's TypeScript server calls it over `localhost:<port>` the same way it calls any other local resource. Three new TypeScript tool modules act as thin HTTP wrappers. The companion APK handles only what ADB cannot: camera, richer sensor event subscriptions, and Notification Listener Service interaction (dismiss/act on notifications beyond the current read-only `adb_notifications`).
+
+**Scope breakdown:**
+- Companion APK: Camera2 capture (enumerate cameras, JPEG output), SensorManager event subscriptions (all sensor types, configurable polling), NotificationListenerService (read + dismiss + act on action buttons), foreground service with auto-start on boot
+- TypeScript tools: `adb_camera_capture`, `adb_sensor_subscribe`, `adb_notification_act` — thin HTTP wrappers in a new `companion.ts` module
+- Companion APK is optional — all existing tools function identically without it; its absence causes only the 3 new tools to return a "companion not running" error
+
+**Prerequisites:** Companion APK architecture decision should wait until the core near-term items above (UI efficiency, input completeness, sensor read via dumpsys/sysfs) are shipped and validated. The sysfs sensor approach covers most sensor read use cases without the APK; the APK primarily adds camera and notification interaction.
+
+---
+
 ### MCP SDK v2 Migration
 The MCP TypeScript SDK v2 stable release has not yet shipped as of April 2026. v1.x (currently 1.29.0) remains the recommended version for production. v1.x will receive bug fixes and security updates for at least 6 months after v2 ships.
 
@@ -541,7 +600,7 @@ The MCP TypeScript SDK v2 stable release has not yet shipped as of April 2026. v
 - `server.ts`, `index.ts`: update imports from `@modelcontextprotocol/sdk` to `@modelcontextprotocol/server`
 - `http-transport.ts`: replace `SSEServerTransport` with Streamable HTTP transport (or use `@modelcontextprotocol/node` middleware)
 - `ws-transport.ts`: evaluate whether Streamable HTTP subsumes the WebSocket transport use case
-- All 41 tool modules: no changes expected (tool registration API is unchanged)
+- All 43 tool modules: no changes expected (tool registration API is unchanged)
 - `package.json`: update dependency, potentially add middleware packages
 
 **Migration should be planned once v2 reaches stable release.** The current v1.29.x codebase is fully current within the v1 line.
@@ -561,7 +620,7 @@ Before any major feature implementation (MCP SDK v2 migration, new tool modules)
 - Code quality — duplicated logic extracted to shared modules, consistent naming, no dead code
 - Documentation consistency — README, roadmap, and inline JSDoc all reflect actual behavior
 
-**Approach:** Distinct analytical lens per pass (same methodology as the 21-pass audit). Each pass reads every modified file end-to-end with a specific focus. Findings fixed and tested before the next pass. Zero-regression discipline: 183/183 ADB mode + 203/203 on-device after every fix.
+**Approach:** Distinct analytical lens per pass (same methodology as the 21-pass audit). Each pass reads every modified file end-to-end with a specific focus. Findings fixed and tested before the next pass. Zero-regression discipline: 235/235 ADB-mode tests (230 with DA_TEST_PIN), 257/257 on-device tests (with DA_TEST_PIN) after every fix.
 
 ### Screenshot Diff Flaky Test ✓ RESOLVED
 The `Screenshot diff (immediate)` test was failing intermittently in both ADB mode and on-device mode.

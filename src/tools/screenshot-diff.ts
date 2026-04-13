@@ -13,11 +13,11 @@ import { z } from "zod";
 import { join } from "path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, unlinkSync } from "fs";
 import { createHash } from "crypto";
-import { inflateSync } from "zlib";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { isOnDevice } from "../config/config.js";
 import { shellEscape } from "../middleware/sanitize.js";
+import { decodePngPixels } from "../middleware/png-utils.js";
 
 interface ScreenshotMeta {
   name: string;
@@ -69,94 +69,6 @@ async function captureScreenshot(
   } finally {
     // Always clean up the device-side screenshot, even if pull/hash throws
     await ctx.bridge.shell(`rm '${shellEscape(remotePath)}'`, { device: serial, ignoreExitCode: true }).catch(() => {});
-  }
-}
-
-/**
- * Decode a PNG file into raw RGBA pixel data.
- * Parses IHDR for dimensions, concatenates IDAT chunks, inflates, and unfilters.
- * Only handles RGBA (colorType 6) and RGB (colorType 2) — the formats produced
- * by Android's screencap. Returns null if decoding fails.
- */
-function decodePngPixels(pngPath: string): { width: number; height: number; bytesPerPixel: number; pixels: Buffer } | null {
-  try {
-    const buf = readFileSync(pngPath);
-
-    // Verify PNG signature
-    if (buf.length < 8 || buf[0] !== 0x89 || buf[1] !== 0x50) return null;
-
-    let offset = 8;
-    let width = 0, height = 0, colorType = 0;
-    const idatChunks: Buffer[] = [];
-
-    while (offset + 12 <= buf.length) {
-      const length = buf.readUInt32BE(offset);
-      if (offset + 12 + length > buf.length) break;
-
-      const type = buf.slice(offset + 4, offset + 8).toString("ascii");
-      const data = buf.slice(offset + 8, offset + 8 + length);
-
-      if (type === "IHDR" && length >= 13) {
-        width = data.readUInt32BE(0);
-        height = data.readUInt32BE(4);
-        colorType = data[9];
-      } else if (type === "IDAT") {
-        idatChunks.push(data);
-      } else if (type === "IEND") {
-        break;
-      }
-
-      offset += 12 + length;
-    }
-
-    if (width === 0 || height === 0 || idatChunks.length === 0) return null;
-
-    const bytesPerPixel = colorType === 6 ? 4 : colorType === 2 ? 3 : 0;
-    if (bytesPerPixel === 0) return null; // Unsupported color type
-
-    const compressed = Buffer.concat(idatChunks);
-    const raw = inflateSync(compressed);
-
-    const rowBytes = 1 + width * bytesPerPixel;
-    if (raw.length < rowBytes * height) return null;
-
-    // Unfilter — reconstruct actual pixel values from filtered rows
-    const pixels = Buffer.alloc(width * height * bytesPerPixel);
-    const prevRow = Buffer.alloc(width * bytesPerPixel);
-
-    for (let y = 0; y < height; y++) {
-      const rowStart = y * rowBytes;
-      const filterType = raw[rowStart];
-      const pixelRowStart = y * width * bytesPerPixel;
-
-      for (let x = 0; x < width * bytesPerPixel; x++) {
-        let val = raw[rowStart + 1 + x];
-        const a = x >= bytesPerPixel ? pixels[pixelRowStart + x - bytesPerPixel] : 0;
-        const b = prevRow[x];
-        const c = x >= bytesPerPixel ? prevRow[x - bytesPerPixel] : 0;
-
-        switch (filterType) {
-          case 0: break;
-          case 1: val = (val + a) & 0xFF; break;
-          case 2: val = (val + b) & 0xFF; break;
-          case 3: val = (val + Math.floor((a + b) / 2)) & 0xFF; break;
-          case 4: {
-            const p = a + b - c;
-            const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
-            val = (val + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c)) & 0xFF;
-            break;
-          }
-          default: break; // Unknown filter — treat as None
-        }
-        pixels[pixelRowStart + x] = val;
-      }
-
-      pixels.copy(prevRow, 0, pixelRowStart, pixelRowStart + width * bytesPerPixel);
-    }
-
-    return { width, height, bytesPerPixel, pixels };
-  } catch {
-    return null; // Any decoding failure returns null — caller falls back to byte comparison
   }
 }
 

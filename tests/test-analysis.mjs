@@ -127,12 +127,28 @@ h.section("AT Modem Detection");
 await h.testContains("AT detect (Shannon)", "adb_at_detect", {}, "shannon");
 await h.testContains("AT cross-validate", "adb_at_cross_validate", { timeout: 8000 }, "Cross-Validation", 60000);
 
-// ── Grant Permission ───────────────────────────────────────
+// ── Permission Management ─────────────────────────────────
 
-h.section("Permission Grant");
+h.section("Permission Management");
 
-// Grant a non-dangerous permission to Magisk (safe, idempotent)
+// Grant a runtime permission to Magisk (safe, idempotent)
 await h.test("Grant permission (Magisk)", "adb_grant_permission",
+  { packageName: "com.topjohnwu.magisk", permission: "android.permission.POST_NOTIFICATIONS" });
+
+// List permissions — verify output contains the summary header
+await h.testContains("List permissions (Magisk)", "adb_list_permissions",
+  { packageName: "com.topjohnwu.magisk", filter: "all" }, "permissions granted");
+
+// List granted only — verify the filter param works
+await h.testContains("List permissions → granted filter", "adb_list_permissions",
+  { packageName: "com.topjohnwu.magisk", filter: "granted" }, "permissions granted");
+
+// Revoke the permission we just granted (idempotent — Magisk works without it)
+await h.test("Revoke permission (Magisk)", "adb_revoke_permission",
+  { packageName: "com.topjohnwu.magisk", permission: "android.permission.POST_NOTIFICATIONS" });
+
+// Re-grant to leave Magisk in original state
+await h.test("Re-grant permission (cleanup)", "adb_grant_permission",
   { packageName: "com.topjohnwu.magisk", permission: "android.permission.POST_NOTIFICATIONS" });
 
 const exitCode = h.finish();

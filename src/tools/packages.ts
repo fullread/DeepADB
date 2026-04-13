@@ -158,6 +158,97 @@ export function registerPackageTools(ctx: ToolContext): void {
   );
 
   ctx.server.tool(
+    "adb_revoke_permission",
+    "Revoke a runtime permission from a package. Useful for resetting permission state to test first-run flows or denial handling.",
+    {
+      packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
+      permission: z.string().describe("Full permission string (e.g., 'android.permission.CAMERA')"),
+      device: z.string().optional().describe("Device serial"),
+    },
+    async ({ packageName, permission, device }) => {
+      try {
+        const argErr = validateShellArgs([[packageName, "packageName"], [permission, "permission"]]);
+        if (argErr) return { content: [{ type: "text", text: argErr }], isError: true };
+        const resolved = await ctx.deviceManager.resolveDevice(device);
+        const result = await ctx.bridge.shell(
+          `pm revoke ${packageName} ${permission}`,
+          { device: resolved.serial, ignoreExitCode: true }
+        );
+        const output = result.stdout.trim() || "Permission revoked.";
+        return { content: [{ type: "text", text: output }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
+      }
+    }
+  );
+
+  ctx.server.tool(
+    "adb_list_permissions",
+    "List permissions declared and granted for a package. Parses the package dump to show install-time and runtime permissions with their current grant state. Useful for auditing permission state before and after grant/revoke operations.",
+    {
+      packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
+      filter: z.enum(["all", "granted", "denied"]).optional().default("all")
+        .describe("Show all permissions, only granted, or only denied (default: all)"),
+      device: z.string().optional().describe("Device serial"),
+    },
+    async ({ packageName, filter, device }) => {
+      try {
+        const pkgErr = validateShellArg(packageName, "packageName");
+        if (pkgErr) return { content: [{ type: "text", text: pkgErr }], isError: true };
+        const resolved = await ctx.deviceManager.resolveDevice(device);
+        const result = await ctx.bridge.shell(
+          `dumpsys package ${packageName}`,
+          { device: resolved.serial, timeout: 15000 }
+        );
+        const dump = result.stdout;
+
+        const permissions: { name: string; granted: boolean; type: string }[] = [];
+
+        // Parse install permissions block
+        const installIdx = dump.indexOf("install permissions:");
+        const runtimeIdx = dump.indexOf("runtime permissions:");
+
+        if (installIdx !== -1) {
+          const endIdx = runtimeIdx !== -1 && runtimeIdx > installIdx ? runtimeIdx : installIdx + 3000;
+          const block = dump.substring(installIdx, endIdx);
+          for (const line of block.split("\n").slice(1)) {
+            const m = line.match(/^\s{6,}([a-zA-Z][a-zA-Z0-9._]+):\s+granted=(\w+)/);
+            if (m) permissions.push({ name: m[1], granted: m[2] === "true", type: "install" });
+          }
+        }
+
+        // Parse runtime permissions block
+        if (runtimeIdx !== -1) {
+          const endIdx = dump.indexOf("\n\n", runtimeIdx);
+          const block = dump.substring(runtimeIdx, endIdx > runtimeIdx ? endIdx : runtimeIdx + 4000);
+          for (const line of block.split("\n").slice(1)) {
+            const m = line.match(/^\s{6,}([a-zA-Z][a-zA-Z0-9._]+):\s+granted=(\w+)/);
+            if (m) permissions.push({ name: m[1], granted: m[2] === "true", type: "runtime" });
+          }
+        }
+
+        if (permissions.length === 0) {
+          return { content: [{ type: "text", text: `No permission entries found for ${packageName}. Package may not be installed.` }] };
+        }
+
+        const filtered = filter === "granted"
+          ? permissions.filter((p) => p.granted)
+          : filter === "denied"
+          ? permissions.filter((p) => !p.granted)
+          : permissions;
+
+        const grantedCount = permissions.filter((p) => p.granted).length;
+        const header = `${packageName}: ${grantedCount}/${permissions.length} permissions granted`;
+        const lines = filtered.map((p) => `  ${p.granted ? "✓" : "✗"} [${p.type}] ${p.name}`);
+
+        return { content: [{ type: "text", text: `${header}\n${lines.join("\n")}` }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
+      }
+    }
+  );
+
+  ctx.server.tool(
     "adb_force_stop",
     "Force-stop an app immediately. The most common debugging action.",
     {

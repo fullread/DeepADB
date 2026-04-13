@@ -9,7 +9,7 @@
 import { z } from "zod";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArg, validateShellArgs } from "../middleware/sanitize.js";
+import { shellEscape, validateShellArg, validateShellArgs } from "../middleware/sanitize.js";
 
 export function registerControlTools(ctx: ToolContext): void {
 
@@ -110,15 +110,26 @@ export function registerControlTools(ctx: ToolContext): void {
 
   ctx.server.tool(
     "adb_screen",
-    "Control screen state: wake, sleep, toggle, or unlock (swipe up)",
+    "Control screen state: wake, sleep, toggle, lock, or unlock. Lock and unlock verify actual keyguard state via dumpsys window. Unlock uses wm dismiss-keyguard (works for swipe keyguards); supply 'pin' to perform the full PIN entry sequence for PIN-protected devices: wakes screen, dismisses keyguard, swipes up to reveal keypad, types PIN, confirms with ENTER, and verifies the keyguard sleep token was released.",
     {
-      action: z.enum(["wake", "sleep", "toggle", "unlock"]).describe("Screen action"),
+      action: z.enum(["wake", "sleep", "toggle", "lock", "unlock"]).describe("Screen action"),
+      pin: z.string().trim().regex(/^[a-zA-Z0-9]+$/, "PIN must be alphanumeric only").optional().describe("PIN/password to enter when unlock encounters an active keyguard (digits only for PIN, alphanumeric for password). Only used with action='unlock'."),
       device: z.string().optional().describe("Device serial"),
     },
-    async ({ action, device }) => {
+    async ({ action, pin, device }) => {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
+
+        /** True if the keyguard security challenge is currently active (window sleep token present). */
+        const isKeyguardActive = async (): Promise<boolean> => {
+          const r = await ctx.bridge.shell(
+            "dumpsys window | grep -m1 keyguard",
+            { device: serial, timeout: 5000, ignoreExitCode: true }
+          );
+          return r.stdout.includes("keyguard");
+        };
+
         switch (action) {
           case "wake":
             await ctx.bridge.shell("input keyevent KEYCODE_WAKEUP", { device: serial });
@@ -129,11 +140,66 @@ export function registerControlTools(ctx: ToolContext): void {
           case "toggle":
             await ctx.bridge.shell("input keyevent KEYCODE_POWER", { device: serial });
             break;
-          case "unlock":
+          case "lock": {
+            const pwState = await ctx.bridge.shell(
+              "dumpsys power | grep -m1 mWakefulness",
+              { device: serial, timeout: 5000, ignoreExitCode: true }
+            );
+            if (!pwState.stdout.includes("Awake")) {
+              // Screen already off — check keyguard so response is always informative
+              const alreadyLocked = await isKeyguardActive();
+              return { content: [{ type: "text", text: alreadyLocked ? "Screen: already locked (keyguard active)" : "Screen: already off" }] };
+            }
+            await ctx.bridge.shell("input keyevent KEYCODE_SLEEP", { device: serial });
+            await new Promise((r) => setTimeout(r, 1500)); // keyguard sleep token takes ~1s to appear in dumpsys window
+            const locked = await isKeyguardActive();
+            return { content: [{ type: "text", text: locked ? "Screen: locked (keyguard active)" : "Screen: sleep sent" }] };
+          }
+          case "unlock": {
             await ctx.bridge.shell("input keyevent KEYCODE_WAKEUP", { device: serial });
             await new Promise((r) => setTimeout(r, 300));
-            await ctx.bridge.shell("input swipe 540 1800 540 400 300", { device: serial, ignoreExitCode: true });
-            break;
+            await ctx.bridge.shell("wm dismiss-keyguard", { device: serial, ignoreExitCode: true });
+            await new Promise((r) => setTimeout(r, 400));
+
+            const stillLocked = await isKeyguardActive();
+            if (!stillLocked) {
+              return { content: [{ type: "text", text: "Screen: unlocked (keyguard dismissed)" }] };
+            }
+
+            // Keyguard is still active (PIN/pattern). Attempt PIN entry if supplied.
+            if (!pin) {
+              return { content: [{ type: "text", text: "Screen: awake — keyguard still active (PIN/pattern/biometric required)" }] };
+            }
+
+            // Derive proportional swipe coordinates from actual screen size
+            const sizeResult = await ctx.bridge.shell("wm size", { device: serial, timeout: 5000, ignoreExitCode: true });
+            const sizeMatch = sizeResult.stdout.match(/(\d+)x(\d+)/);
+            const screenW = sizeMatch ? parseInt(sizeMatch[1]) : 1080;
+            const screenH = sizeMatch ? parseInt(sizeMatch[2]) : 2400;
+            const cx   = Math.round(screenW / 2);
+            const yBot = Math.round(screenH * 0.80);
+            const yTop = Math.round(screenH * 0.20);
+
+            // Swipe up to reveal PIN keypad
+            await ctx.bridge.shell(`input swipe ${cx} ${yBot} ${cx} ${yTop} 300`, { device: serial });
+            await new Promise((r) => setTimeout(r, 1000));
+            // Type PIN and confirm
+            await ctx.bridge.shell(`input text '${shellEscape(pin)}'`, { device: serial });
+            await new Promise((r) => setTimeout(r, 300));
+            await ctx.bridge.shell("input keyevent KEYCODE_ENTER", { device: serial });
+            await new Promise((r) => setTimeout(r, 800));
+
+            // Verify keyguard was actually dismissed
+            const unlockedAfterPin = !(await isKeyguardActive());
+            return {
+              content: [{
+                type: "text",
+                text: unlockedAfterPin
+                  ? "Screen: unlocked (PIN accepted, keyguard dismissed)"
+                  : "Screen: PIN entered — keyguard still active (wrong PIN or biometric required)",
+              }],
+            };
+          }
         }
         return { content: [{ type: "text", text: `Screen: ${action} sent` }] };
       } catch (error) {

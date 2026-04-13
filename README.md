@@ -1,8 +1,8 @@
 # DeepADB
 
-MCP (Model Context Protocol) server providing full Android Debug Bridge (ADB) integration with Claude. Enables Claude to directly interact with connected Android devices — inspecting state, running commands, managing apps, capturing logs, controlling device settings, analyzing UI hierarchies, recording screens, managing emulators, running structured test sessions, orchestrating multi-device operations, capturing network traffic, running CI pipelines, auditing accessibility, detecting performance regressions, executing cloud device farm tests, debugging over WiFi, building projects, and managing community plugins.
+MCP (Model Context Protocol) server providing full Android Debug Bridge (ADB) integration for AI agents. Enables MCP clients to directly interact with connected Android devices — inspecting state, running commands, managing apps, capturing logs, controlling device settings, analyzing UI hierarchies, recording screens, managing emulators, running structured test sessions, orchestrating multi-device operations, capturing network traffic, running CI pipelines, auditing accessibility, detecting performance regressions, executing cloud device farm tests, debugging over WiFi, building projects, and managing community plugins.
 
-**174 tools, 4 resources, and 4 prompts across 43 modules** — the most comprehensive ADB MCP server available, with triple transport (stdio + HTTP/SSE + WebSocket), optional GraphQL API, defense-in-depth security, modem firmware analysis, workflow marketplace, AT command interface with multi-chipset support, RIL message interception, device profiling, baseband/modem integration, automated test generation, OTA update monitoring, SELinux auditing, thermal/power profiling, network device discovery, visual regression detection, workflow orchestration, accessibility auditing, and contextual truncation.
+**180 tools, 4 resources, and 4 prompts across 43 modules** — the most comprehensive ADB MCP server available, with triple transport (stdio + HTTP/SSE + WebSocket), optional GraphQL API, defense-in-depth security, modem firmware analysis, workflow marketplace, AT command interface with multi-chipset support, RIL message interception, device profiling, baseband/modem integration, automated test generation, OTA update monitoring, SELinux auditing, thermal/power profiling, network device discovery, visual regression detection, workflow orchestration, accessibility auditing, and contextual truncation.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ MCP (Model Context Protocol) server providing full Android Debug Bridge (ADB) in
 │               DeepADB Server                     │
 │                                                  │
 │  ┌─────────────────────────────────────────────┐ │
-│  │           Tool Modules (41)                 │ │
+│  │           Tool Modules (43)                 │ │
 │  │  device │ shell │ packages │ files │ logs   │ │
 │  │  diagnostics │ ui │ build │ health          │ │
 │  │  wireless │ control │ logcat-watch          │ │
@@ -78,15 +78,15 @@ DeepADB operates in two modes, auto-detected at startup:
 ```
 AI Agent (PC) ←→ MCP ←→ DeepADB (PC) ←→ ADB (USB) ←→ Android Device
 ```
-Standard mode: DeepADB runs on a PC/Mac/Linux host and communicates with the device over USB via ADB. All 174 tools work through the ADB bridge with automatic retry on transient failures.
+Standard mode: DeepADB runs on a PC/Mac/Linux host and communicates with the device over USB via ADB. All 180 tools work through the ADB bridge with automatic retry on transient failures.
 
 ### On-Device Mode — direct local execution
 ```
 AI Agent (Termux) ←→ MCP (stdio/HTTP) ←→ DeepADB (Termux) ←→ sh/su (local)
 ```
-When DeepADB runs directly on the Android device (e.g., inside Termux), it auto-detects the environment and switches to `LocalBridge`. Commands execute directly via `sh`/`su` — no ADB server, no USB, no serialization overhead. All 174 tools work identically, with significantly lower latency.
+When DeepADB runs directly on the Android device (e.g., inside Termux), it auto-detects the environment and switches to `LocalBridge`. Commands execute directly via `sh`/`su` — no ADB server, no USB, no serialization overhead. All 180 tools work identically, with significantly lower latency.
 
-**Validated on hardware:** 235/235 tests pass on-device (Pixel 6a, Android 16, Termux + Magisk + QEMU 10.2.1). Includes 27 QEMU/KVM virtualization tests covering setup detection, disk image lifecycle, resource budget reporting, Alpine Linux VM boot with KVM acceleration, big.LITTLE CPU topology detection, guest ADB connectivity error handling, and clean VM shutdown. QEMU tests auto-skip in ADB mode (207 passed, 5 skipped).
+**Validated on hardware:** 257/257 tests pass on Pixel 6a (Android 16, Termux + Magisk + QEMU 10.2.1) in on-device mode with DA_TEST_PIN. Includes QEMU/KVM virtualization tests covering setup detection, disk image lifecycle, resource budget reporting, Alpine Linux VM boot with KVM acceleration, big.LITTLE CPU topology detection, guest ADB connectivity error handling, and clean VM shutdown. In ADB mode: 235 total (230 passed with DA_TEST_PIN, 5 QEMU tests auto-skip).
 
 **Privilege escalation:** In ADB mode, all shell commands run as uid=2000 (the `shell` user) which has system-level permissions. In Termux, commands run as a regular app user. LocalBridge automatically elevates privileged commands through `su` when root (Magisk) is available:
 - **Command allowlist:** 16 system commands (`settings`, `dumpsys`, `am`, `input`, `screencap`, `screenrecord`, `uiautomator`, `app_process`, `getenforce`, `setenforce`, `cmd`, `pm`, `wm`, `svc`, `ip`, `ifconfig`) are routed through `su -c` to match ADB-mode behavior.
@@ -136,7 +136,7 @@ DA_GRAPHQL_PORT=4000 npm start
 }
 ```
 
-## Available Tools (174)
+## Available Tools (180)
 
 ### Health (1 tool)
 - `adb_health_check` — Comprehensive toolchain validation: ADB binary, server, device connection, authorization, root access, and storage writability
@@ -150,13 +150,15 @@ DA_GRAPHQL_PORT=4000 npm start
 - `adb_shell` — Execute arbitrary shell commands with configurable timeout (security-checked)
 - `adb_root_shell` — Execute commands as root via su (requires rooted device, security-checked)
 
-### Packages (10 tools)
+### Packages (12 tools)
 - `adb_install` — Install APK with replace/downgrade options
 - `adb_uninstall` — Remove package with optional data retention
 - `adb_list_packages` — List packages filtered by name or type (all/system/third-party)
 - `adb_package_info` — Detailed package info (version, permissions, paths)
 - `adb_clear_data` — Clear all app data and cache
-- `adb_grant_permission` — Grant runtime permissions
+- `adb_grant_permission` — Grant a runtime permission to a package
+- `adb_revoke_permission` — Revoke a runtime permission from a package (reset permission state for testing denial flows)
+- `adb_list_permissions` — List all declared and granted permissions for a package, filterable by granted/denied
 - `adb_force_stop` — Force-stop an app immediately
 - `adb_start_app` — Launch an app by package name (resolves launcher activity)
 - `adb_restart_app` — Force-stop then re-launch in one call (configurable delay)
@@ -190,13 +192,15 @@ DA_GRAPHQL_PORT=4000 npm start
 - `adb_crash_logs` — ANR traces and tombstone crash dumps from /data/anr/ and /data/tombstones/
 - `adb_heap_dump` — Capture heap dump (.hprof) from a running process for memory analysis
 
-### UI (8 tools)
+### UI (10 tools)
 - `adb_screencap` — Take screenshot with filename sanitization, saves locally
+- `adb_screencap_annotated` — Screenshot with UI element bounding boxes and numbered labels composited onto the PNG. Returns annotated image path plus a text legend. Ideal for LLM workflows that reference elements by number
 - `adb_current_activity` — Get focused activity and top window stack
 - `adb_input` — Send tap, swipe, text, or keyevent input
 - `adb_start_activity` — Launch activities by intent or component name
-- `adb_ui_dump` — Dump full UI hierarchy with parsed element data, coordinates, and interaction flags
+- `adb_ui_dump` — Dump full UI hierarchy. Supports three output formats: `text` (default, human-readable), `tsv` (compact tab-separated for token-efficient automation loops), `xml` (raw uiautomator XML)
 - `adb_ui_find` — Search UI hierarchy by text, resource-id, or content-description (returns tap coordinates)
+- `adb_screen_state` — Combined screen state in one call: foreground activity, screen dimensions and density, orientation, battery level, and a TSV list of interactive elements. Replaces 3–4 separate tool calls
 - `adb_screenrecord_start` — Start recording the device screen (1-180s, stored on device)
 - `adb_screenrecord_stop` — Stop recording and pull the mp4 video file locally
 
@@ -206,7 +210,7 @@ DA_GRAPHQL_PORT=4000 npm start
 - `adb_wifi` — Enable or disable WiFi
 - `adb_mobile_data` — Enable or disable mobile data
 - `adb_location` — Set location mode (off/sensors/battery/high)
-- `adb_screen` — Wake, sleep, toggle, or unlock (swipe) the screen
+- `adb_screen` — Wake, sleep, toggle, lock, or unlock the screen. Lock verifies keyguard state via `dumpsys window`. Unlock uses `wm dismiss-keyguard` (works for swipe keyguards); supply `pin` to perform the full PIN entry sequence: wakes screen, swipes up to reveal keypad, types PIN, confirms, and verifies the keyguard sleep token was released
 - `adb_settings_get` — Read any Android setting from system/secure/global namespace
 - `adb_settings_put` — Write any Android setting with read-back verification
 - `adb_reboot` — Reboot device (normal, recovery, or bootloader mode)
@@ -248,20 +252,22 @@ DA_GRAPHQL_PORT=4000 npm start
 - `adb_multi_compare` — Run a command on all devices and highlight output differences
 - `adb_multi_test` — Comparative test workflow: run predefined diagnostic profiles (firmware/security/network/identity/full) or custom command lists across all devices including QEMU guests, compare per-check, report matches and differences
 
-### Input Gestures & UI Automation (13 tools)
+### Input Gestures & UI Automation (15 tools)
 - `adb_input_drag` — Drag from point A to point B (uses `draganddrop` with swipe fallback for older Android)
+- `adb_input_fling` — High-velocity fling gesture for momentum-scrolling through lists and paged views (configurable duration 20-200ms)
 - `adb_input_long_press` — Long press at coordinates with configurable hold duration
 - `adb_input_double_tap` — Double tap with configurable interval between taps
 - `adb_input_text` — Dedicated text input with space/special character handling
 - `adb_open_url` — Open a URL on the device via VIEW intent
 - `adb_orientation` — Get or set screen orientation (auto/portrait/landscape/reverse)
 - `adb_clipboard` — Read or write device clipboard
+- `adb_input_pinch` — Multi-touch pinch (zoom out) or spread (zoom in) gesture. Two fingers move symmetrically around a center point. Layered injection: parallel `input swipe` (universal, no root) or raw `sendevent` MT Type B protocol (true multi-touch, root required). Auto-detects touchscreen device and capabilities via `getevent -p`. Configurable center, radius, duration, angle, and interpolation steps
 - `adb_tap_element` — Find element by text/resource-id/content-description and tap its center
 - `adb_wait_element` — Poll UI hierarchy until an element appears or disappears (configurable timeout/poll interval)
 - `adb_wait_stable` — Poll until consecutive UI dumps match (screen stabilization after transitions)
 - `adb_scroll_until` — Scroll repeatedly until a target element is found, with optional auto-tap
 - `adb_screenshot_compressed` — Capture screenshot with size/quality metadata for token-efficient workflows
-- `adb_batch_actions` — Execute multiple input actions (tap/swipe/long_press/double_tap/keyevent/text/drag/back/home/sleep) in a single tool call with security validation
+- `adb_batch_actions` — Execute multiple input actions (tap/swipe/fling/long_press/double_tap/keyevent/text/drag/pinch/back/home/sleep) in a single tool call with security validation
 
 ### Device Awareness (3 tools)
 - `adb_screen_size` — Screen resolution, display density (DPI), aspect ratio, and DP width in one call
@@ -437,7 +443,7 @@ Full view tree capture via `uiautomator dump` with parsed XML extraction. Return
 Multi-layered security activated via `DA_SECURITY=true`. Provides command blocklist/allowlist filtering, rate limiting (commands per minute), and audit logging with automatic credential redaction. Security checks are integrated into `adb_shell`, `adb_root_shell`, `adb_multi_shell`, `adb_multi_compare`, `adb_input`, `adb_batch_actions`, and `adb_start_activity`. Configurable via environment variables for different deployment scenarios.
 
 ### Input Sanitization
-All tools that interpolate user-supplied parameters into shell command strings validate inputs against shell metacharacters before execution. Package names, property keys, service names, setting keys, test identifiers, network interface names, and tcpdump filters are all validated through a centralized `validateShellArg()` function that rejects `;`, `|`, `&`, `$`, backticks, parentheses, and other injection vectors. File paths use single-quoted shell escaping to prevent `$()` command substitution. The `adb_input` tool applies type-specific validation: `tap`/`swipe` accept only numeric coordinates, `keyevent` accepts only alphanumeric keycodes, and `text` is shell-escaped for literal delivery. The `adb_batch_actions` tool enforces the same per-action-type validation (digits-only for coordinates, alphanumeric for keycodes, shell-escape for text) and routes every assembled command through the security middleware. Deserialized JSON from snapshot files is validated before shell interpolation. Every `z.number()` parameter across all 174 tools has explicit `.min()/.max()` Zod bounds to prevent resource exhaustion from extreme values. The LocalBridge has explicit handlers for every ADB subcommand used by tool modules, preventing unquoted fallthrough to the default shell handler. In on-device mode, privilege escalation uses a frozen 16-command allowlist and restricted-path regex — the elevation set is `ReadonlySet` + `Object.freeze`, not configurable at runtime. The HTTP/SSE transport denies cross-origin requests by default (configurable via `DA_HTTP_CORS_ORIGIN`), the plugin registry verifies SHA-256 integrity hashes and prevents path traversal via directory containment checks, and the workflow engine enforces step count (200), sleep duration (5 min), and repeat iteration (100) limits. Fetch helpers enforce a 5 MB response body limit. Getprop output parsing handles Windows `\r\n` line endings via `.trim()` before regex matching, and dual SIM slot counts are capped at 4 to prevent resource exhaustion from corrupted device properties.
+All tools that interpolate user-supplied parameters into shell command strings validate inputs against shell metacharacters before execution. Package names, property keys, service names, setting keys, test identifiers, network interface names, and tcpdump filters are all validated through a centralized `validateShellArg()` function that rejects `;`, `|`, `&`, `$`, backticks, parentheses, and other injection vectors. File paths use single-quoted shell escaping to prevent `$()` command substitution. The `adb_input` tool applies type-specific validation: `tap`/`swipe` accept only numeric coordinates, `keyevent` accepts only alphanumeric keycodes, and `text` is shell-escaped for literal delivery. The `adb_batch_actions` tool enforces the same per-action-type validation (digits-only for coordinates, alphanumeric for keycodes, shell-escape for text) and routes every assembled command through the security middleware. Deserialized JSON from snapshot files is validated before shell interpolation. Every `z.number()` parameter across all 180 tools has explicit `.min()/.max()` Zod bounds to prevent resource exhaustion from extreme values. The LocalBridge has explicit handlers for every ADB subcommand used by tool modules, preventing unquoted fallthrough to the default shell handler. In on-device mode, privilege escalation uses a frozen 16-command allowlist and restricted-path regex — the elevation set is `ReadonlySet` + `Object.freeze`, not configurable at runtime. The HTTP/SSE transport denies cross-origin requests by default (configurable via `DA_HTTP_CORS_ORIGIN`), the plugin registry verifies SHA-256 integrity hashes and prevents path traversal via directory containment checks, and the workflow engine enforces step count (200), sleep duration (5 min), and repeat iteration (100) limits. Fetch helpers enforce a 5 MB response body limit. Getprop output parsing handles Windows `\r\n` line endings via `.trim()` before regex matching, and dual SIM slot counts are capped at 4 to prevent resource exhaustion from corrupted device properties.
 
 ### Multi-Device Orchestration
 Run commands, install APKs, and compare outputs across multiple connected devices in parallel. Essential for comparative testing across Android versions and device models.
@@ -527,7 +533,7 @@ Scans the local network for ADB-enabled devices via ARP table queries and option
 On-device virtual machine management using QEMU with KVM hardware acceleration. Enables running guest Android VMs directly on the physical device — a capability unique to DeepADB. Dynamic resource allocation auto-detects host CPU cores and physical RAM, reserving 1 core and 35% of memory for the host OS to prevent starvation. Multi-VM support tracks resource consumption across concurrent VMs, refusing new VMs when the pool is exhausted rather than degrading host performance. Disk image management with qcow2 (sparse, snapshot-capable) and raw formats. ADB port forwarding to guest VMs enables DeepADB's full tool suite to target both host and guest devices simultaneously. Process lifecycle tracked via the centralized cleanup registry with SIGTERM/SIGKILL shutdown. Path containment verification on all image operations prevents directory traversal.
 
 ### ToolContext Architecture
-All 41 tool modules receive a unified `ToolContext` dependency bundle containing server, bridge, deviceManager, logger, security, and config. Adding new cross-cutting dependencies requires no module signature changes.
+All 43 tool modules receive a unified `ToolContext` dependency bundle containing server, bridge, deviceManager, logger, security, and config. Adding new cross-cutting dependencies requires no module signature changes.
 
 ## Environment Variables
 
@@ -580,20 +586,20 @@ DeepADB/
 │   │   ├── health.ts           # Toolchain health check (1 tool)
 │   │   ├── device.ts           # Device info and properties (3 tools)
 │   │   ├── shell.ts            # Shell and root command execution (2 tools)
-│   │   ├── packages.ts         # App lifecycle, install, permissions, intents (10 tools)
+│   │   ├── packages.ts         # App lifecycle, install, permissions, intents (12 tools)
 │   │   ├── files.ts            # Push, pull, ls, cat (4 tools)
 │   │   ├── logs.ts             # Logcat snapshots — filtered (3 tools)
 │   │   ├── logcat-watch.ts     # Persistent logcat with ring buffer and poll (4 tools)
 │   │   ├── diagnostics.ts      # dumpsys, telephony, battery, network, perf, bugreport, crash logs, heap dump (9 tools)
-│   │   ├── ui.ts               # Screenshots, input, activity, UI hierarchy (6 tools)
+│   │   ├── ui.ts               # Screenshots, input, activity, UI hierarchy, annotated screencap, screen state (8 tools)
 │   │   ├── screen-record.ts    # Screen video recording start/stop (2 tools)
 │   │   ├── control.ts          # Airplane, WiFi, data, location, screen, settings, reboot (9 tools)
 │   │   ├── wireless.ts         # WiFi pairing, connect, disconnect, TCP/IP (4 tools)
 │   │   ├── forwarding.ts       # Port forwarding and reverse forwarding (3 tools)
 │   │   ├── emulator.ts         # AVD list, start, stop with on-device KVM/QEMU detection (3 tools)
-│   │   ├── qemu.ts             # QEMU/KVM VM management — setup, images, start, stop, status (5 tools)
+│   │   ├── qemu.ts             # QEMU/KVM VM management — setup, images, start, stop, status, guest ADB connect/disconnect/shell (8 tools)
 │   │   ├── testing.ts          # Structured test sessions with numbered steps (3 tools)
-│   │   ├── multi-device.ts     # Multi-device shell, install, compare (3 tools)
+│   │   ├── multi-device.ts     # Multi-device shell, install, compare, comparative testing (4 tools)
 │   │   ├── snapshot.ts         # Device state capture, compare, restore (3 tools)
 │   │   ├── network-capture.ts  # tcpdump start/stop, network connections (3 tools)
 │   │   ├── ci.ts               # CI wait-boot, device-ready, run-tests (3 tools)
@@ -603,7 +609,7 @@ DeepADB/
 │   │   ├── regression.ts       # Performance baseline and regression detection (3 tools)
 │   │   ├── device-farm.ts      # Firebase Test Lab integration via gcloud (3 tools)
 │   │   ├── registry.ts         # Community plugin registry search/install (3 tools)
-│   │   ├── at-commands.ts      # AT command modem interface, multi-chipset (4 tools)
+│   │   ├── at-commands.ts      # AT command modem interface, multi-chipset, cross-validation (5 tools)
 │   │   ├── screenshot-diff.ts  # Visual regression — screenshot baseline/diff (3 tools)
 │   │   ├── workflow.ts         # Declarative workflow orchestration engine (3 tools)
 │   │   ├── split-apk.ts        # App bundles, split APKs, APEX modules (4 tools)
@@ -628,6 +634,7 @@ DeepADB/
 │   │   ├── sanitize.ts         # Shell injection prevention — validateShellArg/validateShellArgs/shellEscape
 │   │   ├── chipset.ts          # Shared chipset family detection, modem path mapping, SIM config detection
 │   │   ├── fetch-utils.ts      # Shared HTTP helpers with 5 MB streaming response size limit
+│   │   ├── png-utils.ts        # Zero-dependency PNG decode/encode/draw primitives for screenshot annotation and diffing
 │   │   ├── ui-dump.ts          # Shared uiautomator XML capture with concurrent-safe paths, on-device /data/local/tmp routing, and cleanup
 │   │   ├── cleanup.ts          # Centralized process cleanup registry for SIGINT/SIGTERM/exit
 │   │   └── logger.ts           # stderr-safe logging (MCP-compliant)
@@ -642,14 +649,14 @@ DeepADB/
 ├── LICENSE                      # MIT license
 ├── tests/
 │   ├── run-all.mjs              # Run all test suites sequentially with summary (tracks skipped counts)
-│   ├── test-hw.mjs              # Hardware core: health, identity, baseband, thermal, profiles, wireless firmware (33 tests)
+│   ├── test-hw.mjs              # Hardware core: health, identity, baseband, thermal, profiles, wireless firmware, crash analysis (34 tests)
 │   ├── test-shell-files.mjs     # Shell, filesystem, packages, diagnostics (24 tests)
-│   ├── test-ui-control.mjs      # UI hierarchy, screenshots, settings, input gestures, UI automation, device awareness, accessibility (31 tests)
+│   ├── test-ui-control.mjs      # UI hierarchy, screenshots, settings, input gestures, UI automation, device awareness, accessibility, screen lock/unlock, multi-touch (46 tests)
 │   ├── test-monitoring.mjs      # Logcat watchers, snapshots, OTA, regression, workflows (25 tests)
 │   ├── test-security.mjs        # Input sanitization, shell injection, AT command safety (25 tests)
 │   ├── test-lifecycle.mjs       # App lifecycle, file push/pull, input, port forwarding, screen recording, test sessions (22 tests)
-│   ├── test-analysis.mjs        # Thermal/snapshot/regression comparison, firmware diff, screenshot diff, test gen, RIL intercept, AT cross-validation (19 tests)
-│   ├── test-boundaries.mjs      # Zod bounds enforcement, input injection, error paths, sensitive data protection (28 tests)
+│   ├── test-analysis.mjs        # Thermal/snapshot/regression comparison, firmware diff, screenshot diff, test gen, RIL intercept, AT cross-validation, permission management (23 tests)
+│   ├── test-boundaries.mjs      # Zod bounds enforcement, input injection, error paths, sensitive data protection (31 tests)
 │   ├── test-qemu.mjs            # QEMU/KVM setup, image management, VM status, guest connectivity errors (13 on-device tests)
 │   ├── test-qemu-boot.mjs       # QEMU Alpine VM boot, KVM acceleration, topology detection, guest ADB connectivity (14 on-device tests)
 │   └── lib/
