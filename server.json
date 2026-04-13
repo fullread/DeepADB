@@ -1,8 +1,7 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-16/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.fullread/deepadb",
   "description": "Full-featured ADB MCP server — 180 tools across 43 modules, from UI to baseband.",
-  "status": "active",
   "websiteUrl": "https://github.com/fullread/DeepADB",
   "repository": {
     "url": "https://github.com/fullread/DeepADB",
@@ -12,12 +11,11 @@
   "packages": [
     {
       "registryType": "npm",
-      "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "deepadb",
       "version": "1.1.0",
-      "runtime": "node",
-      "runtimeArgs": [],
-      "packageArgs": []
+      "transport": {
+        "type": "stdio"
+      }
     }
   ]
 }
