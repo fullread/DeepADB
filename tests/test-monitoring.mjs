@@ -10,7 +10,7 @@ const h = await createHarness("Monitoring & Workflows");
 
 h.section("Logcat Snapshots");
 await h.test("Logcat Clear", "adb_logcat_clear");
-await h.testContains("Logcat (100 lines)", "adb_logcat", { lines: 100 }, "");
+await h.test("Logcat (100 lines)", "adb_logcat", { lines: 100 });
 await h.test("Logcat (priority W+)", "adb_logcat", { lines: 50, priority: "W" });
 await h.test("Logcat (crash buffer)", "adb_logcat_crash", { lines: 20 });
 

@@ -74,6 +74,9 @@ export function registerForwardingTools(ctx: ToolContext): void {
         if (resolved) {
           output += "\n\n=== Reverse (device → host) ===\n";
           output += revOutput || "(none)";
+        } else {
+          output += "\n\n=== Reverse (device → host) ===\n";
+          output += "(specify 'device' to list reverse forwards — they are per-device)";
         }
         return { content: [{ type: "text", text: output }] };
       } catch (error) {
@@ -81,4 +84,49 @@ export function registerForwardingTools(ctx: ToolContext): void {
       }
     }
   );
+
+  ctx.server.tool(
+    "adb_forward_remove",
+    "Remove a port forward (host → device), or all forwards. Use after testing to clean up.",
+    {
+      local: z.string().optional().describe("Local spec to remove (e.g., 'tcp:8080'). Omit to remove all forwards."),
+      device: z.string().optional().describe("Device serial"),
+    },
+    async ({ local, device }) => {
+      try {
+        const resolved = await ctx.deviceManager.resolveDevice(device);
+        if (local) {
+          await ctx.bridge.exec(["forward", "--remove", local], { device: resolved.serial });
+          return { content: [{ type: "text", text: `Removed forward: ${local}` }] };
+        }
+        await ctx.bridge.exec(["forward", "--remove-all"], { device: resolved.serial });
+        return { content: [{ type: "text", text: "All forwards removed." }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
+      }
+    }
+  );
+
+  ctx.server.tool(
+    "adb_reverse_remove",
+    "Remove a reverse forward (device → host), or all reverse forwards. Use after testing to clean up.",
+    {
+      remote: z.string().optional().describe("Remote spec to remove (e.g., 'tcp:3000'). Omit to remove all reverse forwards."),
+      device: z.string().optional().describe("Device serial"),
+    },
+    async ({ remote, device }) => {
+      try {
+        const resolved = await ctx.deviceManager.resolveDevice(device);
+        if (remote) {
+          await ctx.bridge.exec(["reverse", "--remove", remote], { device: resolved.serial });
+          return { content: [{ type: "text", text: `Removed reverse forward: ${remote}` }] };
+        }
+        await ctx.bridge.exec(["reverse", "--remove-all"], { device: resolved.serial });
+        return { content: [{ type: "text", text: "All reverse forwards removed." }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
+      }
+    }
+  );
+
 }

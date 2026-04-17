@@ -275,7 +275,8 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
     },
     async ({ target, filename, device }) => {
       try {
-        validateShellArg(target, "target");
+        const targetErr = validateShellArg(target, "target");
+        if (targetErr) return { content: [{ type: "text", text: targetErr }], isError: true };
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
         const remoteDir = "/data/local/tmp";

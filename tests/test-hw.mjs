@@ -54,7 +54,10 @@ await h.testContains("GPS Firmware → Constellations", "adb_gps_firmware", {}, 
 await h.testContains("Firmware Probe → Wireless", "adb_firmware_probe", {}, "Wireless Firmware");
 
 h.section("Crash Analysis & Debugging");
-await h.testContains("Crash logs (ANR + tombstones)", "adb_crash_logs", { type: "both", maxEntries: 3 }, "===");
+// "===" matches the section header prefix which appears in almost every
+// multi-section tool output — too loose. "ANR Traces" is the actual section
+// header for crash_logs (or "Tombstones"), unambiguous to this tool.
+await h.testContains("Crash logs (ANR + tombstones)", "adb_crash_logs", { type: "both", maxEntries: 3 }, "ANR Traces");
 // adb_heap_dump: not tested (requires a debuggable process; Magisk/system apps are not debuggable)
 // adb_bugreport: not tested (takes 30-120 seconds, too slow for automated suite)
 // adb_reboot: not tested (destructive — would kill device mid-suite)

@@ -2,6 +2,148 @@
 
 All notable changes to DeepADB are documented in this file.
 
+## v1.1.1 — Hardware Sensor Access
+
+### New Tools (18 new tools, 1 new module — 198 tools across 44 modules)
+
+**`adb_sensor_read`** — Read hardware sensor values from the device. Enumerates all available sensors from `dumpsys sensorservice` and returns their last-known readings with timestamps. Parses the full "Sensor List:" section for sensor inventory (name, vendor, type, mode, rate range, wake capability) and the "Recent Sensor events:" section for last-known values. Sensor availability is device-dependent — the tool reports what's present rather than assuming a fixed set. A Pixel 6a exposes 44 sensors (36 hardware + 8 AOSP virtual). Supports `category` filter (accelerometer, gyroscope, magnetometer, light, barometer, proximity, gravity, linear_accel, rotation, orientation, motion, step, temperature) and `listOnly` mode for fast discovery without reading values. Axis-labeled formatting for 3-axis sensors (accelerometer: `x=... y=... z=... m/s²`). Type map covers 21 standard Android sensor types with appropriate units. No root required.
+
+**`adb_iio_read`** — Read raw hardware data from the Linux IIO (Industrial I/O) subsystem. Auto-discovers all IIO devices under `/sys/bus/iio/devices/` and classifies them by kernel driver name. On Tensor/Exynos devices, this exposes per-rail ODPM (On-Device Power Monitor) data from the S2MPG PMICs — real-time power consumption per SoC subsystem (CPU big/mid/little clusters, GPU, TPU, display, DDR, UFS, GPS, AOC, etc.) sorted by consumption with percentage breakdown. On other devices, may expose raw accelerometer, gyroscope, magnetometer, pressure, ADC, or temperature channels with automatic `raw * scale + offset` calibration. Supports `listOnly` mode for discovery. Root required (SELinux blocks sysfs access for non-root). Hardware-verified on Pixel 6a: 2 PMICs (s2mpg10 + s2mpg11), 16 monitored power rails, 125 Hz sampling, physically plausible readings (~5W under CPU load, ~0.4W sub-PMIC idle).
+
+Both tools added to new `sensors.ts` module.
+
+### File Tools Expansion (14 new tools in existing files.ts — 4 → 18 tools)
+
+Expanded `files.ts` from 4 basic tools (push, pull, ls, cat) to 18 comprehensive file operations. Every new tool closes a specific security gap where MCP agents would otherwise fall back to `adb_shell`, bypassing the sanitization infrastructure.
+
+**Safety model — consistent across all modifying tools:**
+- Hard-blocked paths: `/`, `/dev`, `/proc`, `/sys` — kernel virtual filesystems
+- Depth-based recursive protection: recursive delete/chmod/chown refuse at depth ≤ 2 from root
+- Symlink resolution: `realpath` resolved BEFORE depth checks to prevent traversal bypass
+- Filesystem-aware warnings: erofs/squashfs (read-only), sdcardfs/FUSE (ignores chmod), vfat/FAT32 (no perms, 4GB, 2s timestamps), tmpfs (volatile)
+- Explicit root opt-in: `root=false` default, no auto-elevation
+- Execution time and storage metrics on every operation
+
+**Hardened existing tools:**
+- `adb_push` — added hard-block, fs-type detection, symlink resolution, storage reporting, metrics
+- `adb_pull`, `adb_ls`, `adb_cat` — added execution time metrics
+
+**New tools (14):**
+- `adb_file_write` — heredoc content delivery, buffer limit warning, append mode, post-verify
+- `adb_find` — file search with maxResults/maxDepth caps, truncation detection
+- `adb_file_stat` — metadata with SELinux context
+- `adb_file_checksum` — SHA-256/SHA-1/MD5, size-based timeout estimation
+- `adb_mkdir` — directory creation with hard-block and read-only detection
+- `adb_rm` — depth-based recursive protection, symlink resolution, pre-flight count
+- `adb_file_move` — source depth protection, post-verify
+- `adb_file_copy` — pre-flight size+space check, post-verify size match
+- `adb_file_chmod` — Zod-validated octal mode, depth-based recursive protection
+- `adb_file_touch` — create/update/explicit timestamp with format validation
+- `adb_file_fsinfo` — comprehensive filesystem report (type, mount, capacity, capabilities, SELinux)
+- `adb_file_chown` — root required, depth-based recursive protection, Zod-validated owner format
+- `adb_grep` — fixed-string default, recursive with depth control, result capping
+- `adb_file_replace` — sed-backed find/replace with proper escaping, backup option, match counting
+
+**Bugs found and fixed during implementation:**
+- `stat -f -c '%T'` returns hex magic numbers on Android (e.g., `0x65735546`) instead of readable names — added `FS_MAGIC_MAP` lookup table for 8 common Android filesystems
+- `df` on a deleted file fails — `getStorageInfo()` now falls back to parent directory
+- grep flag construction: `.join("")` produced `-F-i-n` — fixed to `.join(" ")`
+
+### Port Forward Cleanup (2 new tools in existing forwarding.ts — 3 → 5 tools)
+
+- `adb_forward_remove` — remove a specific port forward or all forwards (`--remove` / `--remove-all`)
+- `adb_reverse_remove` — remove a specific reverse forward or all reverse forwards
+- Closes cleanup gap: test suites now properly clean up port forwards created during testing
+
+### Bug Fixes
+
+- Fixed event block boundary calculation in sensor value parser — the `-50` character offset was overshooting into preceding event data when sensor headers were close together, truncating multi-axis values (e.g., accelerometer showing 2 values instead of 3). Replaced with precise `headerStart` tracking.
+- Fixed wake-up flag detection — `nextLine.includes("wakeUp")` matched both `wakeUp` and `non-wakeUp`, incorrectly tagging all sensors as wake-up. Fixed with word-boundary regex and explicit `non-wakeUp` exclusion.
+- Fixed rate range display in `listOnly` mode — one-shot and special-trigger sensors showed ugly `—–—` double-dash, on-change sensors showed trailing `–—`. Now displays clean mode-only for sensors without rates, `up to X Hz` for max-only, and `X Hz` for min-only.
+- Fixed ODPM power unit conversion — `in_powerN_scale` was being applied to `lpf_power` values that are already calibrated in μW by the ODPM driver, producing physically impossible readings (~51W total). Fixed: divide by 1000 for μW→mW without additional scale.
+
+### Security
+
+- Fixed printf format string injection in AT command passthrough (`at-commands.ts`). The AT command string was placed directly in `printf`'s format position (`printf '${cmd}\r'`), causing `%` characters in legitimate AT commands (e.g., `AT%RESTART`) to be misinterpreted as format specifiers. Fixed by separating format from data: `printf '%s\r' '${cmd}'`.
+- Fixed sed shell injection in `adb_file_replace` (`files.ts`). `sedEscapePattern()` and `sedEscapeReplacement()` handled regex metacharacters but not single quotes, so a `find` or `replace` value containing `'` would close the surrounding shell single-quote and execute arbitrary commands (e.g., `find = "';rm -rf /sdcard/evil;echo '"`). Fixed by appending `'\''` closing/reopening logic to both escapers. Additionally, Zod `.refine()` now rejects newlines in `find` and `replace`, since sed treats embedded newlines as script-command separators. Regression test added with a canary-file pattern that proves the injection payload no longer executes.
+
+### Code Quality
+
+- **sensors.ts**: O(n) line offset index with binary search replaces O(n²) `substring+split` per sensor entry; self-describing key=value IIO reads (immune to `cat` alignment fragility); file reorganized into clean domain groups (HAL types/parsers/helpers → IIO types/parsers/helpers → tool registration); defense-in-depth validation on IIO device dirs (`^iio:device\d+$`) and sysfs attributes (`^[a-zA-Z0-9_]+$`).
+- **at-commands.ts**: Extracted `autoDetectAtPort()` shared helper, replacing 4 copies of the 15-line modem probe pattern across `adb_at_send`, `adb_at_batch`, `adb_at_probe`, and `adb_at_cross_validate`. `adb_at_detect` retains its own implementation (reports all nodes, not just the first).
+
+### Documentation
+
+- README architecture diagram: updated module count from 43 to 44, added `sensors`, `input-gestures`, `wireless-firmware` to module name list
+- README Available Tools: updated section header from 180 to 182, added `### Hardware Sensor Access (2 tools)` section with `adb_sensor_read` and `adb_iio_read` descriptions
+- README project structure tree: added missing `input-gestures.ts` (18 tools), fixed `plugins.ts` description, fixed ASCII tree syntax (`└──` followed by `├──`)
+- Tool count verified as 198 via comment/string-aware grep across all 44 modules (naive grep returns 200 due to 2 false positives in `plugins.ts` template literal examples)
+
+### Housekeeping
+
+- Added `.mcpregistry_*` credential files to `.gitignore`
+
+### Test Suite
+
+Validated on hardware (Pixel 6a, Android 16, Termux + Magisk + QEMU 10.2.1) across a four-cell matrix — 0 failures:
+
+- **ADB mode, no PIN:** 383 passed / 10 skipped (393 total)
+- **ADB mode, with PIN:** 387 passed / 6 skipped (393 total)
+- **On-device mode, no PIN:** 419 passed / 4 skipped (423 total)
+- **On-device mode, with PIN:** 420 passed / 3 skipped (423 total)
+
+On-device delta (+30 tests) reflects the 5 QEMU tests, 1 shell round-trip, and 9 on-device-specific code paths in test-boundaries that are skipped on the host.
+
+- New `test-sensors.mjs` suite (30 tests): sensor discovery (list, categories, total), full value read with calibrated data verification, category filters with device-specific sensor name assertions (11 categories), list-only with filter, accelerometer z-axis regression test, rate display formatting (one-shot clean output, continuous range), wake-up flag correctness (non-wake exclusion + wake inclusion), IIO device discovery (list, ODPM detection), and IIO power monitor output verification (power data, sampling rate, channels, totals, CPU subsystem, unit formatting)
+- New `test-files-extended.mjs` suite (95 tests): push safety (hard-blocked /dev, /proc, /sys, /), existing tool metrics (ls, cat execution time), file write (create, append, verify, storage, refusals), find (locate, timing, maxResults, no results), stat (size, permissions, SELinux, nonexistent), checksum (SHA-256, MD5, size, nonexistent), mkdir (nested, timing, refusals), rm depth protection (8 tests: depth 1/2/4 boundaries, symlink resolution, /dev refusal), move (verify, depth protection, refusals), copy (size verification, storage), chmod (permissions, recursive depth, Zod validation), touch (create/update/explicit timestamp, format validation), fsinfo (type, capacity, capabilities, mount), chown (ownership, recursive depth, Zod validation), grep (case sensitivity, line numbers, recursive, no match), file replace (match count, content verification, backup, no match, refusal), **sed injection regression (canary-file pattern proving single-quote payload is neutralized, newline rejection in find/replace)**, end-to-end lifecycle (write → stat → checksum → copy → hash compare → rm), cleanup verification
+
+### Post-Audit Additions
+
+Work completed after the initial v1.1.1 scope landed, during a multi-pass security and test-quality audit:
+
+**Additional security fixes (Passes 2–4):**
+- **Shell injection in `adb_qemu_start` kernel `append` parameter** (`qemu.ts`, KVM path only). The `escapeQemuShellArg()` heuristic only quoted arguments containing `=`, `/`, `,`, or `:`, so payloads like `append: "; reboot"` slipped through unquoted into `su -c "..."` and executed. Fixed by extracting `escapeQemuShellArg()` as a module-level export and unconditionally wrapping every QEMU argv element in single quotes with `'\''` closing/reopening to neutralize embedded quotes. The non-KVM path was already safe since it uses `spawn(cmd, args)` with an argv array. 11 unit assertions plus 6 Unix shell round-trip tests verify the quoting property end-to-end.
+- **Discarded validator return in `adb_heap_dump`** (`diagnostics.ts`). `validateShellArg(target, "target")` was called but its error result was never checked — subsequent `shellEscape()` made exploitation impractical, but the intent was to reject shell metacharacters. Fixed by capturing and returning the error properly. 4 injection-rejection tests added.
+- 61 other interpolation sites verified safe across the codebase: 22 `shellEscape`-wrapped, 21 `validateShellArg`-gated, 8 numeric Zod bounds, 4 hardcoded values, 3 Zod enums, 3 free-form gated by `ctx.security.checkCommand()`.
+
+**Test harness correctness fixes** (`tests/lib/harness.mjs`):
+- `testContains` and `testNotContains` now throw on empty expected/forbidden string. Previously these were always-pass no-ops (`String.includes("")` is always true) and silently masked 7 misused assertions across the suite. Every misuse was converted to a meaningful check.
+- `testRejects` no longer counts thrown exceptions as successful rejections. Previously, a tool crash or timeout would be silently tagged "correctly rejected" — now crashes/timeouts are correctly marked failures.
+- `getText(response)` returns an empty string on RPC error instead of fabricating a `"[RPC ERROR] ..."` wrapper string. The fabricated text could leak into `testContains` assertions — a test checking for "error" substring would falsely match the wrapper. Callers use `isError()` to distinguish success from RPC failure.
+- Server startup "Ready" substring match tightened. Previously matched the bare word "Ready" anywhere in stderr — a log line like "Preparing to be Ready..." would fire prematurely. Now matches specific phrases: `"Ready for connections"` (from `index.ts` post-initialization log) or `"tool modules, 4 resources"` (from `server.ts` init-complete log).
+- Added `h.assert()` and `h.assertEq()` primitives for unit-style tests that feed into the suite's pass/fail counter.
+
+**Test coverage additions:**
+- Wireless ADB: 5 tests in `test-boundaries` (Zod port bounds, malformed-host graceful handling, idempotent disconnect, unreachable-pair rejection)
+- Multi-device: 5 tests in `test-boundaries` (single-device shell with whoami, <2-device rejection for compare, firmware profile, listing profiles, custom commands)
+- `adb_at_probe`: tolerant unit test accepting either success or clean rejection
+- `adb_profile_save`: corrected schema (`{ name, profile }`) + invalid-JSON rejection
+- `adb_tcpdump_stop`: no-active-capture rejection path
+- `adb_network_auto_connect`: empty-range graceful handling with correct `ipRange` field
+
+**Assertion quality (tightened loose substrings):**
+- `test-shell-files`: `"sh"` → `"toybox"` (unambiguous Android system binary)
+- `test-hw`: `"==="` (section-header prefix) → `"ANR Traces"` (actual crash_logs section header)
+- `test-sensors`: `"W"` (matched any word with W) → `"mW"` (actual power unit emitted by sensors.ts)
+
+**On-device mode-awareness** — LocalBridge legitimately stubs wireless ADB (`connect`, `disconnect`, `pair`, `tcpip`) and port forwarding (`forward`, `reverse`) since there is no ADB server to route through. Four test-boundaries/test-lifecycle assertions were originally written against ADB-mode semantics and would fail cleanly in on-device mode. Made mode-aware via `existsSync("/data/data/com.termux")`:
+- `Connect to malformed host surfaces error` — ADB mode asserts the bad host appears in stdout; on-device asserts the stub's "not applicable" message appears.
+- `Pair with unreachable host` — ADB mode uses `testRejects` with 45s timeout (adb pair blocks ~30s on unreachable hosts); on-device asserts the stub's "not applicable" message.
+- `multi_shell on single device (whoami)` — ADB mode gets "shell" (uid=2000); on-device gets "root" or the Termux user depending on elevation path. Replaced with tool-executed-and-produced-output check.
+- `Forward list (shows entries)` — ADB mode asserts the created forward appears; on-device skips since the forward creation is itself a stub.
+
+**Alpine VM auto-fetch for `test-qemu-boot.mjs`:**
+Previously required a pre-built Alpine image at a hardcoded path, so the boot test would fail on any fresh on-device install. Added setup phase between pre-flight and boot that:
+- Computes `imageDir` from `process.env.HOME` to match the runtime `ctx.config.tempDir` resolution (avoiding a hardcoded path that mismatches when HOME is overridden by a test wrapper)
+- Probes for cached `vmlinuz-virt`, `initramfs-virt`, and `alpine-test.qcow2`; skips downloads on repeat runs
+- Fetches kernel (~10 MB) and initrd (~9 MB) from `https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/aarch64/netboot/` via `curl --fail --location --silent --retry 2 --max-time 120`
+- Atomic writes (`.tmp` → `mv`) prevent partial downloads from poisoning the cache
+- Size sanity check (>1 MB per file) catches truncation or error-page situations
+- Creates a 64 MB placeholder qcow2 via `qemu-img create` (required by `adb_qemu_start`'s image argument; VM actually boots from kernel+initrd)
+- On any failure (no curl, no network, size check fail), all downstream boot tests skip with explicit reasons rather than crashing
+
+No checksum verification — Alpine doesn't publish per-file sha256 for the netboot directory (only for the 425 MB full-release tarball). HTTPS + TLS chain to `dl-cdn.alpinelinux.org` is the integrity mechanism. Trade-off documented in the test file header.
+
 ## v1.1.0 — MCP Registry Integration
 
 ### MCP Registry Support

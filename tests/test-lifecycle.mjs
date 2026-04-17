@@ -4,8 +4,13 @@
  * test sessions, UI input, and activity launch.
  */
 import { createHarness } from "./lib/harness.mjs";
+import { existsSync } from "fs";
 
 const h = await createHarness("Lifecycle & Interaction");
+
+// Mode detection: port forwarding is stubbed in on-device LocalBridge since
+// there's no ADB server to register forwards with.
+const onDevice = existsSync("/data/data/com.termux");
 
 // ── App Lifecycle ──────────────────────────────────────────
 
@@ -53,7 +58,7 @@ await h.test("Input tap (safe coords)", "adb_input",
   { type: "tap", args: "540 400" });
 
 await h.testContains("Start Activity (Settings)", "adb_start_activity",
-  { intent: "-a android.settings.SETTINGS" }, "");
+  { intent: "-a android.settings.SETTINGS" }, "Starting");
 
 await new Promise(r => setTimeout(r, 1000));
 
@@ -77,7 +82,15 @@ await h.test("Forward create", "adb_forward",
 await h.test("Reverse create", "adb_reverse",
   { remote: "tcp:19877", local: "tcp:19877" });
 
-await h.testContains("Forward list (shows entries)", "adb_forward_list", {}, "");
+// Forward list content: in ADB mode the list should contain the tcp:19876
+// forward we just created. In on-device mode, LocalBridge returns an empty
+// list for `--list` (there's no ADB server to register forwards with, so
+// `adb_forward` itself is a stub). Verify appropriately.
+if (onDevice) {
+  await h.test("Forward list (stub in on-device mode)", "adb_forward_list", {});
+} else {
+  await h.testContains("Forward list (shows entries)", "adb_forward_list", {}, "tcp:19876");
+}
 
 // Cleanup forwards
 await h.callTool("adb_shell", { command: "true" }); // no-op, just ensuring device is responsive
@@ -119,6 +132,16 @@ await h.testContains("Mirror Status (scrcpy check)", "adb_mirror_status", {}, "s
 await h.testContains("Registry Installed (local)", "adb_registry_installed", {}, "installed");
 await h.testContains("CI Wait Boot (already booted)", "adb_ci_wait_boot",
   { timeoutSeconds: 10 }, "booted and ready");
+
+// ── Cleanup ─────────────────────────────────────────────────
+
+h.section("Cleanup");
+
+await h.testContains("Remove forward", "adb_forward_remove",
+  { local: "tcp:19876" }, "Removed forward");
+
+await h.testContains("Remove reverse forward", "adb_reverse_remove",
+  { remote: "tcp:19877" }, "Removed reverse");
 
 const exitCode = h.finish();
 process.exit(exitCode);

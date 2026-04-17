@@ -19,14 +19,16 @@ DeepADB is **not designed** for multi-tenant, internet-facing, or shared-server 
 Every tool that interpolates user-supplied parameters into shell commands validates inputs before execution. This is not optional — it runs regardless of security middleware settings.
 
 - **`validateShellArg()`** rejects strings containing shell metacharacters (`;`, `|`, `&`, `$`, backticks, parentheses, etc.) for identifiers like package names, property keys, service names, and setting keys.
-- **`shellEscape()`** wraps file paths in single quotes with proper escaping for the only character that can break single-quote context.
+- **`shellEscape()`** wraps file paths in single quotes with proper escaping — `'\''` closing/reopening is used to neutralize embedded single quotes without breaking single-quote context.
+- **`escapeQemuShellArg()`** (exported from `qemu.ts`) applies the same unconditional single-quote-with-escape to every QEMU argv element on the KVM path, where arguments are composed into a `su -c "..."` command string. The non-KVM path uses `spawn(cmd, args)` with an argv array and requires no escaping.
 - **`adb_input`** applies type-specific validation: `tap`/`swipe` accept only numeric coordinates, `keyevent` accepts only alphanumeric keycodes, `text` is shell-escaped.
-- **AT commands** are validated against a separate character set that rejects shell operators while allowing legitimate AT syntax (`+`, `=`, `?`, etc.).
+- **AT commands** are validated against a separate character set that rejects shell operators while allowing legitimate AT syntax (`+`, `=`, `?`, etc.). AT command strings are fed to `printf` via `%s` format, never the format position itself, preventing format string injection from commands containing `%` characters (e.g., `AT%RESTART`).
+- **`sed` escaping in `adb_file_replace`** (`files.ts`) applies `'\''` closing/reopening to both the pattern and the replacement value, handling single quotes that would otherwise close the outer shell single-quote. Zod also rejects newlines in `find`/`replace` since sed treats embedded newlines as script-command separators.
 - **Device node paths** must start with `/dev/` and cannot contain path traversal (`..`).
 
 ### Zod Parameter Bounds (always active)
 
-Every `z.number()` parameter across all 180 tools has explicit `.min()/.max()` constraints. This prevents resource exhaustion from extreme values — for example, requesting a 999999-second sleep or a buffer size of 2^31.
+Every `z.number()` parameter across all 198 tools has explicit `.min()/.max()` constraints. This prevents resource exhaustion from extreme values — for example, requesting a 999999-second sleep or a buffer size of 2^31.
 
 ### Security Middleware (opt-in enforcement)
 
@@ -148,7 +150,7 @@ When installing DeepADB via npm, always pin the version:
 
 ```bash
 # Pinned (recommended)
-npm install -g deepadb@1.1.0
+npm install -g deepadb@1.1.1
 
 # Unpinned (not recommended — vulnerable to supply chain attacks)
 npx -y deepadb

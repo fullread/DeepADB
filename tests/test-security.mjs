@@ -98,5 +98,88 @@ await h.testRejects("AT dangerous → AT+CFUN=0 (kill radio)",
 await h.testRejects("AT dangerous → AT+EGMR (write IMEI)",
   "adb_at_send", { command: "AT+EGMR=1,7,\"012345678901234\"" });
 
+// ── adb_heap_dump input validation (regression for Pass 4 Finding #2) ──
+// Prior version called validateShellArg(target, "target") but discarded
+// the return value, so malicious target strings would slip through (though
+// shellEscape provided a second line of defense). Test that metacharacter
+// payloads now yield a clean rejection at the validator layer.
+
+h.section("Heap Dump Input Validation");
+await h.testRejects("Heap dump inject via target (semicolon)",
+  "adb_heap_dump", { target: "com.test; rm -rf /" });
+await h.testRejects("Heap dump inject via target (pipe)",
+  "adb_heap_dump", { target: "com.test | id" });
+await h.testRejects("Heap dump inject via target (backtick)",
+  "adb_heap_dump", { target: "com.test`id`" });
+await h.testRejects("Heap dump inject via target ($())",
+  "adb_heap_dump", { target: "com.test$(whoami)" });
+
+// ── QEMU Shell-Arg Escaping (unit test — regression for Pass 4 fix) ──
+// escapeQemuShellArg() wraps every arg in single quotes and uses the
+// '\''-close-reopen pattern for embedded quotes. A prior heuristic only
+// quoted args containing =/,/: — which missed payloads like "; reboot"
+// that contain no trigger chars but break shell parsing.
+// This test directly exercises the exported helper so a revert is caught
+// whether or not the KVM path is reachable on the test host.
+
+h.section("QEMU Shell Escaping (unit)");
+const { escapeQemuShellArg } = await import("../build/tools/qemu.js");
+
+h.assertEq("Plain string is quoted",
+  escapeQemuShellArg("abc"), "'abc'");
+
+h.assertEq("Empty string is quoted",
+  escapeQemuShellArg(""), "''");
+
+h.assertEq("Arg with spaces is quoted",
+  escapeQemuShellArg("foo bar"), "'foo bar'");
+
+h.assertEq("Arg with = is quoted (was trigger in old heuristic)",
+  escapeQemuShellArg("init=/init"), "'init=/init'");
+
+// Injection payloads — the Pass 4 regression cases:
+h.assertEq("Injection via semicolon is neutralized",
+  escapeQemuShellArg("; reboot"), "'; reboot'");
+
+h.assertEq("Injection via pipe is neutralized",
+  escapeQemuShellArg("| cat /etc/passwd"), "'| cat /etc/passwd'");
+
+h.assertEq("Injection via backtick is neutralized",
+  escapeQemuShellArg("`id`"), "'`id`'");
+
+h.assertEq("Injection via $() is neutralized",
+  escapeQemuShellArg("$(whoami)"), "'$(whoami)'");
+
+h.assertEq("Embedded single quote is escaped via '\\'' pattern",
+  escapeQemuShellArg("it's"), "'it'\\''s'");
+
+h.assertEq("Attempted quote-break is neutralized",
+  escapeQemuShellArg("'; reboot; '"), "''\\''; reboot; '\\'''");
+
+h.assertEq("Multiple embedded quotes",
+  escapeQemuShellArg("a'b'c"), "'a'\\''b'\\''c'");
+
+// Verify the round-trip property: whatever's inside the quotes, when the
+// shell parses it back, must equal the original input. Skipped on Windows
+// where /bin/sh isn't available.
+if (process.platform !== "win32") {
+  const { spawnSync } = await import("child_process");
+  const roundTripCases = [
+    "abc",
+    "; reboot",
+    "$(whoami)",
+    "it's a test",
+    "'; rm -rf /; '",
+    "console=ttyAMA0 root=/dev/vda",
+  ];
+  for (const input of roundTripCases) {
+    const escaped = escapeQemuShellArg(input);
+    const r = spawnSync("/bin/sh", ["-c", `printf %s ${escaped}`], { encoding: "utf8" });
+    h.assertEq(`Shell round-trip: ${JSON.stringify(input)}`, r.stdout, input);
+  }
+} else {
+  h.skip("Shell round-trip (requires /bin/sh)", "Windows host");
+}
+
 const exitCode = h.finish();
 process.exit(exitCode);

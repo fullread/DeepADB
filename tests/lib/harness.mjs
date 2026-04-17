@@ -49,12 +49,18 @@ export async function createHarness(suiteName = "Test") {
     }
   });
 
-  // Wait for server ready
+  // Wait for server ready. Match the specific startup-complete phrases rather
+  // than the substring "Ready" alone, which could match a log line like
+  // "Preparing to be Ready..." and fire prematurely.
+  const READY_PATTERNS = [
+    "Ready for connections",      // from index.ts post-initialization log
+    "tool modules, 4 resources",  // from server.ts init-complete log
+  ];
   let stderrBuffer = "";
   await new Promise((resolve, reject) => {
     proc.stderr.on("data", (chunk) => {
       stderrBuffer += chunk.toString();
-      if (stderrBuffer.includes("Ready")) resolve();
+      if (READY_PATTERNS.some((p) => stderrBuffer.includes(p))) resolve();
     });
     proc.on("error", (err) => reject(new Error(`Server spawn failed: ${err.message}`)));
     proc.on("exit", (code) => {
@@ -95,7 +101,11 @@ export async function createHarness(suiteName = "Test") {
   }
 
   function getText(response) {
-    if (response.error) return `[RPC ERROR] ${JSON.stringify(response.error)}`;
+    // On RPC error, return empty string rather than fabricating a "[RPC ERROR] ..."
+    // string. Fabricated text could leak into testContains assertions (e.g., a
+    // test checking for "error" substring would falsely match the wrapper).
+    // Callers use isError() to distinguish success from RPC-level failure.
+    if (response.error) return "";
     return (response.result?.content ?? [])
       .filter((c) => c.type === "text")
       .map((c) => c.text)
@@ -137,6 +147,11 @@ export async function createHarness(suiteName = "Test") {
 
   /** Test that output contains an expected substring (case-insensitive). */
   async function testContains(label, tool, args, expected, timeoutMs = 30000) {
+    if (typeof expected !== "string" || expected.length === 0) {
+      throw new Error(`testContains("${label}"): expected substring must be a non-empty string. ` +
+        `An empty string always matches via String.includes(""). ` +
+        `Use h.test() if you only want to verify the tool doesn't error.`);
+    }
     try {
       const res = await callTool(tool, args, timeoutMs);
       const text = getText(res);
@@ -163,7 +178,11 @@ export async function createHarness(suiteName = "Test") {
     }
   }
 
-  /** Test that tool returns an error (for negative/rejection tests). */
+  /** Test that tool returns an error (for negative/rejection tests).
+   *  A "rejection" means the tool returned isError:true or an MCP RPC error.
+   *  A thrown exception (timeout, server crash, transport failure) is treated
+   *  as a FAILURE, not a rejection — those indicate the tool didn't reject
+   *  cleanly but rather blew up, which is a real bug we want to surface. */
   async function testRejects(label, tool, args, timeoutMs = 30000) {
     try {
       const res = await callTool(tool, args, timeoutMs);
@@ -177,14 +196,19 @@ export async function createHarness(suiteName = "Test") {
       }
       return res;
     } catch (e) {
-      console.log(`  ✓ ${label} — correctly rejected (exception)`);
-      passed++;
+      console.log(`  ✗ ${label} — EXCEPTION (expected clean rejection, got crash/timeout): ${e.message}`);
+      failed++;
+      failures.push(label);
       return null;
     }
   }
 
   /** Test that output does NOT contain a substring (case-insensitive). */
   async function testNotContains(label, tool, args, forbidden, timeoutMs = 30000) {
+    if (typeof forbidden !== "string" || forbidden.length === 0) {
+      throw new Error(`testNotContains("${label}"): forbidden substring must be a non-empty string. ` +
+        `An empty string is always "found" via String.includes(""), so this would always fail.`);
+    }
     try {
       const res = await callTool(tool, args, timeoutMs);
       const text = getText(res);
@@ -246,6 +270,32 @@ export async function createHarness(suiteName = "Test") {
     skipped++;
   }
 
+  /** Unit-style assertion that feeds into the suite's pass/fail counter.
+   *  Use for pure-function tests that don't need a tool call. If the
+   *  condition is falsy, records a failure with the provided context. */
+  function assert(label, condition, context = "") {
+    if (condition) {
+      console.log(`  ✓ ${label}`);
+      passed++;
+    } else {
+      console.log(`  ✗ ${label}${context ? " — " + context : ""}`);
+      failed++;
+      failures.push(label);
+    }
+  }
+
+  /** Convenience: strict-equality assertion with auto-generated context. */
+  function assertEq(label, actual, expected) {
+    if (actual === expected) {
+      console.log(`  ✓ ${label}`);
+      passed++;
+    } else {
+      console.log(`  ✗ ${label}\n      expected: ${JSON.stringify(expected)}\n      actual:   ${JSON.stringify(actual)}`);
+      failed++;
+      failures.push(label);
+    }
+  }
+
   /** Print section header. */
   function section(name) {
     console.log(`\n── ${name} ${"─".repeat(Math.max(0, 55 - name.length))}`);
@@ -263,5 +313,5 @@ export async function createHarness(suiteName = "Test") {
     return failed;
   }
 
-  return { callTool, getText, isError, test, testContains, testNotContains, testMatch, testRejects, skip, section, finish };
+  return { callTool, getText, isError, test, testContains, testNotContains, testMatch, testRejects, skip, assert, assertEq, section, finish };
 }

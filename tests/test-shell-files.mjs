@@ -15,9 +15,12 @@ await h.testContains("Root Shell → id", "adb_root_shell", { command: "id" }, "
 await h.testContains("Root Shell → whoami", "adb_root_shell", { command: "whoami" }, "root");
 
 h.section("Filesystem Operations");
-await h.testContains("ls /sdcard", "adb_ls", { path: "/sdcard" }, "");
-await h.testContains("ls /sdcard (detailed)", "adb_ls", { path: "/sdcard", details: true }, "");
-await h.testContains("ls /system/bin", "adb_ls", { path: "/system/bin" }, "sh");
+await h.test("ls /sdcard", "adb_ls", { path: "/sdcard" });
+await h.test("ls /sdcard (detailed)", "adb_ls", { path: "/sdcard", details: true });
+// /system/bin always contains a 'sh' binary on Android — but "sh" is too
+// loose (matches "she", "shell", "shape" anywhere). Use "toybox" or "linker64"
+// which are unambiguous Android system binaries present on every build.
+await h.testContains("ls /system/bin", "adb_ls", { path: "/system/bin" }, "toybox");
 
 // Create a temp file, cat it, then clean up
 await h.test("Shell → create temp file", "adb_shell", { command: "echo 'DeepADB test content 12345' > /sdcard/DA_test_file.txt" });
@@ -31,12 +34,12 @@ await h.testContains("List system packages", "adb_list_packages", { type: "syste
 await h.testContains("List third-party packages", "adb_list_packages", { type: "third-party" }, "magisk");
 await h.testContains("Package info (Magisk)", "adb_package_info", { packageName: "com.topjohnwu.magisk" }, "com.topjohnwu.magisk");
 await h.testContains("Filter packages → magisk", "adb_list_packages", { filter: "magisk" }, "magisk");
-await h.testContains("Resolve intents (Magisk)", "adb_resolve_intents", { packageName: "com.topjohnwu.magisk" }, "");
+await h.test("Resolve intents (Magisk)", "adb_resolve_intents", { packageName: "com.topjohnwu.magisk" });
 
 h.section("Diagnostics");
 await h.testContains("Dumpsys battery", "adb_dumpsys", { service: "battery" }, "level");
 await h.testContains("Dumpsys list", "adb_dumpsys", { service: "list" }, "battery");
-await h.testContains("Top (1 iteration)", "adb_top", { count: 1 }, "");
+await h.test("Top (1 iteration)", "adb_top", { count: 1 });
 await h.test("Network Connections", "adb_network_connections", { protocol: "all" });
 
 h.section("Port Forwarding");

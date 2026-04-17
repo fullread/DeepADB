@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.fullread/deepadb",
-  "description": "Full-featured ADB MCP server — 180 tools across 43 modules, from UI to baseband.",
+  "description": "Full-featured ADB MCP server — 198 tools across 44 modules, from UI to baseband.",
   "websiteUrl": "https://github.com/fullread/DeepADB",
   "repository": {
     "url": "https://github.com/fullread/DeepADB",
     "source": "github"
   },
-  "version": "1.1.0",
+  "version": "1.1.1",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "deepadb",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "transport": {
         "type": "stdio"
       }

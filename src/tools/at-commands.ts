@@ -102,10 +102,11 @@ async function sendAtCommand(
 
   // Send the command and read response with a timeout.
   // Both cmd and deviceNode are validated above — no shell metacharacters.
-  // Use printf instead of echo -e for portable carriage return handling
-  // (echo -e is not supported by all Android shell implementations).
+  // Use printf with '%s\r' format to separate format string from data —
+  // AT commands may contain % (e.g., AT%RESTART) which printf would
+  // misinterpret as format specifiers if cmd were in the format position.
   const timeoutSec = Math.max(1, Math.ceil(timeoutMs / 1000));
-  const shellCmd = `printf '${cmd}\\r' > '${deviceNode}' && timeout ${timeoutSec} cat '${deviceNode}' 2>&1 || true`;
+  const shellCmd = `printf '%s\\r' '${cmd}' > '${deviceNode}' && timeout ${timeoutSec} cat '${deviceNode}' 2>&1 || true`;
 
   try {
     const result = await ctx.bridge.rootShell(shellCmd, {
@@ -122,6 +123,31 @@ async function sendAtCommand(
   } catch (err) {
     return { response: "", error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * Auto-detect the first existing modem device node for the given chipset family.
+ * Probes MODEM_PATHS entries via `test -e` through root shell.
+ * Returns the first existing node path, or null if none found.
+ */
+async function autoDetectAtPort(
+  ctx: ToolContext,
+  serial: string,
+  family?: string,
+): Promise<string | null> {
+  if (!family) {
+    const props = await ctx.deviceManager.getDeviceProps(serial);
+    family = detectChipsetFamily(props);
+  }
+  const paths = MODEM_PATHS[family] ?? MODEM_PATHS.generic;
+  const existCmd = paths.map((p) => `test -e ${p} && echo "EXISTS:${p}"`).join("; ");
+  const existResult = await ctx.bridge.rootShell(existCmd, {
+    device: serial, timeout: 5000, ignoreExitCode: true,
+  });
+  const existing = existResult.stdout.split("\n")
+    .filter((l) => l.startsWith("EXISTS:"))
+    .map((l) => l.replace("EXISTS:", "").trim());
+  return existing.length > 0 ? existing[0]! : null;
 }
 
 export function registerAtCommandTools(ctx: ToolContext): void {
@@ -249,26 +275,13 @@ export function registerAtCommandTools(ctx: ToolContext): void {
         // Auto-detect port if not specified
         let targetPort = port;
         if (!targetPort) {
-          const props = await ctx.deviceManager.getDeviceProps(serial);
-          const family = detectChipsetFamily(props);
-          const paths = MODEM_PATHS[family] ?? MODEM_PATHS.generic;
-
-          // Quick probe: find first existing node
-          const existCmd = paths.map((p) => `test -e ${p} && echo "EXISTS:${p}"`).join("; ");
-          const existResult = await ctx.bridge.rootShell(existCmd, {
-            device: serial, timeout: 5000, ignoreExitCode: true,
-          });
-          const existing = existResult.stdout.split("\n")
-            .filter((l) => l.startsWith("EXISTS:"))
-            .map((l) => l.replace("EXISTS:", "").trim());
-
-          if (existing.length === 0) {
+          targetPort = await autoDetectAtPort(ctx, serial) ?? undefined;
+          if (!targetPort) {
             return {
               content: [{ type: "text", text: "No modem device node found. Use adb_at_detect to identify available ports, or specify 'port' manually." }],
               isError: true,
             };
           }
-          targetPort = existing[0];
         }
 
         const { response, error } = await sendAtCommand(ctx, serial, targetPort, command, timeout);
@@ -329,23 +342,13 @@ export function registerAtCommandTools(ctx: ToolContext): void {
         // Auto-detect port if not specified
         let targetPort = port;
         if (!targetPort) {
-          const props = await ctx.deviceManager.getDeviceProps(serial);
-          const family = detectChipsetFamily(props);
-          const paths = MODEM_PATHS[family] ?? MODEM_PATHS.generic;
-          const existCmd = paths.map((p) => `test -e ${p} && echo "EXISTS:${p}"`).join("; ");
-          const existResult = await ctx.bridge.rootShell(existCmd, {
-            device: serial, timeout: 5000, ignoreExitCode: true,
-          });
-          const existing = existResult.stdout.split("\n")
-            .filter((l) => l.startsWith("EXISTS:"))
-            .map((l) => l.replace("EXISTS:", "").trim());
-          if (existing.length === 0) {
+          targetPort = await autoDetectAtPort(ctx, serial) ?? undefined;
+          if (!targetPort) {
             return {
               content: [{ type: "text", text: "No modem device node found. Use adb_at_detect or specify 'port'." }],
               isError: true,
             };
           }
-          targetPort = existing[0];
         }
 
         const results: string[] = [`Port: ${targetPort}`, `Commands: ${commands.length}`, ``];
@@ -389,23 +392,13 @@ export function registerAtCommandTools(ctx: ToolContext): void {
         // Auto-detect port
         let targetPort = port;
         if (!targetPort) {
-          const props = await ctx.deviceManager.getDeviceProps(serial);
-          const family = detectChipsetFamily(props);
-          const paths = MODEM_PATHS[family] ?? MODEM_PATHS.generic;
-          const existCmd = paths.map((p) => `test -e ${p} && echo "EXISTS:${p}"`).join("; ");
-          const existResult = await ctx.bridge.rootShell(existCmd, {
-            device: serial, timeout: 5000, ignoreExitCode: true,
-          });
-          const existing = existResult.stdout.split("\n")
-            .filter((l) => l.startsWith("EXISTS:"))
-            .map((l) => l.replace("EXISTS:", "").trim());
-          if (existing.length === 0) {
+          targetPort = await autoDetectAtPort(ctx, serial) ?? undefined;
+          if (!targetPort) {
             return {
               content: [{ type: "text", text: "No modem device node found. Use adb_at_detect or specify 'port'." }],
               isError: true,
             };
           }
-          targetPort = existing[0];
         }
 
         // Standard diagnostic AT command sequence
@@ -467,17 +460,7 @@ export function registerAtCommandTools(ctx: ToolContext): void {
         // ── Auto-detect port if not specified ──
         let targetPort = port;
         if (!targetPort) {
-          const paths = MODEM_PATHS[family] ?? MODEM_PATHS.generic;
-          const existCmd = paths.map((p) => `test -e ${p} && echo "EXISTS:${p}"`).join("; ");
-          const existResult = await ctx.bridge.rootShell(existCmd, {
-            device: serial, timeout: 5000, ignoreExitCode: true,
-          });
-          const existing = existResult.stdout.split("\n")
-            .filter((l) => l.startsWith("EXISTS:"))
-            .map((l) => l.replace("EXISTS:", "").trim());
-          if (existing.length > 0) {
-            targetPort = existing[0];
-          }
+          targetPort = await autoDetectAtPort(ctx, serial, family) ?? undefined;
         }
 
         sections.push(`AT port: ${targetPort ?? "not available"}`);

@@ -29,5 +29,16 @@ initramfs-*
 .DS_Store
 Thumbs.db
 
-# MCP Registry publisher binary
+# MCP Registry publisher binary and credentials
 mcp-publisher.exe
+.mcpregistry_*
+
+# Release workflow artifacts (session-local, not committed)
+cmsg.txt
+run_*.txt
+run_on_device.sh
+extract_on_device.sh
+run_*_capture.sh
+
+# Private working docs (roadmap, audit logs, internal notes)
+private-docs/

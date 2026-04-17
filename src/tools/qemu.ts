@@ -199,6 +199,24 @@ function sanitizeName(name: string): string {
 }
 
 /**
+ * Escape a single shell argument for safe use inside `su -c "<cmd>"`.
+ *
+ * Unconditionally wraps the argument in single quotes and escapes any
+ * internal single quotes using the canonical `'\''` close-reopen pattern.
+ * This is the same robust escape used by shellEscape() in sanitize.ts,
+ * applied at the argv level so every QEMU arg is individually safe.
+ *
+ * A previous heuristic ("only quote if the arg contains =/,/:") missed
+ * injection payloads like `append: "; reboot"` that contain no trigger
+ * chars but still break shell parsing. Don't be clever — quote everything.
+ *
+ * Exported for unit testing; see tests/test-security.mjs.
+ */
+export function escapeQemuShellArg(arg: string): string {
+  return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
+/**
  * Verify that a path is contained within the image directory.
  * Prevents path traversal attacks via image name manipulation.
  */
@@ -733,13 +751,8 @@ export function registerQemuTools(ctx: ToolContext): void {
 
         if (useKvm) {
           // Build a shell command string for su -c.
-          // Single-quote each arg that could contain special chars (file paths).
-          const escapedArgs = qemuArgs.map(arg => {
-            if (arg.includes("=") || arg.includes("/") || arg.includes(",") || arg.includes(":")) {
-              return `'${arg.replace(/'/g, "'\\''")}'`;
-            }
-            return arg;
-          }).join(" ");
+          // See escapeQemuShellArg() doc: unconditional quoting, argv-level.
+          const escapedArgs = qemuArgs.map(escapeQemuShellArg).join(" ");
 
           const suCmd = `PATH=${termuxBin}:$PATH LD_LIBRARY_PATH=${termuxLib} ${tasksetPrefix}qemu-system-aarch64 ${escapedArgs}`;
           proc = spawn("su", ["-c", suCmd], {
