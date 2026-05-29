@@ -11,6 +11,11 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: "development"
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      include:
+        - "*"
 
   # Keep GitHub Actions versions current as well.
   - package-ecosystem: "github-actions"
@@ -21,3 +26,7 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+    cooldown:
+      default-days: 7
+      include:
+        - "*"

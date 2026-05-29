@@ -2,6 +2,24 @@
 
 All notable changes to DeepADB are documented in this file.
 
+## Unreleased
+
+### Security — CI supply-chain hardening
+
+Hardened the CI/release pipeline against dependency- and action-level
+supply-chain attacks. CI configuration only — no package or behavior changes.
+
+- **Dependabot cooldown.** Update PRs now wait out a hold window before they are
+  opened: 7 days for npm and GitHub Actions updates, 30 days for npm majors, so a
+  malicious release has time to be detected and pulled before it reaches a PR.
+- **npm ci --ignore-scripts in CI.** Every install step skips dependency lifecycle
+  scripts, neutralizing the postinstall path that self-propagating npm worms use
+  to harvest credentials when a PR runs CI. The lockfile currently declares no
+  install scripts, so nothing about what is built changes.
+- **SHA-pinned GitHub Actions.** Every uses: is pinned to a full commit SHA (with
+  the version in a trailing comment) rather than a movable tag, closing the
+  re-pointed-tag vector. Dependabot keeps the pins current.
+
 ## v1.1.2 — Hardware Re-validation & Security-Test Corrections
 
 Re-ran the full four-cell hardware matrix and corrected three security-suite
