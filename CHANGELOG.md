@@ -20,6 +20,10 @@ supply-chain attacks. CI configuration only — no package or behavior changes.
   the version in a trailing comment) rather than a movable tag, closing the
   re-pointed-tag vector. Dependabot keeps the pins current.
 
+### Fixed — device-free CI suite
+
+- Made four device-free assertions tolerate the `ubuntu-latest` state where adb is installed but every command exits 1 (no device/server) — they previously assumed adb was either fully working or entirely absent, which had kept the Test workflow red. Test files only.
+
 ## v1.1.2 — Hardware Re-validation & Security-Test Corrections
 
 Re-ran the full four-cell hardware matrix and corrected three security-suite
