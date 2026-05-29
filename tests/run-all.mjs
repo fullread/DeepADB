@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Run all DeepADB test suites sequentially.
  * Usage: node tests/run-all.mjs
@@ -9,14 +11,29 @@ import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// Device-free suites — safe to run in CI without a connected device or
+// emulator. They either touch no device at all (transports, supply-chain) or
+// skip-guard their device-dependent assertions (boundaries, result-handles,
+// sanitize-fuzz). Pass --ci to restrict the run to this set.
+const CI_SAFE = new Set([
+  "test-boundaries.mjs",
+  "test-result-handles.mjs",
+  "test-sanitize-fuzz.mjs",
+  "test-supply-chain.mjs",
+  "test-transports.mjs",
+]);
+
+const ciMode = process.argv.includes("--ci");
 const suites = readdirSync(__dirname)
   .filter(f => f.startsWith("test-") && f.endsWith(".mjs"))
+  .filter(f => !ciMode || CI_SAFE.has(f))
   .sort();
 
 console.log("╔══════════════════════════════════════════════════════════╗");
 console.log("║          DeepADB — Full Test Suite                 ║");
 console.log("╚══════════════════════════════════════════════════════════╝");
-console.log(`\nSuites: ${suites.join(", ")}\n`);
+console.log(`\nMode: ${ciMode ? "CI (device-free suites only)" : "full"}`);
+console.log(`Suites: ${suites.join(", ")}\n`);
 
 let totalPassed = 0;
 let totalFailed = 0;

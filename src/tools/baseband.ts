@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Baseband/Modem Integration Tools — Deep cellular radio state inspection.
  * 
@@ -14,7 +16,8 @@
 import { z } from "zod";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArg } from "../middleware/sanitize.js";
+import { resultHandleSchemaFields, withResultHandle } from "./result-handles.js";
+import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 import { detectSimConfig } from "../middleware/chipset.js";
 
 export function registerBasebandTools(ctx: ToolContext): void {
@@ -25,8 +28,9 @@ export function registerBasebandTools(ctx: ToolContext): void {
     {
       device: z.string().optional().describe("Device serial"),
       includeImei: z.boolean().optional().default(false).describe("Include IMEI in output (sensitive permanent device identifier — opt-in only)"),
+      ...resultHandleSchemaFields,
     },
-    async ({ device, includeImei }) => {
+    async ({ device, includeImei, result_handle, result_handle_ttl }) => {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
@@ -53,7 +57,7 @@ export function registerBasebandTools(ctx: ToolContext): void {
 
         const propResults = await Promise.allSettled(
           propKeys.map((key) =>
-            ctx.bridge.shell(`getprop ${key}`, { device: serial })
+            ctx.bridge.shell(`getprop ${shellQuote(key)}`, { device: serial })
               .then((r) => ({ key, value: r.stdout.trim() }))
           )
         );
@@ -115,7 +119,7 @@ export function registerBasebandTools(ctx: ToolContext): void {
 
           const slotResults = await Promise.allSettled(
             slotQueries.map((q) =>
-              ctx.bridge.shell(`getprop ${q.prop}`, { device: serial })
+              ctx.bridge.shell(`getprop ${shellQuote(q.prop)}`, { device: serial })
                 .then((r) => ({ ...q, value: r.stdout.trim() }))
             )
           );
@@ -191,7 +195,11 @@ export function registerBasebandTools(ctx: ToolContext): void {
           sections.push("\nIMEI: (omitted — set includeImei=true to retrieve)");
         }
 
-        return { content: [{ type: "text", text: sections.join("\n") }] };
+        return withResultHandle(
+          { content: [{ type: "text" as const, text: sections.join("\n") }] },
+          "baseband_info",
+          { result_handle, result_handle_ttl },
+        );
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
       }
@@ -355,8 +363,15 @@ export function registerBasebandTools(ctx: ToolContext): void {
           if (grepErr) return { content: [{ type: "text", text: grepErr }], isError: true };
         }
 
-        const grepSuffix = grep ? ` | grep -iF '${grep}'` : "";
-        // Double-quotes intentional: this goes through rootShell (su -c '...'), so inner single quotes would break
+        // U3 fix: corrected rationale. Previous comment claimed single-quotes
+        // would "break" through rootShell, which is technically incorrect —
+        // shellQuote's '\'' close/reopen pattern handles embedded single
+        // quotes correctly through both ADB and rootShell paths. The actual
+        // reason for the dual format is visual: the rootShell wrap composes
+        // its own su -c "..." string, so using double-quotes here avoids a
+        // visual mess of escaped single-quote sequences when read by humans.
+        // Functionally either style is safe; the choice is for readability.
+        const grepSuffix = grep ? ` | grep -iF ${shellQuote(grep)}` : "";
         const dmesgGrepSuffix = grep ? ` | grep -iF "${grep}"` : "";
 
         const [rilLog, telephonyLog, radioLog, dmesgModem] = await Promise.allSettled([

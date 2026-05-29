@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Input Gestures, UI Automation & Device Awareness Tools.
  *
@@ -10,9 +12,9 @@
 import { z } from "zod";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { shellEscape } from "../middleware/sanitize.js";
+import { shellQuote } from "../middleware/sanitize.js";
+import { sanitizeFilenameComponentDotted } from "../middleware/fs-utils.js";
 import { captureUiDump, parseUiNodes } from "../middleware/ui-dump.js";
-import { isOnDevice } from "../config/config.js";
 import { join } from "path";
 
 export function registerInputGestureTools(ctx: ToolContext): void {
@@ -141,7 +143,7 @@ export function registerInputGestureTools(ctx: ToolContext): void {
         // Android's input text treats spaces as argument separators — must use %s
         // Also need to escape shell special characters
         const escaped = text.replace(/ /g, "%s");
-        const shellCmd = `input text '${shellEscape(escaped)}'`;
+        const shellCmd = `input text ${shellQuote(escaped)}`;
         await ctx.bridge.shell(shellCmd, { device: resolved.serial, ignoreExitCode: true });
         return { content: [{ type: "text", text: `Typed ${text.length} character(s)` }] };
       } catch (error) {
@@ -154,14 +156,14 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     "adb_open_url",
     "Open a URL on the device in the default browser or handling app. Uses Android's VIEW intent action.",
     {
-      url: z.string().url().describe("URL to open (must be a valid URL with scheme)"),
+      url: z.url().describe("URL to open (must be a valid URL with scheme)"),
       device: z.string().optional().describe("Device serial"),
     },
     async ({ url, device }) => {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const result = await ctx.bridge.shell(
-          `am start -a android.intent.action.VIEW -d '${shellEscape(url)}'`,
+          `am start -a android.intent.action.VIEW -d ${shellQuote(url)}`,
           { device: resolved.serial, ignoreExitCode: true }
         );
         const output = result.stdout.trim();
@@ -243,17 +245,56 @@ export function registerInputGestureTools(ctx: ToolContext): void {
           }
           // Use am broadcast to set clipboard via a helper — this is the most reliable cross-version approach
           await ctx.bridge.shell(
-            `am broadcast -a clipper.set -e text '${shellEscape(text)}'`,
+            `am broadcast -a clipper.set -e text ${shellQuote(text)}`,
             { device: serial, ignoreExitCode: true }
           );
           // Fallback: use service call if clipper app isn't installed
           // service call clipboard 2 (SET_PRIMARY_CLIP) requires parcel construction
           // For simplicity, also try the settings-based approach
           await ctx.bridge.shell(
-            `input keyevent --longpress KEYCODE_UNKNOWN 2>/dev/null; settings put system clipboard_text '${shellEscape(text)}' 2>/dev/null`,
+            `input keyevent --longpress KEYCODE_UNKNOWN 2>/dev/null; settings put system clipboard_text ${shellQuote(text)} 2>/dev/null`,
             { device: serial, ignoreExitCode: true }
           );
-          return { content: [{ type: "text", text: `Clipboard set (${text.length} chars). Note: if no clipper app is installed, use 'input text' as alternative.` }] };
+
+          // AH7 fix: read-back verification. Previously the tool reported
+          // "Clipboard set" even when BOTH fallback writes failed silently
+          // (no clipper app + Android 12+ blocking settings put). Now we
+          // immediately read the clipboard back and surface success/failure
+          // honestly. The read uses the same dumpsys / service call methods
+          // as the read action below — duplicated here to avoid moving the
+          // methods array above the function structure.
+          //
+          // Caveats this verification cannot catch: (1) On Android 12+ the
+          // clipboard requires the requesting app to be in the foreground,
+          // and adb shell isn't a foreground app, so read-back may fail even
+          // if write succeeded for foreground consumers. We surface that as
+          // an explicit "could not verify" rather than a hard failure.
+          let verified: string | null = null;
+          const verifyMethods: Array<{ cmd: string; parse: (s: string) => string | null }> = [
+            { cmd: "dumpsys clipboard | grep -A 2 'mPrimaryClip'", parse: (s) => {
+              const m = s.match(/Text\s*\{(.+?)\}/);
+              return m ? m[1] : null;
+            }},
+            { cmd: "service call clipboard 1 2>/dev/null", parse: (s) => {
+              const parts = s.match(/'([^']*)'/g);
+              return parts ? parts.map(p => p.replace(/'/g, "").replace(/\.\s*$/g, "")).join("") : null;
+            }},
+          ];
+          for (const method of verifyMethods) {
+            try {
+              const result = await ctx.bridge.shell(method.cmd, { device: serial, timeout: 3000, ignoreExitCode: true });
+              const parsed = method.parse(result.stdout);
+              if (parsed && parsed.trim().length > 0) { verified = parsed; break; }
+            } catch { /* try next */ }
+          }
+
+          if (verified === text) {
+            return { content: [{ type: "text", text: `Clipboard set (${text.length} chars). Verified: read-back matches.` }] };
+          } else if (verified !== null && verified !== text) {
+            return { content: [{ type: "text", text: `Clipboard write may have partially failed: wrote ${text.length} chars but read back ${verified.length} chars of different content. Some apps may have own clipboard implementations.` }], isError: true };
+          } else {
+            return { content: [{ type: "text", text: `Clipboard write attempted (${text.length} chars) but read-back returned empty — could not verify. On Android 12+, this is normal: the clipboard requires a foreground app to read. The write may still have succeeded; try paste in a foreground app to confirm. If pasting also yields empty, no clipper helper is installed.` }] };
+          }
         }
 
         // action === "read"
@@ -549,7 +590,7 @@ export function registerInputGestureTools(ctx: ToolContext): void {
 
   ctx.server.tool(
     "adb_screenshot_compressed",
-    "Take a screenshot and compress it for reduced file size and LLM token usage. Captures at full resolution then uses device-side conversion to produce a smaller JPEG. Returns the local file path. Ideal for iterative UI testing where token cost matters.",
+    "Take a screenshot and pull the full-resolution PNG, plus metadata for client-side compression. Returns local file path, dimensions, file size, and a ready-to-run imagemagick command for converting to a smaller JPEG. (Android doesn't ship imagemagick, so the actual compression is post-processing — this tool sets up everything you need.)",
     {
       quality: z.number().int().min(10).max(100).optional().default(50)
         .describe("JPEG quality (10-100, default 50). Lower = smaller file, more artifacts"),
@@ -562,14 +603,14 @@ export function registerInputGestureTools(ctx: ToolContext): void {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
-        const remoteDir = isOnDevice() ? "/data/local/tmp" : "/sdcard";
+        const remoteDir = "/data/local/tmp";
         const timestamp = Date.now();
         const remotePng = `${remoteDir}/DA_cap_${timestamp}.png`;
         const remoteJpg = `${remoteDir}/DA_cap_${timestamp}.jpg`;
 
         // Sanitize filename
         const outName = filename
-          ? filename.replace(/[^a-zA-Z0-9._-]/g, "_")
+          ? sanitizeFilenameComponentDotted(filename)
           : `screenshot_compressed_${timestamp}.jpg`;
         const localPath = join(ctx.config.tempDir, outName);
 
@@ -619,7 +660,7 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     {
       actions: z.array(z.object({
         type: z.enum(["tap", "swipe", "fling", "long_press", "double_tap", "keyevent", "text", "drag", "pinch", "back", "home", "sleep"])
-          .describe("Action type"),
+          .describe("Action type — one of: tap, swipe, fling, long_press, double_tap, keyevent, text, drag, pinch, back, home, sleep. The args field documents the expected argument format per type."),
         args: z.string().optional()
           .describe("Action arguments: tap='x y', swipe='x1 y1 x2 y2 [ms]', fling='x1 y1 x2 y2 [ms]', long_press='x y [ms]', double_tap='x y', keyevent='KEYCODE_*', text='string', drag='x1 y1 x2 y2 [ms]', pinch='cx cy startRadius endRadius [durationMs]', sleep='ms', back/home=none"),
       })).min(1).max(50).describe("Array of actions to execute (1-50)"),
@@ -683,7 +724,7 @@ export function registerInputGestureTools(ctx: ToolContext): void {
                 cmd = `input keyevent ${args}`;
                 break;
               case "text":
-                cmd = `input text '${shellEscape(args.replace(/ /g, "%s"))}'`;
+                cmd = `input text ${shellQuote(args.replace(/ /g, "%s"))}`;
                 break;
               case "drag":
                 if (!/^[\d\s]+$/.test(args)) throw new Error(`Invalid drag args: "${args}"`);
@@ -704,7 +745,14 @@ export function registerInputGestureTools(ctx: ToolContext): void {
                 const pf2sy = Math.round(pcy - psr * Math.sin(prad));
                 const pf2ex = Math.round(pcx - per * Math.cos(prad));
                 const pf2ey = Math.round(pcy - per * Math.sin(prad));
-                cmd = `input swipe ${pf1sx} ${pf1sy} ${pf1ex} ${pf1ey} ${pdur} & input swipe ${pf2sx} ${pf2sy} ${pf2ex} ${pf2ey} ${pdur}`;
+                // AH11 note: the bare & here is INTENTIONAL, not a typo or shell-
+          // injection vector. Pinch/spread requires two input swipe commands
+          // running in parallel so both fingers move simultaneously; the &
+          // backgrounds the first while the second runs. All coordinate
+          // values were validated against /^[\d\s]+$/ above (pure digits +
+          // whitespace), so there's no operator-supplied content here that
+          // could exploit the & — only validated integers from parseInt.
+          cmd = `input swipe ${pf1sx} ${pf1sy} ${pf1ex} ${pf1ey} ${pdur} & input swipe ${pf2sx} ${pf2sy} ${pf2ex} ${pf2ey} ${pdur}`;
                 break;
               }
               case "back":

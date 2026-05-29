@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Screenshot Diffing Tools — Pixel-level screenshot comparison for visual regression detection.
  *
@@ -11,12 +13,13 @@
 
 import { z } from "zod";
 import { join } from "path";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, unlinkSync } from "fs";
+import { readFileSync, existsSync, readdirSync, statSync, unlinkSync } from "fs";
+import { ensurePrivateDir, writeAtomicSync, sanitizeFilenameComponent } from "../middleware/fs-utils.js";
 import { createHash } from "crypto";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { isOnDevice } from "../config/config.js";
-import { shellEscape } from "../middleware/sanitize.js";
+import { resultHandleSchemaFields, withResultHandle } from "./result-handles.js";
+import { shellQuote } from "../middleware/sanitize.js";
 import { decodePngPixels } from "../middleware/png-utils.js";
 
 interface ScreenshotMeta {
@@ -33,10 +36,6 @@ function getBaselineDir(tempDir: string): string {
   return join(tempDir, "screenshot-baselines");
 }
 
-function sanitizeName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_-]/g, "_");
-}
-
 /**
  * Capture a screenshot and return the local PNG path plus basic metadata.
  * Uses /data/local/tmp/ on-device to avoid scoped storage issues.
@@ -47,11 +46,11 @@ async function captureScreenshot(
   serial: string,
   localPath: string,
 ): Promise<{ width: number; height: number; fileSize: number; sha256: string }> {
-  const remoteDir = isOnDevice() ? "/data/local/tmp" : "/sdcard";
+  const remoteDir = "/data/local/tmp";
   const remotePath = `${remoteDir}/DA_diff_${Date.now()}.png`;
 
   try {
-    await ctx.bridge.shell(`screencap -p '${shellEscape(remotePath)}'`, { device: serial, timeout: 15000 });
+    await ctx.bridge.shell(`screencap -p ${shellQuote(remotePath)}`, { device: serial, timeout: 15000 });
     await ctx.bridge.exec(["pull", remotePath, localPath], { device: serial, timeout: 30000 });
 
     // Get dimensions from device
@@ -68,7 +67,7 @@ async function captureScreenshot(
     return { width, height, fileSize, sha256 };
   } finally {
     // Always clean up the device-side screenshot, even if pull/hash throws
-    await ctx.bridge.shell(`rm '${shellEscape(remotePath)}'`, { device: serial, ignoreExitCode: true }).catch(() => {});
+    await ctx.bridge.shell(`rm ${shellQuote(remotePath)}`, { device: serial, ignoreExitCode: true }).catch(() => {});
   }
 }
 
@@ -160,16 +159,17 @@ export function registerScreenshotDiffTools(ctx: ToolContext): void {
     {
       name: z.string().describe("Baseline name (e.g., 'home_screen', 'login_page', 'threat_alert')"),
       device: z.string().optional().describe("Device serial"),
+      ...resultHandleSchemaFields,
     },
-    async ({ name, device }) => {
+    async ({ name, device, result_handle, result_handle_ttl }) => {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
 
         const dir = getBaselineDir(ctx.config.tempDir);
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        if (!existsSync(dir)) ensurePrivateDir(dir);
 
-        const safeName = sanitizeName(name);
+        const safeName = sanitizeFilenameComponent(name);
         const pngPath = join(dir, `${safeName}.png`);
         const metaPath = join(dir, `${safeName}.meta.json`);
 
@@ -184,14 +184,18 @@ export function registerScreenshotDiffTools(ctx: ToolContext): void {
           sha256,
           fileSize,
         };
-        writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+        writeAtomicSync(metaPath, JSON.stringify(meta, null, 2));
 
-        return {
-          content: [{
-            type: "text",
-            text: `Screenshot baseline saved: ${safeName}\nPath: ${pngPath}\nDimensions: ${width}x${height}\nSize: ${(fileSize / 1024).toFixed(1)} KB\nSHA-256: ${sha256.substring(0, 16)}...`,
-          }],
-        };
+        return withResultHandle(
+          {
+            content: [{
+              type: "text" as const,
+              text: `Screenshot baseline saved: ${safeName}\nPath: ${pngPath}\nDimensions: ${width}x${height}\nSize: ${(fileSize / 1024).toFixed(1)} KB\nSHA-256: ${sha256.substring(0, 16)}...`,
+            }],
+          },
+          "screenshot_baseline",
+          { result_handle, result_handle_ttl },
+        );
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
       }
@@ -206,14 +210,15 @@ export function registerScreenshotDiffTools(ctx: ToolContext): void {
       tolerancePercent: z.number().min(0).max(100).optional().default(0)
         .describe("Pixel difference percentage threshold below which the result reports IDENTICAL. 0 = exact match required. 1-2 absorbs clock/status bar changes."),
       device: z.string().optional().describe("Device serial"),
+      ...resultHandleSchemaFields,
     },
-    async ({ baseline, tolerancePercent, device }) => {
+    async ({ baseline, tolerancePercent, device, result_handle, result_handle_ttl }) => {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
 
         const dir = getBaselineDir(ctx.config.tempDir);
-        const safeName = sanitizeName(baseline);
+        const safeName = sanitizeFilenameComponent(baseline);
         const baselinePngPath = join(dir, `${safeName}.png`);
         const baselineMetaPath = join(dir, `${safeName}.meta.json`);
 
@@ -225,7 +230,11 @@ export function registerScreenshotDiffTools(ctx: ToolContext): void {
         }
 
         // Capture current screenshot
-        const currentPngPath = join(dir, `_diff_current_${Date.now()}.png`);
+        // AY7 fix: add PID + random suffix to defeat Date.now() collision in
+        // the rare case two diff captures land in the same millisecond (e.g.,
+        // parallel automation calling adb_screenshot_diff from a script).
+        // The path is local-only and short-lived, so the format change is safe.
+        const currentPngPath = join(dir, `_diff_current_${Date.now()}_${process.pid}_${Math.random().toString(36).slice(2, 8)}.png`);
         const current = await captureScreenshot(ctx, serial, currentPngPath);
 
         // Load baseline metadata if available
@@ -298,7 +307,11 @@ export function registerScreenshotDiffTools(ctx: ToolContext): void {
           try { unlinkSync(currentPngPath); } catch { /* ignore */ }
         }
 
-        return { content: [{ type: "text", text: sections.join("\n") }] };
+        return withResultHandle(
+          { content: [{ type: "text" as const, text: sections.join("\n") }] },
+          "screenshot_diff",
+          { result_handle, result_handle_ttl },
+        );
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
       }
@@ -308,8 +321,10 @@ export function registerScreenshotDiffTools(ctx: ToolContext): void {
   ctx.server.tool(
     "adb_screenshot_history",
     "List all saved screenshot baselines with their metadata (timestamp, dimensions, device, file size).",
-    {},
-    async () => {
+    {
+      ...resultHandleSchemaFields,
+    },
+    async ({ result_handle, result_handle_ttl }) => {
       try {
         const dir = getBaselineDir(ctx.config.tempDir);
         if (!existsSync(dir)) {
@@ -339,7 +354,11 @@ export function registerScreenshotDiffTools(ctx: ToolContext): void {
         }
 
         lines.push(`\nBaseline directory: ${dir}`);
-        return { content: [{ type: "text", text: lines.join("\n") }] };
+        return withResultHandle(
+          { content: [{ type: "text" as const, text: lines.join("\n") }] },
+          "screenshot_history",
+          { result_handle, result_handle_ttl },
+        );
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
       }

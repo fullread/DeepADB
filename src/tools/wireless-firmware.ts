@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Wireless Firmware Tools — WiFi, Bluetooth, and NFC firmware identification.
  *
@@ -271,13 +273,19 @@ export function registerWirelessFirmwareTools(ctx: ToolContext): void {
 
   ctx.server.tool(
     "adb_wifi_firmware",
-    "WiFi chipset and firmware identification. Reports WiFi driver version, firmware version, chipset/hardware info, supported bands and standards, interface details, and connection state. MAC address is opt-in only (permanent hardware identifier).",
+    "WiFi chipset and firmware identification. Reports WiFi driver version, firmware version, chipset/hardware info, supported bands and standards, interface details, and dumpsys excerpts. BH7 fix: dumpsys truncation now configurable via maxLines. connection state. MAC address is opt-in only (permanent hardware identifier).",
     {
       device: z.string().optional().describe("Device serial"),
       includeMac: z.boolean().optional().default(false)
         .describe("Include WiFi MAC address (permanent hardware identifier — opt-in only)"),
+      // BH7 fix: dumpsys truncation now operator-configurable. Default 200
+      // matches pre-fix behavior. Some Android variants (One UI, MIUI)
+      // produce more verbose dumpsys output where firmware lines appear
+      // past line 200 — operators on those devices can raise this.
+      maxLines: z.number().int().min(50).max(2000).optional().default(200)
+        .describe("Lines of dumpsys output to inspect (50-2000, default 200). Raise for verbose vendor builds where firmware info appears late in dumpsys output."),
     },
-    async ({ device, includeMac }) => {
+    async ({ device, includeMac, maxLines }) => {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
@@ -311,7 +319,7 @@ export function registerWirelessFirmwareTools(ctx: ToolContext): void {
         // ── dumpsys wifi ──
         try {
           const wifiDump = await ctx.bridge.shell(
-            "dumpsys wifi 2>/dev/null | head -200",
+            `dumpsys wifi 2>/dev/null | head -${maxLines}`,
             { device: serial, timeout: 10000, ignoreExitCode: true }
           );
           const parsed = parseWifiDumpsys(wifiDump.stdout);
@@ -356,8 +364,11 @@ export function registerWirelessFirmwareTools(ctx: ToolContext): void {
       device: z.string().optional().describe("Device serial"),
       includeIdentifiers: z.boolean().optional().default(false)
         .describe("Include Bluetooth MAC address and device name (permanent identifiers — opt-in only)"),
+      // BH7 fix (same rationale as WiFi tool above)
+      maxLines: z.number().int().min(50).max(2000).optional().default(300)
+        .describe("Lines of dumpsys output to inspect (50-2000, default 300). Raise for verbose vendor builds."),
     },
-    async ({ device, includeIdentifiers }) => {
+    async ({ device, includeIdentifiers, maxLines }) => {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
@@ -390,7 +401,7 @@ export function registerWirelessFirmwareTools(ctx: ToolContext): void {
         // ── dumpsys bluetooth_manager ──
         try {
           const btDump = await ctx.bridge.shell(
-            "dumpsys bluetooth_manager 2>/dev/null | head -300",
+            `dumpsys bluetooth_manager 2>/dev/null | head -${maxLines}`,
             { device: serial, timeout: 10000, ignoreExitCode: true }
           );
           const parsed = parseBluetoothDumpsys(btDump.stdout);
@@ -415,8 +426,11 @@ export function registerWirelessFirmwareTools(ctx: ToolContext): void {
     "NFC controller firmware identification. Reports controller type (NXP/Broadcom/Samsung/ST), firmware version, NCI version, supported technologies (NFC-A/B/F/V), secure element availability (eSE/UICC), and HCE (Host Card Emulation) support.",
     {
       device: z.string().optional().describe("Device serial"),
+      // BH7 fix (same rationale)
+      maxLines: z.number().int().min(50).max(2000).optional().default(200)
+        .describe("Lines of dumpsys output to inspect (50-2000, default 200). Raise for verbose vendor builds."),
     },
-    async ({ device }) => {
+    async ({ device, maxLines }) => {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
@@ -446,7 +460,7 @@ export function registerWirelessFirmwareTools(ctx: ToolContext): void {
         // ── dumpsys nfc ──
         try {
           const nfcDump = await ctx.bridge.shell(
-            "dumpsys nfc 2>/dev/null | head -200",
+            `dumpsys nfc 2>/dev/null | head -${maxLines}`,
             { device: serial, timeout: 10000, ignoreExitCode: true }
           );
 

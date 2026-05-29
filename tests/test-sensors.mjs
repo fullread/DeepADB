@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Sensor Test Suite — Hardware sensor enumeration, IIO power monitors, and reading.
  * Tests adb_sensor_read (HAL-level, no root) and adb_iio_read (IIO subsystem, root).

@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * GraphQL API — Composed device query endpoint.
  *
@@ -26,6 +28,40 @@ import { AdbBridge } from "./bridge/adb-bridge.js";
 import { DeviceManager } from "./bridge/device-manager.js";
 import { Logger } from "./middleware/logger.js";
 import { checkAuth } from "./middleware/auth.js";
+
+/**
+ * Y1: maximum allowed GraphQL query nesting depth. Brace-counting is a
+ * conservative proxy for AST depth analysis and is sufficient here because
+ * GraphQL grammar uses '{' only for selection sets and inline fragments;
+ * the helper skips '{' inside strings and '#' comments.
+ *
+ * Tuning: bump if the schema grows deeper nested types; reduce if you see
+ * abusive query patterns in audit logs.
+ */
+const GRAPHQL_MAX_QUERY_DEPTH = 10;
+
+function queryDepth(query: string): number {
+  let depth = 0, max = 0;
+  let inStr = false, strChar = '';
+  let inComment = false;
+  for (let i = 0; i < query.length; i++) {
+    const ch = query[i];
+    if (inComment) {
+      if (ch === '\n') inComment = false;
+      continue;
+    }
+    if (inStr) {
+      if (ch === '\\') { i++; continue; } // skip escaped char
+      if (ch === strChar) inStr = false;
+      continue;
+    }
+    if (ch === '#') { inComment = true; continue; }
+    if (ch === '"') { inStr = true; strChar = ch; continue; }
+    if (ch === '{') { depth++; if (depth > max) max = depth; }
+    else if (ch === '}') depth--;
+  }
+  return max;
+}
 
 export interface GraphQLOptions {
   port: number;
@@ -201,7 +237,7 @@ export async function startGraphQLApi(
   // Dynamic import of graphql — optional dependency
   let graphqlModule: {
     buildSchema: (source: string) => unknown;
-    graphql: (args: { schema: unknown; source: string; rootValue: unknown; fieldResolver?: unknown }) => Promise<{ data?: unknown; errors?: Array<{ message: string }> }>;
+    graphql: (args: { schema: unknown; source: string; rootValue: unknown; variableValues?: unknown; fieldResolver?: unknown }) => Promise<{ data?: unknown; errors?: Array<{ message: string }> }>;
   };
 
   try {
@@ -233,7 +269,16 @@ export async function startGraphQLApi(
     if (typeResolvers && typeof typeResolvers[info.fieldName] === "function") {
       return (typeResolvers[info.fieldName] as (parent: unknown, args: unknown) => unknown)(source, (_args ?? {}) as Record<string, unknown>);
     }
-    return source[info.fieldName];
+    // Default-resolver semantics: if the field on the source object is a
+    // function (e.g. a rootValue Query resolver such as devices/device),
+    // invoke it with the field args; otherwise return the property value.
+    // Without this function-invocation branch, root Query resolvers would
+    // resolve to the function object itself rather than its result, which
+    // surfaces as a GraphQL "Expected Iterable" error for list fields.
+    const value = source[info.fieldName];
+    return typeof value === "function"
+      ? (value as (args: unknown, context: unknown, info: unknown) => unknown)(_args ?? {}, _context, info)
+      : value;
   };
 
   const httpServer = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -297,14 +342,26 @@ export async function startGraphQLApi(
           return;
         }
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // Y1: bound query depth to limit resolver-chain cost. A query like
+        // `{devices{battery{level} network{wifi} properties{...}}}` walks
+        // multiple dumpsys calls per device; pathologically deep queries
+        // could fan out into many seconds of shell work. 10 levels covers
+        // every legitimate query shape the schema admits while rejecting
+        // adversarial nesting.
+        if (queryDepth(query) > GRAPHQL_MAX_QUERY_DEPTH) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ errors: [{ message: `Query depth exceeds limit (${GRAPHQL_MAX_QUERY_DEPTH}).` }] }));
+          return;
+        }
+
+         
         const result = await graphqlModule.graphql({
           schema,
           source: query,
           rootValue,
           variableValues: variables,
-          fieldResolver: fieldResolver as any,
-        } as any);
+          fieldResolver,
+        });
 
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(result));

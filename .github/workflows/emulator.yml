@@ -1,0 +1,70 @@
+# Emulator integration lane (best-effort, non-gating).
+#
+# Boots an Android emulator across an API-level matrix and runs the full test
+# suite against it, adding Android-version diversity that a single physical
+# device cannot. This lane is INFORMATIONAL: a stock emulator has no real
+# baseband/modem, no real IIO sensors, no Magisk root, and cannot run nested
+# QEMU/KVM, so the baseband, sensor, on-device-virtualization, and root tools
+# are expected to fail or skip here. It exists to catch gross regressions on a
+# real Android runtime, not to gate merges (see test.yml for the gating CI).
+#
+# Triggered manually or weekly because emulator boots are slow and can be flaky.
+name: Emulator (integration)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 * * 1"  # Mondays 07:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  emulator:
+    name: API ${{ matrix.api-level }} (best-effort)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [ 30, 33, 35 ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # The emulator runner needs hardware acceleration (KVM) on the runner.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Best-effort: failures from hardware-only tools are expected and do not
+      # fail the job. The full output is uploaded for inspection.
+      - name: Run full suite on emulator (informational)
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: npm test 2>&1 | tee emulator-api${{ matrix.api-level }}.log
+
+      - name: Upload emulator test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-log-api${{ matrix.api-level }}
+          path: emulator-api${{ matrix.api-level }}.log
+          if-no-files-found: warn

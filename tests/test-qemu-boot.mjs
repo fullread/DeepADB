@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * QEMU Session 2 — Boot Alpine Linux VM with KVM acceleration.
  * Tests: big.LITTLE detection, root-elevated KVM spawn, VM lifecycle.

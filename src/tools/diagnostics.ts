@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Diagnostics Tools — dumpsys, battery, network, telephony state,
  * bug reports, crash logs, heap dumps, and device reboot.
@@ -7,7 +9,9 @@ import { z } from "zod";
 import { join } from "path";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArg, shellEscape } from "../middleware/sanitize.js";
+import { resultHandleSchemaFields, withResultHandle } from "./result-handles.js";
+import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
+import { sanitizeFilenameComponent, sanitizeFilenameComponentDotted } from "../middleware/fs-utils.js";
 
 export function registerDiagnosticTools(ctx: ToolContext): void {
 
@@ -18,8 +22,9 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
       service: z.string().describe("Service name (e.g., 'battery', 'telephony.registry', 'activity') or 'list'"),
       args: z.string().optional().describe("Additional arguments passed to dumpsys"),
       device: z.string().optional().describe("Device serial"),
+      ...resultHandleSchemaFields,
     },
-    async ({ service, args, device }) => {
+    async ({ service, args, device, result_handle, result_handle_ttl }) => {
       try {
         const svcErr = validateShellArg(service, "service");
         if (svcErr) return { content: [{ type: "text", text: svcErr }], isError: true };
@@ -32,7 +37,11 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
           ? "dumpsys -l"
           : `dumpsys ${service}${args ? ` ${args}` : ""}`;
         const result = await ctx.bridge.shell(cmd, { device: resolved.serial, timeout: 30000 });
-        return { content: [{ type: "text", text: OutputProcessor.process(result.stdout) }] };
+        return withResultHandle(
+          { content: [{ type: "text" as const, text: OutputProcessor.process(result.stdout) }] },
+          "dumpsys",
+          { result_handle, result_handle_ttl },
+        );
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
       }
@@ -139,8 +148,8 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
         const [meminfo, gfxinfo, cpuinfo] = await Promise.allSettled([
-          ctx.bridge.shell(`dumpsys meminfo ${packageName}`, { device: serial, timeout: 15000 }),
-          ctx.bridge.shell(`dumpsys gfxinfo ${packageName}`, { device: serial, timeout: 10000 }),
+          ctx.bridge.shell(`dumpsys meminfo ${shellQuote(packageName)}`, { device: serial, timeout: 15000 }),
+          ctx.bridge.shell(`dumpsys gfxinfo ${shellQuote(packageName)}`, { device: serial, timeout: 10000 }),
           ctx.bridge.shell("dumpsys cpuinfo", { device: serial, timeout: 10000 }),
         ]);
 
@@ -168,7 +177,10 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
-        const filename = `bugreport_${serial}_${Date.now()}.zip`;
+        // AB3 fix: sanitize serial — network ADB serials contain ':' (e.g.,
+        // 'localhost:5555', '192.168.1.10:5555') which is invalid in Windows
+        // filenames. sanitizeFilenameComponent maps ':' to '_'.
+        const filename = `bugreport_${sanitizeFilenameComponent(serial)}_${Date.now()}.zip`;
         const localPath = join(ctx.config.tempDir, filename);
 
         const result = await ctx.bridge.exec(["bugreport", localPath], {
@@ -245,7 +257,7 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
             const latest = files.stdout.trim();
             if (latest) {
               const content = await ctx.bridge.shell(
-                `head -100 '/data/tombstones/${shellEscape(latest)}'`,
+                `head -100 /data/tombstones/${shellQuote(latest)}`,
                 { device: serial, timeout: 10000, ignoreExitCode: true }
               );
               if (content.stdout.trim()) {
@@ -282,12 +294,12 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
         const remoteDir = "/data/local/tmp";
         const timestamp = Date.now();
         const remotePath = `${remoteDir}/DA_heap_${timestamp}.hprof`;
-        const fname = (filename ?? `heap_${target.replace(/\./g, "_")}_${timestamp}.hprof`).replace(/[^a-zA-Z0-9._-]/g, "_");
+        const fname = sanitizeFilenameComponentDotted(filename ?? `heap_${target.replace(/\./g, "_")}_${timestamp}.hprof`);
         const localPath = join(ctx.config.tempDir, fname);
 
         try {
           await ctx.bridge.shell(
-            `am dumpheap '${shellEscape(target)}' '${remotePath}'`,
+            `am dumpheap ${shellQuote(target)} '${remotePath}'`,
             { device: serial, timeout: 60000 }
           );
           // Wait for dump to complete (am dumpheap is async)

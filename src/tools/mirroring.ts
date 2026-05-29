@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Device Mirroring Tools — Live screen mirroring via scrcpy.
  *
@@ -14,9 +16,10 @@ import { z } from "zod";
 import { spawn, ChildProcess, execFile } from "child_process";
 import { platform } from "os";
 import { existsSync } from "fs";
+import { isWithinDir } from "../middleware/fs-utils.js";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { registerCleanup } from "../middleware/cleanup.js";
+import { registerCleanup, gracefulKill } from "../middleware/cleanup.js";
 
 interface MirrorSession {
   process: ChildProcess;
@@ -70,10 +73,12 @@ function checkScrcpyVersion(scrcpyPath: string): Promise<string | null> {
 
 // Register cleanup via shared registry
 function ensureCleanupRegistered(): void {
-  registerCleanup("mirroring", () => {
-    for (const [, session] of sessions) {
-      try { session.process.kill(); } catch { /* ignore */ }
-    }
+  registerCleanup("mirroring", async () => {
+    // AK8 fix: SIGTERM → SIGKILL fallback. scrcpy generally responds to
+    // SIGTERM but a hung video pipe or mid-recording can leave it stuck.
+    await Promise.all(
+      Array.from(sessions.values()).map((s) => gracefulKill(s.process, 1500))
+    );
     sessions.clear();
   });
 }
@@ -89,7 +94,10 @@ export function registerMirroringTools(ctx: ToolContext): void {
       device: z.string().optional().describe("Device serial"),
       headless: z.boolean().optional().default(false).describe("No-display mode — useful with recording. Omits the scrcpy window."),
       maxFps: z.number().min(1).max(120).optional().default(30).describe("Maximum frame rate (1-120, default 30)"),
-      bitrate: z.string().optional().default("4M").describe("Video bitrate (e.g., '4M', '8M', '2M')"),
+      bitrate: z.string().regex(
+        /^\d+(\.\d+)?[KMG]?$/,
+        "Bitrate must be a numeric value optionally followed by K, M, or G (e.g., '4M', '8M', '500K')."
+      ).optional().default("4M").describe("Video bitrate (e.g., '4M', '8M', '2M'). AK2 fix: format-validated at schema layer."),
       maxSize: z.number().min(0).max(4096).optional().default(0).describe("Max dimension in pixels (0 = no limit, max 4096)"),
       record: z.string().optional().describe("Record to a local file path (e.g., 'mirror.mp4')"),
       stayAwake: z.boolean().optional().default(true).describe("Keep device awake while mirroring"),
@@ -97,6 +105,12 @@ export function registerMirroringTools(ctx: ToolContext): void {
     },
     async ({ device, headless, maxFps, bitrate, maxSize, record, stayAwake, turnScreenOff }) => {
       try {
+        // S2: scope the record path to tempDir. scrcpy writes the video file
+        // to whatever path is supplied via --record; an unscoped path is the
+        // same operator-trust concern as the AD1/AF1/AI2/AL2 class.
+        if (record && !isWithinDir(record, ctx.config.tempDir)) {
+          return { content: [{ type: "text", text: `Recording path must be inside the temp directory (${ctx.config.tempDir}). Got: ${record}` }], isError: true };
+        }
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
 
@@ -206,10 +220,13 @@ export function registerMirroringTools(ctx: ToolContext): void {
           if (count === 0) {
             return { content: [{ type: "text", text: "No active mirror sessions." }] };
           }
-          for (const [serial, session] of sessions) {
-            try { session.process.kill(); } catch { /* ignore */ }
-            ctx.logger.info(`[mirror:${serial}] Stopped.`);
-          }
+          // AK8 fix: graceful kill in parallel
+          await Promise.all(
+            Array.from(sessions.entries()).map(async ([serial, session]) => {
+              await gracefulKill(session.process, 1500);
+              ctx.logger.info(`[mirror:${serial}] Stopped.`);
+            })
+          );
           sessions.clear();
           return { content: [{ type: "text", text: `Stopped ${count} mirror session(s).` }] };
         }
@@ -223,7 +240,8 @@ export function registerMirroringTools(ctx: ToolContext): void {
         }
 
         const elapsed = ((Date.now() - session.startedAt) / 1000).toFixed(1);
-        try { session.process.kill(); } catch { /* ignore */ }
+        // AK8 fix: graceful kill with SIGKILL fallback
+        await gracefulKill(session.process, 1500);
         sessions.delete(serial);
 
         return { content: [{ type: "text", text: `Mirror stopped: ${serial} (ran for ${elapsed}s).` }] };

@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Modem Firmware Analysis — Comprehensive firmware version tracking and diffing.
  *
@@ -23,8 +25,10 @@
 import { z } from "zod";
 import { join } from "path";
 import { readFileSync, existsSync, readdirSync } from "fs";
+import { isWithinDir, sanitizeFilenameComponent, tryReadJsonOrWarn } from "../middleware/fs-utils.js";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
+import { resultHandleSchemaFields, withResultHandle } from "./result-handles.js";
 import { detectChipsetFamily } from "../middleware/chipset.js";
 
 interface FirmwareInfo {
@@ -63,10 +67,14 @@ function parseFirmwareVersion(raw: string, chipsetFamily: string): FirmwareInfo 
     if (clMatch) info.parsed.changelist = clMatch[1];
     const modelMatch = raw.match(/(S\d{4}\w*)/i);
     if (modelMatch) info.parsed.modemModel = modelMatch[1];
-    const verMatch = raw.match(/V(\d+\.\d+[\.\d]*)/i);
+    const verMatch = raw.match(/V(\d+\.\d+[.\d]*)/i);
     if (verMatch) info.parsed.version = verMatch[1];
     // Date patterns in Shannon strings (YYYYMMDD)
-    const dateMatch = raw.match(/(\d{4})(\d{2})(\d{2})/);
+    // AE7 fix: tighten month/day ranges. Previous regex \d{2}\d{2} would
+    // accept '13' as month or '32' as day, producing nonsense like
+    // '2025-13-13' from a random 8-digit substring that happened to start
+    // with a 4-digit year. Range-restrict month to 01-12 and day to 01-31.
+    const dateMatch = raw.match(/(\d{4})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])/);
     if (dateMatch && parseInt(dateMatch[1], 10) > 2010) {
       info.parsed.buildDate = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
     }
@@ -107,7 +115,7 @@ function parseFirmwareVersion(raw: string, chipsetFamily: string): FirmwareInfo 
     //   "S9863A1H10_U04.00.04" — SoC model + version
     //   "MOCOR5_Trunk_W24.22.2" — branch + version
     info.parsed.family = "Unisoc/Spreadtrum";
-    const unisocMatch = raw.match(/^(\w+?)_(\w)(\d+\.\d+[\.\d]*)/);
+    const unisocMatch = raw.match(/^(\w+?)_(\w)(\d+\.\d+[.\d]*)/);
     if (unisocMatch) {
       info.parsed.model = unisocMatch[1];
       info.parsed.branch = unisocMatch[2];
@@ -153,7 +161,8 @@ function parseFirmwareVersion(raw: string, chipsetFamily: string): FirmwareInfo 
       info.parsed.minor = semverMatch[2];
       info.parsed.patch = semverMatch[3];
     }
-    const dateMatch = raw.match(/(\d{4})[\-.]?(\d{2})[\-.]?(\d{2})/);
+    // AE7 fix (same rationale as above): range-restrict month/day.
+    const dateMatch = raw.match(/(\d{4})[-.]?(0[1-9]|1[0-2])[-.]?(0[1-9]|[12]\d|3[01])/);
     if (dateMatch && parseInt(dateMatch[1], 10) > 2010) {
       info.parsed.buildDate = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
     }
@@ -262,11 +271,13 @@ function loadFingerprints(dir: string, deviceFilter?: string): SavedFingerprint[
     .filter((f) => f.endsWith(".json") && (!deviceFilter || f.startsWith(deviceFilter)))
     .sort();
 
+  // AE8 fix: use tryReadJsonOrWarn so a corrupt fingerprint surfaces via
+  // stderr rather than vanishing into a quietly-reduced count. loadFingerprints
+  // has no ctx/logger in scope, so stderr is the right channel.
   const results: SavedFingerprint[] = [];
   for (const file of files) {
-    try {
-      results.push(JSON.parse(readFileSync(join(dir, file), "utf-8")));
-    } catch { /* skip corrupt */ }
+    const parsed = tryReadJsonOrWarn<SavedFingerprint>(join(dir, file), "loadFingerprints");
+    if (parsed) results.push(parsed);
   }
   return results;
 }
@@ -435,8 +446,9 @@ export function registerFirmwareAnalysisTools(ctx: ToolContext): void {
       from: z.string().optional().describe("Path to 'from' fingerprint JSON (or 'current' to use live device state). Defaults to the second-most-recent fingerprint."),
       to: z.string().optional().describe("Path to 'to' fingerprint JSON (or 'current' to use live device state). Defaults to the most recent fingerprint."),
       device: z.string().optional().describe("Device serial (used when 'from' or 'to' is 'current', or for auto-selecting fingerprints)"),
+      ...resultHandleSchemaFields,
     },
-    async ({ from, to, device }) => {
+    async ({ from, to, device, result_handle, result_handle_ttl }) => {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
@@ -444,7 +456,7 @@ export function registerFirmwareAnalysisTools(ctx: ToolContext): void {
         const family = detectChipsetFamily(props);
 
         const dir = getFingerprintDir(ctx.config.tempDir);
-        const safeDevice = serial.replace(/[^a-zA-Z0-9_-]/g, "_");
+        const safeDevice = sanitizeFilenameComponent(serial);
 
         // Helper: build a firmware component map from live device or saved fingerprint
         // Only includes fields that are stored in both live state and saved fingerprints
@@ -479,6 +491,13 @@ export function registerFirmwareAnalysisTools(ctx: ToolContext): void {
           fromComps = currentComponents();
           fromLabel = "current device";
         } else if (from) {
+          // AE1 fix: scope operator-supplied path to tempDir before reading.
+          // Without this, `from` could point to any file readable by the
+          // server process; readFileSync turns this tool into a "read any
+          // JSON" primitive. Same containment pattern as ota-monitor.ts (AO1).
+          if (!isWithinDir(from, ctx.config.tempDir)) {
+            return { content: [{ type: "text", text: `Fingerprint path must be inside the temp directory (${ctx.config.tempDir}). Got: ${from}` }], isError: true };
+          }
           if (!existsSync(from)) return { content: [{ type: "text", text: `File not found: ${from}` }], isError: true };
           try {
             fromComps = fpComponents(JSON.parse(readFileSync(from, "utf-8")));
@@ -502,6 +521,10 @@ export function registerFirmwareAnalysisTools(ctx: ToolContext): void {
           toComps = currentComponents();
           toLabel = "current device";
         } else if (to) {
+          // AE1 fix: same containment check as `from` above.
+          if (!isWithinDir(to, ctx.config.tempDir)) {
+            return { content: [{ type: "text", text: `Fingerprint path must be inside the temp directory (${ctx.config.tempDir}). Got: ${to}` }], isError: true };
+          }
           if (!existsSync(to)) return { content: [{ type: "text", text: `File not found: ${to}` }], isError: true };
           try {
             toComps = fpComponents(JSON.parse(readFileSync(to, "utf-8")));
@@ -599,7 +622,11 @@ export function registerFirmwareAnalysisTools(ctx: ToolContext): void {
           sections.push(...unchanged);
         }
 
-        return { content: [{ type: "text", text: sections.join("\n") }] };
+        return withResultHandle(
+          { content: [{ type: "text" as const, text: sections.join("\n") }] },
+          "firmware_diff",
+          { result_handle, result_handle_ttl },
+        );
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
       }
@@ -625,7 +652,7 @@ export function registerFirmwareAnalysisTools(ctx: ToolContext): void {
         }
 
         const dir = getFingerprintDir(ctx.config.tempDir);
-        const safeDevice = serial?.replace(/[^a-zA-Z0-9_-]/g, "_");
+        const safeDevice = serial ? sanitizeFilenameComponent(serial) : undefined;
         const fps = loadFingerprints(dir, safeDevice);
 
         if (fps.length === 0) {

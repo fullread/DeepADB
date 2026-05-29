@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Split APK Management Tools — App bundles, split APKs, and APEX modules.
  *
@@ -10,11 +12,12 @@
  */
 
 import { z } from "zod";
-import { join, resolve } from "path";
-import { mkdirSync, existsSync, statSync } from "fs";
+import { join } from "path";
+import { existsSync, statSync } from "fs";
+import { ensurePrivateDir, sanitizeFilenameComponentDotted, isWithinDir } from "../middleware/fs-utils.js";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArg, shellEscape } from "../middleware/sanitize.js";
+import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 
 export function registerSplitApkTools(ctx: ToolContext): void {
 
@@ -29,6 +32,14 @@ export function registerSplitApkTools(ctx: ToolContext): void {
     },
     async ({ apkPaths, device, replace, allowDowngrade }) => {
       try {
+        // BC6 fix: preflight existsSync on every APK path. Matches V1/Y5 pattern.
+        // adb's own error for a missing file is a confusing "Could not stat",
+        // and a missing split in the middle of a bundle aborts the whole install.
+        for (const apk of apkPaths) {
+          if (!existsSync(apk)) {
+            return { content: [{ type: "text", text: `APK does not exist: ${apk}` }], isError: true };
+          }
+        }
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
 
@@ -74,7 +85,7 @@ export function registerSplitApkTools(ctx: ToolContext): void {
         const serial = resolved.serial;
 
         // Get all APK paths for the package
-        const pathResult = await ctx.bridge.shell(`pm path ${packageName}`, {
+        const pathResult = await ctx.bridge.shell(`pm path ${shellQuote(packageName)}`, {
           device: serial, ignoreExitCode: true,
         });
 
@@ -115,7 +126,7 @@ export function registerSplitApkTools(ctx: ToolContext): void {
 
         // Get sizes
         if (paths.length > 0) {
-          const sizeCmd = paths.map((p) => `stat -c '%s' '${shellEscape(p)}'`).join("; ");
+          const sizeCmd = paths.map((p) => `stat -c '%s' ${shellQuote(p)}`).join("; ");
           const sizeResult = await ctx.bridge.shell(sizeCmd, {
             device: serial, ignoreExitCode: true,
           });
@@ -150,7 +161,7 @@ export function registerSplitApkTools(ctx: ToolContext): void {
         const serial = resolved.serial;
 
         // Get all APK paths
-        const pathResult = await ctx.bridge.shell(`pm path ${packageName}`, {
+        const pathResult = await ctx.bridge.shell(`pm path ${shellQuote(packageName)}`, {
           device: serial, ignoreExitCode: true,
         });
 
@@ -163,39 +174,53 @@ export function registerSplitApkTools(ctx: ToolContext): void {
         }
 
         // Create output directory — containment check if user-supplied
-        const safePkg = packageName.replace(/[^a-zA-Z0-9_.-]/g, "_");
+        const safePkg = sanitizeFilenameComponentDotted(packageName);
         const destDir = outputDir ?? join(ctx.config.tempDir, "extracted", safePkg);
         if (outputDir) {
-          // User-supplied path — verify it resolves inside tempDir to prevent path traversal
-          const resolvedDest = resolve(destDir);
-          const resolvedTemp = resolve(ctx.config.tempDir);
-          if (!resolvedDest.startsWith(resolvedTemp)) {
+          // User-supplied path — verify it resolves inside tempDir to prevent
+          // path traversal. Uses path-separator boundary so a value like
+          // `${tempDir}_evil/x` is correctly rejected even though its absolute
+          // path string-prefix-matches `${tempDir}`.
+          if (!isWithinDir(destDir, ctx.config.tempDir)) {
             return {
               content: [{ type: "text", text: `Output directory must be inside the temp directory (${ctx.config.tempDir}). Got: ${destDir}` }],
               isError: true,
             };
           }
         }
-        if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
+        if (!existsSync(destDir)) ensurePrivateDir(destDir);
 
         // Pull each APK
         const results: string[] = [];
         results.push(`Extracting ${paths.length} APK(s) for ${packageName}...\n`);
 
-        let totalBytes = 0;
-        for (const remotePath of paths) {
-          const filename = remotePath.split("/").pop() ?? "unknown.apk";
-          const localPath = join(destDir, filename);
-
-          try {
+        // BC7 fix: parallelize APK pulls with Promise.allSettled. Typical
+        // app bundles have 4-6 splits (base + density + language + ABI);
+        // serial pull at 60s/APK timeout was up to 6 min worst-case, while
+        // a single adb server can comfortably handle concurrent pulls in
+        // parallel (the bottleneck is USB or wireless bandwidth, not adb).
+        // Ordering of results matches `paths` order for stable output.
+        const pullResults = await Promise.allSettled(
+          paths.map(async (remotePath) => {
+            const filename = remotePath.split("/").pop() ?? "unknown.apk";
+            const localPath = join(destDir, filename);
             await ctx.bridge.exec(["pull", remotePath, localPath], {
               device: serial, timeout: 60000,
             });
             const size = statSync(localPath).size;
-            totalBytes += size;
-            results.push(`  ✓ ${filename} (${(size / 1024).toFixed(0)} KB)`);
-          } catch (err) {
-            results.push(`  ✗ ${filename}: ${err instanceof Error ? err.message : err}`);
+            return { filename, size };
+          })
+        );
+        let totalBytes = 0;
+        for (let i = 0; i < pullResults.length; i++) {
+          const r = pullResults[i];
+          if (r.status === "fulfilled") {
+            totalBytes += r.value.size;
+            results.push(`  ✓ ${r.value.filename} (${(r.value.size / 1024).toFixed(0)} KB)`);
+          } else {
+            const filename = paths[i].split("/").pop() ?? "unknown.apk";
+            const reason = r.reason instanceof Error ? r.reason.message : r.reason;
+            results.push(`  ✗ ${filename}: ${reason}`);
           }
         }
 
@@ -258,7 +283,7 @@ export function registerSplitApkTools(ctx: ToolContext): void {
 
         // Batch query — get dumpsys for a few key ones
         for (const pkg of packages) {
-          const infoResult = await ctx.bridge.shell(`dumpsys package ${pkg} | grep -E 'versionName|versionCode|apexModuleName' | head -3`, {
+          const infoResult = await ctx.bridge.shell(`dumpsys package ${shellQuote(pkg)} | grep -E 'versionName|versionCode|apexModuleName' | head -3`, {
             device: serial, timeout: 5000, ignoreExitCode: true,
           });
           const info = infoResult.stdout.trim();

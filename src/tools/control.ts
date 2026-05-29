@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Device Control Tools — Toggle device settings for testing.
  * 
@@ -9,7 +11,7 @@
 import { z } from "zod";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { shellEscape, validateShellArg, validateShellArgs } from "../middleware/sanitize.js";
+import { validateShellArg, validateShellArgs, shellQuote } from "../middleware/sanitize.js";
 
 export function registerControlTools(ctx: ToolContext): void {
 
@@ -112,7 +114,7 @@ export function registerControlTools(ctx: ToolContext): void {
     "adb_screen",
     "Control screen state: wake, sleep, toggle, lock, or unlock. Lock and unlock verify actual keyguard state via dumpsys window. Unlock uses wm dismiss-keyguard (works for swipe keyguards); supply 'pin' to perform the full PIN entry sequence for PIN-protected devices: wakes screen, dismisses keyguard, swipes up to reveal keypad, types PIN, confirms with ENTER, and verifies the keyguard sleep token was released.",
     {
-      action: z.enum(["wake", "sleep", "toggle", "lock", "unlock"]).describe("Screen action"),
+      action: z.enum(["wake", "sleep", "toggle", "lock", "unlock"]).describe("Screen action — one of: wake (power on + dismiss keyguard if no PIN), sleep (power off), toggle (flip current state), lock (force keyguard), unlock (dismiss keyguard, with PIN if supplied)"),
       pin: z.string().trim().regex(/^[a-zA-Z0-9]+$/, "PIN must be alphanumeric only").optional().describe("PIN/password to enter when unlock encounters an active keyguard (digits only for PIN, alphanumeric for password). Only used with action='unlock'."),
       device: z.string().optional().describe("Device serial"),
     },
@@ -174,8 +176,14 @@ export function registerControlTools(ctx: ToolContext): void {
             // Derive proportional swipe coordinates from actual screen size
             const sizeResult = await ctx.bridge.shell("wm size", { device: serial, timeout: 5000, ignoreExitCode: true });
             const sizeMatch = sizeResult.stdout.match(/(\d+)x(\d+)/);
-            const screenW = sizeMatch ? parseInt(sizeMatch[1]) : 1080;
-            const screenH = sizeMatch ? parseInt(sizeMatch[2]) : 2400;
+            // X6 fix: defend against NaN. parseInt on a non-numeric match would
+            // return NaN, then Math.round(NaN) = NaN, and "input swipe NaN NaN"
+            // fails on the device. Use Number.isFinite to fall back to
+            // hardcoded defaults on parse failure.
+            const parsedW = sizeMatch ? parseInt(sizeMatch[1], 10) : NaN;
+            const parsedH = sizeMatch ? parseInt(sizeMatch[2], 10) : NaN;
+            const screenW = Number.isFinite(parsedW) ? parsedW : 1080;
+            const screenH = Number.isFinite(parsedH) ? parsedH : 2400;
             const cx   = Math.round(screenW / 2);
             const yBot = Math.round(screenH * 0.80);
             const yTop = Math.round(screenH * 0.20);
@@ -184,7 +192,7 @@ export function registerControlTools(ctx: ToolContext): void {
             await ctx.bridge.shell(`input swipe ${cx} ${yBot} ${cx} ${yTop} 300`, { device: serial });
             await new Promise((r) => setTimeout(r, 1000));
             // Type PIN and confirm
-            await ctx.bridge.shell(`input text '${shellEscape(pin)}'`, { device: serial });
+            await ctx.bridge.shell(`input text ${shellQuote(pin)}`, { device: serial });
             await new Promise((r) => setTimeout(r, 300));
             await ctx.bridge.shell("input keyevent KEYCODE_ENTER", { device: serial });
             await new Promise((r) => setTimeout(r, 800));
@@ -254,7 +262,7 @@ export function registerControlTools(ctx: ToolContext): void {
     "Read an Android settings value from any namespace (system, secure, global)",
     {
       namespace: z.enum(["system", "secure", "global"]).describe("Settings namespace"),
-      key: z.string().describe("Setting key (e.g., 'screen_brightness', 'location_mode', 'airplane_mode_on')"),
+      key: z.string().min(1).describe("Setting key (e.g., 'screen_brightness', 'location_mode', 'airplane_mode_on')"),
       device: z.string().optional().describe("Device serial"),
     },
     async ({ namespace, key, device }) => {
@@ -262,7 +270,7 @@ export function registerControlTools(ctx: ToolContext): void {
         const keyErr = validateShellArg(key, "key");
         if (keyErr) return { content: [{ type: "text", text: keyErr }], isError: true };
         const resolved = await ctx.deviceManager.resolveDevice(device);
-        const result = await ctx.bridge.shell(`settings get ${namespace} ${key}`, { device: resolved.serial });
+        const result = await ctx.bridge.shell(`settings get ${shellQuote(namespace)} ${shellQuote(key)}`, { device: resolved.serial });
         const value = result.stdout.trim();
         return { content: [{ type: "text", text: value === "null" ? `(not set) ${namespace}/${key}` : `${namespace}/${key} = ${value}` }] };
       } catch (error) {
@@ -276,8 +284,8 @@ export function registerControlTools(ctx: ToolContext): void {
     "Write an Android settings value to any namespace (system, secure, global)",
     {
       namespace: z.enum(["system", "secure", "global"]).describe("Settings namespace"),
-      key: z.string().describe("Setting key"),
-      value: z.string().describe("Value to set"),
+      key: z.string().min(1).describe("Setting key (e.g., 'screen_brightness' for system namespace, 'wifi_on' or 'airplane_mode_on' for global, 'location_providers_allowed' for secure). Use `adb_shell` with `settings list <namespace>` to enumerate available keys for a device."),
+      value: z.string().describe("Value to write. Type depends on the key — typically a string, integer, or 0/1 for booleans. The setting framework accepts everything as a string and parses on read."),
       device: z.string().optional().describe("Device serial"),
     },
     async ({ namespace, key, value, device }) => {
@@ -285,9 +293,9 @@ export function registerControlTools(ctx: ToolContext): void {
         const argErr = validateShellArgs([[key, "key"], [value, "value"]]);
         if (argErr) return { content: [{ type: "text", text: argErr }], isError: true };
         const resolved = await ctx.deviceManager.resolveDevice(device);
-        await ctx.bridge.shell(`settings put ${namespace} ${key} ${value}`, { device: resolved.serial });
+        await ctx.bridge.shell(`settings put ${shellQuote(namespace)} ${shellQuote(key)} ${shellQuote(value)}`, { device: resolved.serial });
         // Read back to confirm
-        const check = await ctx.bridge.shell(`settings get ${namespace} ${key}`, { device: resolved.serial });
+        const check = await ctx.bridge.shell(`settings get ${shellQuote(namespace)} ${shellQuote(key)}`, { device: resolved.serial });
         return { content: [{ type: "text", text: `${namespace}/${key} = ${check.stdout.trim()}` }] };
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };

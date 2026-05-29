@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Workflow Orchestration Engine — Declarative multi-step tool sequences.
  *
@@ -33,8 +35,8 @@ import { join } from "path";
 import { readFileSync, existsSync, readdirSync } from "fs";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArg, shellEscape } from "../middleware/sanitize.js";
-import { isOnDevice } from "../config/config.js";
+import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
+import { sanitizeFilenameComponent } from "../middleware/fs-utils.js";
 
 interface WorkflowStep {
   name: string;
@@ -71,6 +73,42 @@ const MAX_STEPS = 200;
 const MAX_SLEEP_MS = 300_000;
 
 /** Substitute {{variable}} references in a string. */
+/**
+ * AH2 trust model: `{{key}}` substitution is a raw textual replacement — no
+ * shell escaping, no validation. This is by design; many legitimate workflow
+ * commands embed variables that are not meant to be argv values (e.g., the
+ * variable IS a glob, or expands to multiple words).
+ *
+ * Two sources feed `vars` (see workflow runner around L199):
+ *   1. `def.variables` + invocation-time `variables` — operator-controlled.
+ *      If the operator writes a workflow that interpolates an unsafe value
+ *      into a shell command, that is the operator's choice; the runner does
+ *      not second-guess.
+ *   2. `vars[step.capture] = result` (around L334) — DEVICE-CONTROLLED.
+ *      Captured stdout from a previous step. A compromised or manipulated
+ *      device can inject shell metacharacters here.
+ *
+ * Per-call-site safety:
+ *   - `evaluateCondition` (L82): used for ==/!=/contains. No shell. Safe.
+ *   - detail-string sites (L219, L220): display only. Safe.
+ *   - `case "install"` (L277): argv-style `bridge.exec([..., apk])`. Safe
+ *     even with metachars in apk.
+ *   - `case "logcat"` tag (L300): validateShellArg AFTER substitution. Safe.
+ *   - `case "getprop"` key (L314): validateShellArg AFTER substitution. Safe.
+ *   - `case "shell"` (L253) and `case "root_shell"` (L265): substituted
+ *     string passed to `bridge.shell()` / `bridge.rootShell()` without
+ *     per-variable shell-arg validation. The security middleware's
+ *     blocklist/allowlist provides a backstop (see `ctx.security.checkCommand`
+ *     immediately following each substitution), but it is pattern-based and
+ *     not a substitute for argument escaping.
+ *
+ * If you need a stronger model (e.g., when devices are untrusted), add per-
+ * step provenance tracking: tag every `vars` entry with its source, and
+ * shell-escape any value tagged DEVICE before it reaches a `case "shell"` or
+ * `case "root_shell"` step. The conservative knee-jerk fix — escaping every
+ * substituted value unconditionally — breaks legitimate uses where the
+ * workflow author WANTS shell behaviour in the variable.
+ */
 function substituteVars(text: string, vars: Record<string, string>): string {
   return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`);
 }
@@ -108,6 +146,34 @@ function validateWorkflow(def: unknown): string[] {
   if (!Array.isArray(w.steps)) {
     errors.push("Missing or invalid 'steps' array.");
     return errors;
+  }
+
+  // BK9 fix: warn on `{{var}}` references not declared in `workflow.variables`.
+  // substituteVars falls back to the literal `{{key}}` (useful for debugging),
+  // but if the operator typo'd a variable name, the literal then propagates
+  // through a shell step as part of the command string. Catching this at
+  // validate-time surfaces the typo before any shell call.
+  const declaredVars = new Set<string>();
+  if (w.variables && typeof w.variables === "object") {
+    for (const k of Object.keys(w.variables as object)) declaredVars.add(k);
+  }
+  const stepStrings: string[] = [];
+  for (const stepRaw of w.steps as unknown[]) {
+    if (!stepRaw || typeof stepRaw !== "object") continue;
+    const s = stepRaw as Record<string, unknown>;
+    for (const field of ["command", "key", "apkPath", "tag", "match"]) {
+      if (typeof s[field] === "string") stepStrings.push(s[field] as string);
+    }
+  }
+  const referencedVars = new Set<string>();
+  for (const str of stepStrings) {
+    const matches = str.matchAll(/\{\{(\w+)\}\}/g);
+    for (const m of matches) referencedVars.add(m[1]);
+  }
+  for (const ref of referencedVars) {
+    if (!declaredVars.has(ref)) {
+      errors.push(`Variable '${ref}' is referenced in a step but not declared in workflow.variables. Add { variables: { ${ref}: "..." } } to the workflow.`);
+    }
   }
 
   if ((w.steps as unknown[]).length > MAX_STEPS) {
@@ -160,7 +226,7 @@ export function registerWorkflowTools(ctx: ToolContext): void {
     "Execute a workflow — a JSON-defined sequence of device operations with variable substitution, conditional steps, and loop support. Supported actions: shell, root_shell, install, screenshot, logcat, getprop, sleep. Pass the workflow as a JSON string or provide a saved workflow name.",
     {
       workflow: z.string().describe("Workflow JSON string, or the name of a saved workflow file"),
-      variables: z.record(z.string()).optional().describe("Override workflow variables (merged with defaults)"),
+      variables: z.record(z.string(), z.string()).optional().describe("Override workflow variables (merged with defaults)"),
       device: z.string().optional().describe("Device serial"),
       dryRun: z.boolean().optional().default(false).describe("Validate and show execution plan without running"),
     },
@@ -176,7 +242,7 @@ export function registerWorkflowTools(ctx: ToolContext): void {
             def = JSON.parse(workflow);
           } else {
             const dir = getWorkflowDir(ctx.config.tempDir);
-            const safeName = workflow.replace(/[^a-zA-Z0-9_-]/g, "_");
+            const safeName = sanitizeFilenameComponent(workflow);
             const filePath = join(dir, `${safeName}.json`);
             if (!existsSync(filePath)) {
               return { content: [{ type: "text", text: `Workflow "${workflow}" not found. Use adb_workflow_list to see available workflows.` }], isError: true };
@@ -279,14 +345,14 @@ export function registerWorkflowTools(ctx: ToolContext): void {
                 }
                 case "screenshot": {
                   const fname = `workflow_${Date.now()}.png`;
-                  const remoteDir = isOnDevice() ? "/data/local/tmp" : "/sdcard";
+                  const remoteDir = "/data/local/tmp";
                   const remotePath = `${remoteDir}/${fname}`;
                   const localPath = join(ctx.config.tempDir, fname);
                   try {
-                    await ctx.bridge.shell(`screencap -p '${shellEscape(remotePath)}'`, { device: serial, timeout: 15000 });
+                    await ctx.bridge.shell(`screencap -p ${shellQuote(remotePath)}`, { device: serial, timeout: 15000 });
                     await ctx.bridge.exec(["pull", remotePath, localPath], { device: serial, timeout: 30000 });
                   } finally {
-                    await ctx.bridge.shell(`rm '${shellEscape(remotePath)}'`, { device: serial, ignoreExitCode: true }).catch(() => {});
+                    await ctx.bridge.shell(`rm ${shellQuote(remotePath)}`, { device: serial, ignoreExitCode: true }).catch(() => {});
                   }
                   result = localPath;
                   break;
@@ -316,7 +382,7 @@ export function registerWorkflowTools(ctx: ToolContext): void {
                     stepsFailed++;
                     continue;
                   }
-                  const r = await ctx.bridge.shell(`getprop ${key}`, { device: serial });
+                  const r = await ctx.bridge.shell(`getprop ${shellQuote(key)}`, { device: serial });
                   result = r.stdout.trim();
                   break;
                 }

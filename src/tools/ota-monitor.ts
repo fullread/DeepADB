@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * OTA Update Monitoring — Track system updates across sessions.
  *
@@ -14,7 +16,8 @@
 
 import { z } from "zod";
 import { join } from "path";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from "fs";
+import { readFileSync, existsSync, readdirSync} from "fs";
+import { ensurePrivateDir, sanitizeFilenameComponent, writeAtomicSync, isWithinDir, tryReadJsonOrWarn} from "../middleware/fs-utils.js";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 
@@ -119,13 +122,17 @@ export function registerOtaMonitorTools(ctx: ToolContext): void {
         const fp = await captureFingerprint(ctx, serial);
 
         const dir = getFingerprintDir(ctx.config.tempDir);
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        if (!existsSync(dir)) ensurePrivateDir(dir);
 
-        const safeLabel = label.replace(/[^a-zA-Z0-9_-]/g, "_");
-        const safeDevice = serial.replace(/[^a-zA-Z0-9_-]/g, "_");
-        const filename = `${safeDevice}_${safeLabel}_${Date.now()}.json`;
+        const safeLabel = sanitizeFilenameComponent(label);
+        const safeDevice = sanitizeFilenameComponent(serial);
+        // AO7 fix: add PID + random suffix to defeat Date.now() collision when
+        // two captures land in the same millisecond. The fingerprint filename
+        // becomes the storage key; a same-ms collision would otherwise overwrite
+        // a prior capture silently.
+        const filename = `${safeDevice}_${safeLabel}_${Date.now()}_${process.pid}_${Math.random().toString(36).slice(2, 8)}.json`;
         const filePath = join(dir, filename);
-        writeFileSync(filePath, JSON.stringify(fp, null, 2));
+        writeAtomicSync(filePath, JSON.stringify(fp, null, 2));
 
         const summary: string[] = [];
         summary.push(`System fingerprint captured: ${label}`);
@@ -155,6 +162,12 @@ export function registerOtaMonitorTools(ctx: ToolContext): void {
     },
     async ({ fingerprintPath, device }) => {
       try {
+        // Path scoping for explicit fingerprintPath; the default-resolution
+        // path (when fingerprintPath is omitted) already produces a path
+        // inside tempDir.
+        if (fingerprintPath && !isWithinDir(fingerprintPath, ctx.config.tempDir)) {
+          return { content: [{ type: "text", text: `Fingerprint path must be inside the temp directory (${ctx.config.tempDir}). Got: ${fingerprintPath}` }], isError: true };
+        }
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
 
@@ -165,7 +178,7 @@ export function registerOtaMonitorTools(ctx: ToolContext): void {
           if (!existsSync(dir)) {
             return { content: [{ type: "text", text: "No saved fingerprints. Use adb_ota_fingerprint to capture one first." }], isError: true };
           }
-          const safeDevice = serial.replace(/[^a-zA-Z0-9_-]/g, "_");
+          const safeDevice = sanitizeFilenameComponent(serial);
           const files = readdirSync(dir)
             .filter((f) => f.startsWith(safeDevice) && f.endsWith(".json"))
             .sort()
@@ -228,7 +241,7 @@ export function registerOtaMonitorTools(ctx: ToolContext): void {
         let deviceFilter = "";
         if (device) {
           const resolved = await ctx.deviceManager.resolveDevice(device);
-          deviceFilter = resolved.serial.replace(/[^a-zA-Z0-9_-]/g, "_");
+          deviceFilter = sanitizeFilenameComponent(resolved.serial);
         }
 
         const files = readdirSync(dir)
@@ -239,11 +252,12 @@ export function registerOtaMonitorTools(ctx: ToolContext): void {
           return { content: [{ type: "text", text: device ? `No fingerprints for device ${device}.` : "No fingerprints saved." }] };
         }
 
+        // AO6 fix: route through tryReadJsonOrWarn so corrupt fingerprints
+        // surface via ctx.logger.warn rather than being silently skipped.
         const fingerprints: SystemFingerprint[] = [];
         for (const file of files) {
-          try {
-            fingerprints.push(JSON.parse(readFileSync(join(dir, file), "utf-8")));
-          } catch { /* skip corrupt */ }
+          const parsed = tryReadJsonOrWarn<SystemFingerprint>(join(dir, file), "ota_history", ctx.logger);
+          if (parsed) fingerprints.push(parsed);
         }
 
         const lines: string[] = [`${fingerprints.length} fingerprint(s):\n`];

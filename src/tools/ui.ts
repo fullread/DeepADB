@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * UI Tools — Screenshots, input events, activity inspection, and UI hierarchy analysis.
  */
@@ -7,15 +9,19 @@ import { join, basename } from "path";
 import { writeFileSync } from "fs";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { shellEscape } from "../middleware/sanitize.js";
+import { shellQuote } from "../middleware/sanitize.js";
+import { sanitizeFilenameComponentDotted } from "../middleware/fs-utils.js";
 import { captureUiDump, parseUiNodes, UiElement } from "../middleware/ui-dump.js";
 import { decodePngPixels, encodePng, drawRect, drawLabel, ELEMENT_COLORS } from "../middleware/png-utils.js";
-import { isOnDevice } from "../config/config.js";
 
 function sanitizeFilename(name: string): string {
+  // BG6 fix: route through canonical sanitizeFilenameComponentDotted from
+  // fs-utils.ts instead of duplicating the regex inline. The basename()
+  // strip and the timestamp fallback are preserved for back-compat;
+  // empty basename ("" or trailing slash) still yields file_{ts}, not "_".
   const base = basename(name);
-  const sanitized = base.replace(/[^a-zA-Z0-9._-]/g, "_");
-  return sanitized || `file_${Date.now()}`;
+  if (base.length === 0) return `file_${Date.now()}`;
+  return sanitizeFilenameComponentDotted(base);
 }
 
 export function registerUiTools(ctx: ToolContext): void {
@@ -32,13 +38,13 @@ export function registerUiTools(ctx: ToolContext): void {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const fname = sanitizeFilename(filename ?? `screenshot_${Date.now()}.png`);
         const localPath = join(ctx.config.tempDir, fname);
-        const remoteDir = isOnDevice() ? "/data/local/tmp" : "/sdcard";
+        const remoteDir = "/data/local/tmp";
         const remotePath = `${remoteDir}/${fname}`;
         try {
-          await ctx.bridge.shell(`screencap -p '${shellEscape(remotePath)}'`, { device: resolved.serial, timeout: 15000 });
+          await ctx.bridge.shell(`screencap -p ${shellQuote(remotePath)}`, { device: resolved.serial, timeout: 15000 });
           await ctx.bridge.exec(["pull", remotePath, localPath], { device: resolved.serial, timeout: 30000 });
         } finally {
-          await ctx.bridge.shell(`rm '${shellEscape(remotePath)}'`, { device: resolved.serial, ignoreExitCode: true }).catch(() => {});
+          await ctx.bridge.shell(`rm ${shellQuote(remotePath)}`, { device: resolved.serial, ignoreExitCode: true }).catch(() => {});
         }
         return { content: [{ type: "text", text: `Screenshot saved: ${localPath}` }] };
       } catch (error) {
@@ -77,7 +83,7 @@ export function registerUiTools(ctx: ToolContext): void {
     "adb_input",
     "Send input events to the device (tap, swipe, text, keyevent)",
     {
-      type: z.enum(["tap", "swipe", "text", "keyevent"]).describe("Input type"),
+      type: z.enum(["tap", "swipe", "text", "keyevent"]).describe("Input type — one of: tap (single touch), swipe (drag between two points), text (literal string entry), keyevent (Android key code like KEYCODE_HOME). The args field documents the expected argument format per type."),
       args: z.string().describe(
         "Arguments: tap='x y', swipe='x1 y1 x2 y2 [duration_ms]', text='string', keyevent='KEYCODE_HOME'"
       ),
@@ -112,7 +118,7 @@ export function registerUiTools(ctx: ToolContext): void {
           case "text":
             // Text can contain anything — must be shell-escaped to prevent injection
             // and to ensure special characters are typed literally on the device
-            shellCmd = `input text '${shellEscape(args)}'`;
+            shellCmd = `input text ${shellQuote(args)}`;
             break;
         }
 
@@ -256,20 +262,20 @@ export function registerUiTools(ctx: ToolContext): void {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
         const ts = Date.now();
-        const remoteDir = isOnDevice() ? "/data/local/tmp" : "/sdcard";
+        const remoteDir = "/data/local/tmp";
         const remotePng = `${remoteDir}/DA_ann_${ts}.png`;
         const outName = filename
-          ? filename.replace(/[^a-zA-Z0-9._-]/g, "_")
+          ? sanitizeFilenameComponentDotted(filename)
           : `annotated_${ts}.png`;
         const localPath = join(ctx.config.tempDir, outName);
 
         // Capture screenshot and UI hierarchy in parallel
-        await ctx.bridge.shell(`screencap -p '${shellEscape(remotePng)}'`,
+        await ctx.bridge.shell(`screencap -p ${shellQuote(remotePng)}`,
           { device: serial, timeout: 15000 });
         try {
           await ctx.bridge.exec(["pull", remotePng, localPath], { device: serial, timeout: 30000 });
         } finally {
-          await ctx.bridge.shell(`rm '${shellEscape(remotePng)}'`,
+          await ctx.bridge.shell(`rm ${shellQuote(remotePng)}`,
             { device: serial, ignoreExitCode: true }).catch(() => {});
         }
 

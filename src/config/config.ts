@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * DeepADB Configuration
  * 
@@ -51,6 +53,14 @@ export interface DeepADBConfig {
 
   /** Base delay between retries in milliseconds (doubles each retry) */
   retryBaseDelay: number;
+
+  /**
+   * Log level for the Logger middleware. Q1 fix: previously absent from
+   * the interface (DA_LOG_LEVEL was read directly in index.ts at Logger
+   * instantiation), causing type-blind reads elsewhere. Reading through
+   * this field gives compile-time visibility.
+   */
+  logLevel: "debug" | "info" | "warn" | "error";
 }
 
 function getDefaultAdbPath(): string {
@@ -88,15 +98,9 @@ function getTempDir(): string {
     : "/tmp/deepadb";
 }
 
-function parseIntSafe(value: string | undefined, fallback: number): number {
-  if (value === undefined) return fallback;
-  const parsed = parseInt(value, 10);
-  if (isNaN(parsed) || parsed < 0) {
-    console.error(`[DeepADB] Invalid config value "${value}", using default: ${fallback}`);
-    return fallback;
-  }
-  return parsed;
-}
+// Q2 fix: parseIntSafe extracted to src/middleware/parse-utils.ts as the
+// single source of truth (previously duplicated here and in result-handle.ts).
+import { parseIntSafe } from "../middleware/parse-utils.js";
 
 export const config: DeepADBConfig = {
   adbPath: process.env.ADB_PATH ?? getDefaultAdbPath(),
@@ -108,6 +112,16 @@ export const config: DeepADBConfig = {
   deviceCacheTtl: parseIntSafe(process.env.DA_CACHE_TTL, 5000),
   retryCount: parseIntSafe(process.env.DA_RETRY_COUNT, 1),
   retryBaseDelay: parseIntSafe(process.env.DA_RETRY_DELAY, 500),
+  logLevel: (() => {
+    // Q1 fix: parse DA_LOG_LEVEL with case-insensitive whitelist validation.
+    // Falls back to "info" with a stderr warning on invalid input. This
+    // belongs in config.ts (single source of truth for env-var parsing)
+    // rather than at the Logger instantiation site in index.ts.
+    const raw = (process.env.DA_LOG_LEVEL ?? "info").toLowerCase();
+    if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") return raw;
+    console.error(`[DeepADB] Invalid DA_LOG_LEVEL="${process.env.DA_LOG_LEVEL}", using "info". Valid: debug, info, warn, error.`);
+    return "info";
+  })(),
 };
 
 /**
@@ -128,6 +142,16 @@ export function validateConfig(): string[] {
     warnings.push(`Command timeout (${config.commandTimeout}ms) is very low. Commands may fail prematurely.`);
   }
 
+  // Q3 fix: clamp to a sane ceiling. With no cap, an operator typo
+  // (DA_MAX_OUTPUT=2000000000) would cause execFile's maxBuffer to be
+  // 2 × maxOutputSize = 4 GB, blowing up host memory before any tool
+  // even runs. 1 GB is well above any legitimate use (logcat dumps,
+  // bugreport zips fit comfortably) and cheap defense against typos.
+  const MAX_OUTPUT_CEILING = 1024 * 1024 * 1024;
+  if (config.maxOutputSize > MAX_OUTPUT_CEILING) {
+    warnings.push(`Max output size (${config.maxOutputSize}) exceeds 1 GB ceiling, clamping to ${MAX_OUTPUT_CEILING}. Adjust DA_MAX_OUTPUT if this is intentional.`);
+    config.maxOutputSize = MAX_OUTPUT_CEILING;
+  }
   if (config.maxOutputSize < 5000) {
     warnings.push(`Max output size (${config.maxOutputSize}) is very low. Output will be heavily truncated.`);
   }

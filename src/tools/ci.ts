@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * CI/CD Integration Tools — Headless test execution and device readiness.
  * 
@@ -8,8 +10,7 @@
 import { z } from "zod";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArg } from "../middleware/sanitize.js";
-
+import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 export function registerCiTools(ctx: ToolContext): void {
 
   ctx.server.tool(
@@ -92,7 +93,16 @@ export function registerCiTools(ctx: ToolContext): void {
         checks.push({ name: "Screen awake", passed: awake, detail: awake ? "Awake" : screenResult.stdout.trim() || "unknown" });
 
         // Network connectivity
-        const netResult = await ctx.bridge.shell("ping -c 1 -W 2 8.8.8.8", { device: serial, ignoreExitCode: true, timeout: 5000 });
+        // W1 fix: configurable ping target via DA_CI_PING_TARGET env var.
+        // Defaults to Cloudflare's public resolver 1.1.1.1 (less surveillance
+        // exposure than Google's 8.8.8.8 — Cloudflare offers a documented
+        // no-log policy at 1.1.1.1/privacy). Operators in environments
+        // requiring specific reachability checks (corporate internal, IPv6,
+        // air-gapped lab with internal router) can override. Validated as
+        // hostname/IP shape to avoid shell injection.
+        const rawPingTarget = process.env.DA_CI_PING_TARGET ?? "1.1.1.1";
+        const pingTarget = /^[A-Za-z0-9.:_-]+$/.test(rawPingTarget) ? rawPingTarget : "1.1.1.1";
+        const netResult = await ctx.bridge.shell(`ping -c 1 -W 2 ${shellQuote(pingTarget)}`, { device: serial, ignoreExitCode: true, timeout: 5000 });
         const netOk = netResult.exitCode === 0;
         checks.push({ name: "Network (internet)", passed: netOk, detail: netOk ? "reachable" : "unreachable" });
 
@@ -145,10 +155,10 @@ export function registerCiTools(ctx: ToolContext): void {
 
         let cmd = `am instrument -w -r`;
         if (testClass) {
-          cmd += ` -e class ${testClass}`;
-          if (testMethod) cmd += `#${testMethod}`;
+          cmd += ` -e class ${shellQuote(testClass)}`;
+          if (testMethod) cmd += `#${shellQuote(testMethod)}`;
         }
-        cmd += ` ${testPackage}/${runner}`;
+        cmd += ` ${shellQuote(testPackage)}/${shellQuote(runner)}`;
 
         const result = await ctx.bridge.shell(cmd, {
           device: serial, timeout, ignoreExitCode: true,

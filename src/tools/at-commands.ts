@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * AT Command Interface — Raw modem AT command passthrough via root access.
  *
@@ -20,8 +22,24 @@ import { z } from "zod";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { MODEM_PATHS, detectChipsetFamily } from "../middleware/chipset.js";
+import { shellQuote } from "../middleware/sanitize.js";
 
-/** AT commands that can brick, factory-reset, or disable the modem. */
+/**
+ * AT commands that can brick, factory-reset, or disable the modem.
+ *
+ * T1 note: NON-EXHAUSTIVE. Covers the well-known cross-vendor dangerous
+ * commands but vendor-specific surfaces have many more entries that aren't
+ * listed here. Notable missing vendor-specific commands:
+ *   - Huawei:    AT^SYSCFG*  (system config, can disable bands/RATs)
+ *   - MediaTek:  AT^EFNAME   (EF file writes, can corrupt SIM)
+ *   - Quectel:   AT+QCFG     (config writes)
+ *   - Cinterion: AT^SCFG     (config writes)
+ *   - Generic:   AT+CPOL     (preferred operator list write)
+ *
+ * Operators MUST review their modem's vendor datasheet before using
+ * `force: true` — the blocklist is a safety net for the common case, not
+ * a substitute for understanding what a command does.
+ */
 const DANGEROUS_AT_COMMANDS = [
   "AT+CFUN=0",     // Minimum functionality — kills radio
   "AT+CFUN=4",     // Disable TX
@@ -140,7 +158,12 @@ async function autoDetectAtPort(
     family = detectChipsetFamily(props);
   }
   const paths = MODEM_PATHS[family] ?? MODEM_PATHS.generic;
-  const existCmd = paths.map((p) => `test -e ${p} && echo "EXISTS:${p}"`).join("; ");
+  // T5 fix: defense-in-depth shellQuote on MODEM_PATHS entries. Current
+  // values are hardcoded /dev/... constants from chipset.ts (no whitespace
+  // or metacharacters), so this is safe by construction today. Wrapping
+  // ensures a future contributor adding a path with whitespace doesn't
+  // accidentally word-split here.
+  const existCmd = paths.map((p) => `test -e ${shellQuote(p)} && echo "EXISTS:${p}"`).join("; ");
   const existResult = await ctx.bridge.rootShell(existCmd, {
     device: serial, timeout: 5000, ignoreExitCode: true,
   });
@@ -183,7 +206,8 @@ export function registerAtCommandTools(ctx: ToolContext): void {
         sections.push(`\nProbing ${allPaths.length} device nodes...`);
 
         // Check which device nodes exist
-        const existCmd = allPaths.map((p) => `test -e ${p} && echo "EXISTS:${p}"`).join("; ");
+        // T5 fix (same rationale as autoDetectAtPort)
+        const existCmd = allPaths.map((p) => `test -e ${shellQuote(p)} && echo "EXISTS:${p}"`).join("; ");
         const existResult = await ctx.bridge.rootShell(existCmd, {
           device: serial, timeout: 10000, ignoreExitCode: true,
         });
@@ -548,10 +572,11 @@ export function registerAtCommandTools(ctx: ToolContext): void {
             sections.push(`  Overlap: ${overlap.join(", ")}`);
           } else {
             discrepancies++;
-            sections.push("✗ DISCREPANCY: Firmware revision mismatch between AT+CGMR and gsm.version.baseband");
+            sections.push("⚠ HEURISTIC MISMATCH: Firmware revision strings differ between AT+CGMR and gsm.version.baseband");
             sections.push(`  AT+CGMR: ${atResults["AT+CGMR"]}`);
             sections.push(`  getprop: ${propBaseline["gsm.version.baseband"]}`);
-            sections.push("  ⚠ This may indicate firmware tampering, incomplete OTA, or property spoofing");
+            // T7 fix: soften — this is a heuristic token-overlap check, not a tampering indicator
+          sections.push("  Note: vendor AT+CGMR strings and Android getprop labels rarely match exactly even on healthy hardware. Treat as an investigation hint, not evidence of tampering.");
           }
         }
 
@@ -601,7 +626,7 @@ export function registerAtCommandTools(ctx: ToolContext): void {
             sections.push("✓ Property consistency: ro.build.expect.baseband matches gsm.version.baseband");
           } else {
             discrepancies++;
-            sections.push("✗ DISCREPANCY: Expected baseband doesn't match running baseband");
+            sections.push("⚠ HEURISTIC MISMATCH: Expected baseband string doesn't match running baseband string");
             sections.push(`  Expected: ${propBaseline["ro.build.expect.baseband"]}`);
             sections.push(`  Running:  ${propBaseline["gsm.version.baseband"]}`);
             sections.push("  ⚠ This may indicate a pending OTA, partial update, or firmware downgrade");

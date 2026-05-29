@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Security Middleware — Command filtering, rate limiting, and audit logging.
  * 
@@ -40,7 +42,7 @@ export class SecurityMiddleware {
       blockedCommands: this.parseList(process.env.DA_BLOCKED_COMMANDS),
       allowedCommands: this.parseList(process.env.DA_ALLOWED_COMMANDS),
       rateLimit: parseInt(process.env.DA_RATE_LIMIT ?? "0", 10) || 0,
-      auditLog: process.env.DA_AUDIT_LOG !== "false",
+      auditLog: (process.env.DA_AUDIT_LOG ?? "").toLowerCase() !== "false", // E1 fix: case-insensitive disable check
     };
 
     if (this.config.enabled) {
@@ -75,7 +77,21 @@ export class SecurityMiddleware {
 
     if (!this.config.enabled) return null;
 
-    // Rate limiting
+    // Rate limiting.
+    //
+    // G1 design note: this is a SINGLE GLOBAL bucket — there is no
+    // per-device, per-tool, or per-token isolation. Under the documented
+    // single-operator threat model (one operator, one MCP client, possibly
+    // multiple devices) this is sufficient: the limiter exists to backstop
+    // accidental tool-call fan-out (an LLM loop spamming requests), not
+    // to fairly arbitrate among competing clients. A burst from one
+    // workflow CAN briefly rate-limit another workflow on the same server
+    // — accept that under the threat model.
+    //
+    // If you ever need fairness across devices/tools/tokens, replace
+    // `this.rateBucket` with a `Map<key, bucket>` keyed by a stable
+    // dimension. Don't ship that as a default without re-deriving the
+    // memory bound (each bucket adds 16 bytes ish; cap the map size).
     if (this.config.rateLimit > 0) {
       const now = Date.now();
       const windowMs = 60_000;
@@ -93,7 +109,7 @@ export class SecurityMiddleware {
     const cmdLower = command.toLowerCase();
     for (const blocked of this.config.blockedCommands) {
       if (cmdLower.includes(blocked.toLowerCase())) {
-        this.logger.warn(`Blocked command: ${command} (matched: ${blocked})`);
+        this.logger.warn(`Blocked command: ${this.redactForLog(command)} (matched: ${blocked})`);
         return `Command blocked by security policy (matched: "${blocked}").`;
       }
     }
@@ -104,7 +120,7 @@ export class SecurityMiddleware {
         (pattern) => cmdLower.includes(pattern.toLowerCase())
       );
       if (!allowed) {
-        this.logger.warn(`Command not in allowlist: ${command}`);
+        this.logger.warn(`Command not in allowlist: ${this.redactForLog(command)}`);
         return "Command not in security allowlist.";
       }
     }
@@ -146,10 +162,19 @@ export class SecurityMiddleware {
 
     // Mask common credential patterns
     let redacted = command
-      .replace(/(?:password|passwd|token|secret|key|auth)([\s=:]+)\S+/gi, (_, sep) => `***${sep}***REDACTED***`)
+      .replace(/(?:password|passwd|token|secret|api[_-]?key|bearer|authorization|auth)([\s=:]+)\S+/gi, (_, sep) => `***${sep}***REDACTED***`)
       .replace(/echo\s+["'].*?["']\s*>\s*/g, "echo '***' > ");
 
     if (redacted.length > MAX_LOG_LENGTH) {
+      // E5 note: emitting `command.length` here is a WEAK side-channel.
+      // A sudden +64 chars vs the operator's typical command-length baseline
+      // is a strong hint that a hex token was on the command line. Under
+      // DeepADB's threat model (single trusted operator on a host they
+      // control) this is acceptable — the operator sees their own audit
+      // log. For deployments shipping the audit log to an external SIEM
+      // or shared log aggregator, consider redacting the length too
+      // (replace with a coarse bucket like "+truncated"). Documented at
+      // the source so future log-egress changes can revisit.
       redacted = redacted.substring(0, MAX_LOG_LENGTH) + `... (${command.length} chars total)`;
     }
     return redacted;

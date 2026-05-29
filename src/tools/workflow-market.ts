@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Workflow Marketplace — Community-shared workflow definitions.
  *
@@ -15,7 +17,8 @@
 
 import { z } from "zod";
 import { join } from "path";
-import { writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync } from "fs";
+import { readFileSync, existsSync, readdirSync} from "fs";
+import { ensurePrivateDir, sanitizeFilenameComponent, writeAtomicSync, tryReadJsonOrWarn} from "../middleware/fs-utils.js";
 import { createHash } from "crypto";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
@@ -32,10 +35,31 @@ interface WorkflowManifestEntry {
   steps?: number;
 }
 
-const DEFAULT_WORKFLOW_REGISTRY_URL = "https://raw.githubusercontent.com/anthropics/DeepADB-plugins/main/workflows.json";
+/**
+ * Workflow marketplace URL — operator must opt in.
+ *
+ * Fallback chain:
+ *   1. DA_WORKFLOW_REGISTRY_URL (explicit)
+ *   2. DA_REGISTRY_URL with registry.json → workflows.json substitution
+ *   3. null (refuse with friendly "not configured" error)
+ *
+ * No default URL is shipped: same supply-chain rationale as registry.ts.
+ */
+function getRegistryUrl(): string | null {
+  return process.env.DA_WORKFLOW_REGISTRY_URL
+    ?? process.env.DA_REGISTRY_URL?.replace("registry.json", "workflows.json")
+    ?? null;
+}
 
-function getRegistryUrl(): string {
-  return process.env.DA_WORKFLOW_REGISTRY_URL ?? process.env.DA_REGISTRY_URL?.replace("registry.json", "workflows.json") ?? DEFAULT_WORKFLOW_REGISTRY_URL;
+/** Standard "marketplace not configured" error response. */
+function notConfiguredError() {
+  return {
+    content: [{
+      type: "text" as const,
+      text: `Workflow marketplace not configured.\nSet DA_WORKFLOW_REGISTRY_URL (or DA_REGISTRY_URL) to a manifest URL you trust to enable workflow discovery and installation.\nDeepADB does not ship a default marketplace — selecting a source is an operator-side supply-chain decision. See SECURITY.md for guidance.`,
+    }],
+    isError: true as const,
+  };
 }
 
 function getWorkflowDir(tempDir: string): string {
@@ -46,15 +70,21 @@ function getInstalledWorkflows(dir: string): Map<string, { version: string; desc
   const installed = new Map<string, { version: string; description: string }>();
   if (!existsSync(dir)) return installed;
 
+  // BJ7 fix: route through tryReadJsonOrWarn so a corrupt market workflow
+  // surfaces via stderr (getInstalledWorkflows has no logger in scope) rather
+  // than vanishing into a quietly-shrinking installed-count.
   for (const file of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
-    try {
-      const wf = JSON.parse(readFileSync(join(dir, file), "utf-8"));
+    const wf = tryReadJsonOrWarn<{ _marketplace?: { version?: string }; description?: string }>(
+      join(dir, file),
+      "workflow_market_installed"
+    );
+    if (wf) {
       const name = file.replace(".json", "");
       installed.set(name, {
         version: wf._marketplace?.version ?? "local",
         description: wf.description ?? "",
       });
-    } catch { /* skip corrupt */ }
+    }
   }
   return installed;
 }
@@ -71,6 +101,7 @@ export function registerWorkflowMarketTools(ctx: ToolContext): void {
     async ({ query, tag }) => {
       try {
         const registryUrl = getRegistryUrl();
+        if (registryUrl === null) return notConfiguredError();
         let manifest: WorkflowManifestEntry[];
         try {
           manifest = await fetchJson(registryUrl) as WorkflowManifestEntry[];
@@ -140,6 +171,7 @@ export function registerWorkflowMarketTools(ctx: ToolContext): void {
     async ({ name, force }) => {
       try {
         const registryUrl = getRegistryUrl();
+        if (registryUrl === null) return notConfiguredError();
         let manifest: WorkflowManifestEntry[];
         try {
           manifest = await fetchJson(registryUrl) as WorkflowManifestEntry[];
@@ -154,9 +186,9 @@ export function registerWorkflowMarketTools(ctx: ToolContext): void {
         }
 
         const dir = getWorkflowDir(ctx.config.tempDir);
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        if (!existsSync(dir)) ensurePrivateDir(dir);
 
-        const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_");
+        const safeName = sanitizeFilenameComponent(name);
         const filePath = join(dir, `${safeName}.json`);
 
         if (existsSync(filePath) && !force) {
@@ -183,6 +215,14 @@ export function registerWorkflowMarketTools(ctx: ToolContext): void {
               isError: true,
             };
           }
+        } else {
+          return {
+            content: [{
+              type: "text",
+              text: `Refusing to install workflow "${name}" without a SHA-256 integrity hash.\nThe marketplace manifest must include a "sha256" field for this entry.\nWithout an integrity hash, a compromised marketplace could deliver a malicious workflow whose shell, root_shell, or install actions execute on your device. The marketplace maintainer should add a SHA-256 hash to the manifest entry to enable installation.`,
+            }],
+            isError: true,
+          };
         }
 
         // Validate it's a proper workflow
@@ -205,13 +245,27 @@ export function registerWorkflowMarketTools(ctx: ToolContext): void {
           installedAt: new Date().toISOString(),
         };
 
-        writeFileSync(filePath, JSON.stringify(parsed, null, 2));
+        // BJ8 fix: backup-on-overwrite. When force=true overwrites an existing
+        // workflow, save the previous version to {name}.json.bak so a fat-finger
+        // install doesn't permanently lose a customized local workflow.
+        let backupNote = "";
+        if (existsSync(filePath) && force) {
+          try {
+            const backupPath = filePath + ".bak";
+            const existing = readFileSync(filePath, "utf-8");
+            writeAtomicSync(backupPath, existing);
+            backupNote = `\nBackup of previous version: ${backupPath}`;
+          } catch (err) {
+            backupNote = `\n(Note: backup of previous version failed — ${err instanceof Error ? err.message : err})`;
+          }
+        }
+        writeAtomicSync(filePath, JSON.stringify(parsed, null, 2));
 
         const stepCount = Array.isArray(parsed.steps) ? (parsed.steps as unknown[]).length : "?";
         return {
           content: [{
             type: "text",
-            text: `Workflow "${name}" v${entry.version} installed (${stepCount} steps).\nSaved: ${filePath}\nRun with: adb_workflow_run workflow="${safeName}"`,
+            text: `Workflow "${name}" v${entry.version} installed (${stepCount} steps).\nSaved: ${filePath}${backupNote}\nRun with: adb_workflow_run workflow="${safeName}"`,
           }],
         };
       } catch (error) {
@@ -226,13 +280,13 @@ export function registerWorkflowMarketTools(ctx: ToolContext): void {
     {
       workflow: z.string().describe("Name of the local workflow to export (from adb_workflow_list)"),
       author: z.string().optional().describe("Author name to include in metadata"),
-      version: z.string().optional().default("1.0.0").describe("Version string"),
+      version: z.string().optional().default("1.0.0").describe("Version string (semver-style, e.g., '1.2.3'). Defaults to '1.0.0' if omitted. Increment when publishing an updated workflow so registry consumers can detect changes."),
       tags: z.array(z.string()).optional().describe("Tags for discovery (e.g., ['testing', 'diagnostics'])"),
     },
     async ({ workflow, author, version, tags }) => {
       try {
         const dir = getWorkflowDir(ctx.config.tempDir);
-        const safeName = workflow.replace(/[^a-zA-Z0-9_-]/g, "_");
+        const safeName = sanitizeFilenameComponent(workflow);
         const filePath = join(dir, `${safeName}.json`);
 
         if (!existsSync(filePath)) {
@@ -255,7 +309,7 @@ export function registerWorkflowMarketTools(ctx: ToolContext): void {
         const exportJson = JSON.stringify(exportPkg, null, 2);
         const sha256 = createHash("sha256").update(exportJson).digest("hex");
         const exportPath = join(dir, `${safeName}.export.json`);
-        writeFileSync(exportPath, exportJson);
+        writeAtomicSync(exportPath, exportJson);
 
         const stepCount = Array.isArray(wf.steps) ? wf.steps.length : "?";
 

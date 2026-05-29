@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * RIL Message Interception — Passive radio interface layer monitoring.
  *
@@ -24,7 +26,7 @@ import { z } from "zod";
 import { ChildProcess } from "child_process";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { registerCleanup } from "../middleware/cleanup.js";
+import { registerCleanup, gracefulKill } from "../middleware/cleanup.js";
 
 interface RilMessage {
   timestamp: string;
@@ -65,6 +67,12 @@ const RIL_CATEGORIES: Array<{ pattern: RegExp; category: string }> = [
 ];
 
 function categorizeMessage(line: string): string {
+  // AW4 note: ORDER MATTERS. First-match-wins via early return. If a single
+  // line matches multiple categories (e.g., both /VOICE/ and /CALL_STATE/),
+  // the category listed earlier in RIL_CATEGORIES is selected. Reordering
+  // entries changes downstream categorization for ambiguous messages.
+  // The current ordering puts the more-specific patterns before the more-
+  // general ones (e.g., voice-call patterns before generic radio patterns).
   for (const { pattern, category } of RIL_CATEGORIES) {
     if (pattern.test(line)) return category;
   }
@@ -87,10 +95,12 @@ function parseRilLine(line: string): RilMessage | null {
 
 // Register cleanup via shared registry
 function ensureCleanupRegistered(): void {
-  registerCleanup("ril-intercept", () => {
-    for (const [, session] of sessions) {
-      try { session.process.kill(); } catch { /* ignore */ }
-    }
+  registerCleanup("ril-intercept", async () => {
+    // Same hazard as AC3/AK8: a stuck radio logcat reader can ignore
+    // SIGTERM. Two-stage gracefulKill ensures the child is reaped.
+    await Promise.all(
+      Array.from(sessions.values()).map((s) => gracefulKill(s.process, 1500))
+    );
     sessions.clear();
   });
 }
@@ -291,9 +301,9 @@ export function registerRilInterceptTools(ctx: ToolContext): void {
       try {
         if (sessionId === "all") {
           const count = sessions.size;
-          for (const [, s] of sessions) {
-            try { s.process.kill(); } catch { /* ignore */ }
-          }
+          await Promise.all(
+            Array.from(sessions.values()).map((s) => gracefulKill(s.process, 1500))
+          );
           sessions.clear();
           return { content: [{ type: "text", text: `Stopped ${count} RIL session(s).` }] };
         }
@@ -315,7 +325,7 @@ export function registerRilInterceptTools(ctx: ToolContext): void {
           .map(([cat, n]) => `  ${cat}: ${n}`)
           .join("\n");
 
-        try { session.process.kill(); } catch { /* ignore */ }
+        await gracefulKill(session.process, 1500);
         sessions.delete(sessionId);
 
         const summary: string[] = [];

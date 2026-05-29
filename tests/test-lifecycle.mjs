@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Lifecycle Test Suite — Multi-step tool workflows requiring start→interact→stop patterns.
  * Tests: app lifecycle, file push/pull, port forwarding, screen recording,

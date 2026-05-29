@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Thermal & Power Profiling — Temperature, CPU frequency, and battery drain analysis.
  *
@@ -12,16 +14,23 @@
  *   - /sys/class/power_supply/battery/ — detailed battery state
  *   - dumpsys batterystats — historical battery usage statistics
  *
- * All sysfs reads use hardcoded paths — no user input reaches shell interpolation.
+ * Shell-construction surface (BF1 audit, corrected from earlier docstring):
+ *   - Snapshot/compare tools: all sysfs reads use hardcoded paths in
+ *     device-side for-loops. NO user input reaches shell interpolation.
+ *   - adb_battery_drain: the per-package stats path interpolates a
+ *     validated `packageName` into `dumpsys batterystats ${packageName}`.
+ *     validateShellArg blocks metacharacters; the wrapping for
+ *     defense-in-depth against whitespace word-splitting is queued in this
+ *     release as part of the shellQuote promotion.
  */
 
 import { z } from "zod";
 import { join } from "path";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from "fs";
+import { readFileSync, existsSync, readdirSync} from "fs";
+import { ensurePrivateDir, sanitizeFilenameComponent, writeAtomicSync, isWithinDir} from "../middleware/fs-utils.js";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArg } from "../middleware/sanitize.js";
-
+import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 interface ThermalSnapshot {
   timestamp: string;
   device: string;
@@ -185,11 +194,11 @@ export function registerThermalPowerTools(ctx: ToolContext): void {
           };
 
           const dir = getThermalDir(ctx.config.tempDir);
-          if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-          const safeLabel = label.replace(/[^a-zA-Z0-9_-]/g, "_");
-          const safeDevice = serial.replace(/[^a-zA-Z0-9_-]/g, "_");
+          if (!existsSync(dir)) ensurePrivateDir(dir);
+          const safeLabel = sanitizeFilenameComponent(label);
+          const safeDevice = sanitizeFilenameComponent(serial);
           const filePath = join(dir, `${safeDevice}_${safeLabel}_${Date.now()}.json`);
-          writeFileSync(filePath, JSON.stringify(snapshot, null, 2));
+          writeAtomicSync(filePath, JSON.stringify(snapshot, null, 2));
           sections.push(`\nSaved: ${filePath}`);
         }
 
@@ -209,6 +218,12 @@ export function registerThermalPowerTools(ctx: ToolContext): void {
     },
     async ({ baselinePath, device }) => {
       try {
+        // Path scoping for explicit baselinePath; the default-resolution
+        // path (when baselinePath is omitted) already produces a path
+        // inside tempDir.
+        if (baselinePath && !isWithinDir(baselinePath, ctx.config.tempDir)) {
+          return { content: [{ type: "text", text: `Baseline path must be inside the temp directory (${ctx.config.tempDir}). Got: ${baselinePath}` }], isError: true };
+        }
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
 
@@ -219,7 +234,7 @@ export function registerThermalPowerTools(ctx: ToolContext): void {
           if (!existsSync(dir)) {
             return { content: [{ type: "text", text: "No thermal baselines saved. Use adb_thermal_snapshot with save=true first." }], isError: true };
           }
-          const safeDevice = serial.replace(/[^a-zA-Z0-9_-]/g, "_");
+          const safeDevice = sanitizeFilenameComponent(serial);
           const files = readdirSync(dir)
             .filter((f) => f.startsWith(safeDevice) && f.endsWith(".json"))
             .sort()
@@ -315,6 +330,14 @@ export function registerThermalPowerTools(ctx: ToolContext): void {
   );
 
   ctx.server.tool(
+    // BF8 note: adb_battery_drain BLOCKS the MCP server's event loop for
+    // the duration parameter (3-60 seconds via setTimeout). Single-threaded
+    // JS means no other tool calls can be serviced while the drain test is
+    // running. Acceptable for the use case — battery drain is an explicit
+    // long-running measurement and the operator chose the duration — but
+    // it does mean the client may appear unresponsive for up to 60s, and
+    // any concurrent device polling stops. Operators running multi-tool
+    // workflows should sequence drain LAST or in isolation.
     "adb_battery_drain",
     "Measure battery drain rate over a specified duration. Takes initial and final readings and calculates mA draw, mW power consumption, and estimated percentage per hour. Useful for profiling power impact of specific operations.",
     {
@@ -389,7 +412,7 @@ export function registerThermalPowerTools(ctx: ToolContext): void {
         // Package-specific stats if requested
         if (packageName) {
           const statsResult = await ctx.bridge.shell(
-            `dumpsys batterystats ${packageName} | grep -E 'Uid|Total|Screen|Wifi|Cell|Sensor|Wake' | head -20`,
+            `dumpsys batterystats ${shellQuote(packageName)} | grep -E 'Uid|Total|Screen|Wifi|Cell|Sensor|Wake' | head -20`,
             { device: serial, timeout: 10000, ignoreExitCode: true }
           );
           if (statsResult.stdout.trim()) {

@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Screen Recording Tools — Start/stop video capture on the device.
  * 
@@ -7,9 +9,10 @@
 
 import { z } from "zod";
 import { join } from "path";
+import { statSync } from "fs";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { shellEscape } from "../middleware/sanitize.js";
+import { shellQuote } from "../middleware/sanitize.js";
 
 interface RecordingSession {
   device: string;
@@ -46,7 +49,7 @@ export function registerScreenRecordTools(ctx: ToolContext): void {
         // Start screenrecord in background via shell nohup
         // screenrecord auto-stops at --time-limit
         await ctx.bridge.shell(
-          `nohup screenrecord --time-limit ${maxDuration} '${shellEscape(remotePath)}' > /dev/null 2>&1 &`,
+          `nohup screenrecord --time-limit ${maxDuration} ${shellQuote(remotePath)} > /dev/null 2>&1 &`,
           { device: serial, ignoreExitCode: true }
         );
 
@@ -104,22 +107,48 @@ export function registerScreenRecordTools(ctx: ToolContext): void {
         const localFilename = session.remotePath.split("/").pop() ?? "recording.mp4";
         const localPath = join(ctx.config.tempDir, localFilename);
 
+        // AX6 fix: scale the pull timeout with recording duration. A 3-minute
+        // recording at high bitrate can produce a 20-50 MB file; over slow USB 2.0
+        // or wireless ADB the pull alone can exceed the previous hardcoded 60s.
+        // Formula: 30s base + 2s per second of recorded duration (handles ~500 KB/s
+        // pull throughput conservatively; healthy USB 3.0 will finish much faster).
+        const recordedSec = Math.max(1, (Date.now() - session.startedAt) / 1000);
+        const pullTimeoutMs = Math.min(600000, 30000 + Math.ceil(recordedSec * 2000));
         await ctx.bridge.exec(["pull", session.remotePath, localPath], {
-          device: serial, timeout: 60000,
+          device: serial, timeout: pullTimeoutMs,
         });
 
         // Clean up device file
-        await ctx.bridge.shell(`rm '${shellEscape(session.remotePath)}'`, {
+        await ctx.bridge.shell(`rm ${shellQuote(session.remotePath)}`, {
           device: serial, ignoreExitCode: true,
         });
 
         const elapsed = ((Date.now() - session.startedAt) / 1000).toFixed(1);
         recordings.delete(serial);
 
+        // AX5 fix: detect empty-file pull. screenrecord requires hardware H.264
+        // encoder; on some emulators and virtualized environments the binary
+        // exits silently with a zero-byte output. Previously the tool reported
+        // "Recording saved" with no hint the file was empty. Now we check
+        // size and surface the failure explicitly.
+        let fileSize = 0;
+        try {
+          fileSize = statSync(localPath).size;
+        } catch { /* file missing → treat as 0 */ }
+        if (fileSize === 0) {
+          return {
+            content: [{
+              type: "text",
+              text: `Recording produced an empty file at ${localPath}. This usually means the device's screenrecord binary failed silently — common on emulators without hardware H.264 encoders, or on devices in restricted modes. Try: (1) recording on a physical device, (2) lowering bitrate, (3) checking dmesg for screenrecord errors. Duration: ~${elapsed}s`,
+            }],
+            isError: true,
+          };
+        }
+
         return {
           content: [{
             type: "text",
-            text: `Recording saved: ${localPath}\nDuration: ~${elapsed}s`,
+            text: `Recording saved: ${localPath}\nDuration: ~${elapsed}s\nFile size: ${(fileSize / 1024).toFixed(1)} KB`,
           }],
         };
       } catch (error) {

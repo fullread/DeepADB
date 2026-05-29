@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Shared test harness for DeepADB hardware tests.
  * Manages stdio JSON-RPC transport, MCP initialization, and test utilities.
@@ -54,7 +56,7 @@ export async function createHarness(suiteName = "Test") {
   // "Preparing to be Ready..." and fire prematurely.
   const READY_PATTERNS = [
     "Ready for connections",      // from index.ts post-initialization log
-    "tool modules, 4 resources",  // from server.ts init-complete log
+    "tool modules, 5 resources",  // from server.ts init-complete log
   ];
   let stderrBuffer = "";
   await new Promise((resolve, reject) => {
@@ -98,6 +100,22 @@ export async function createHarness(suiteName = "Test") {
 
   function callTool(name, args = {}, timeoutMs = 30000) {
     return sendRequest("tools/call", { name, arguments: args }, timeoutMs);
+  }
+
+  /** Read an MCP Resource by URI. Returns the full RPC response — caller
+   *  can inspect `response.result.contents` for the resource blocks. */
+  function readResource(uri, timeoutMs = 30000) {
+    return sendRequest("resources/read", { uri }, timeoutMs);
+  }
+
+  /** Extract concatenated text from a resources/read response. Returns "" on
+   *  RPC error (same convention as getText for tool responses). */
+  function getResourceText(response) {
+    if (response.error) return "";
+    return (response.result?.contents ?? [])
+      .filter((c) => typeof c.text === "string")
+      .map((c) => c.text)
+      .join("\n");
   }
 
   function getText(response) {
@@ -313,5 +331,5 @@ export async function createHarness(suiteName = "Test") {
     return failed;
   }
 
-  return { callTool, getText, isError, test, testContains, testNotContains, testMatch, testRejects, skip, assert, assertEq, section, finish };
+  return { callTool, readResource, getText, getResourceText, isError, test, testContains, testNotContains, testMatch, testRejects, skip, assert, assertEq, section, finish };
 }

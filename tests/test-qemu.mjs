@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * QEMU/KVM Test Suite — On-device VM management tools.
  * Tests: setup, image management (create/list/delete), status, resource detection.

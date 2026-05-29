@@ -1,0 +1,22 @@
+# Normalize all text files to LF in the repository and on checkout.
+# The working tree had mixed CRLF/LF; this enforces a single convention so
+# diffs stay clean and editors/tooling behave consistently across platforms.
+* text=auto eol=lf
+
+# Shell scripts must stay LF regardless of platform.
+*.sh text eol=lf
+
+# Treat known binary types as binary (no EOL conversion, no textual diff).
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.pdf  binary
+*.exe  binary
+*.gz   binary
+*.zip  binary
+
+# Lockfile is generated — collapse it in diffs and mark it generated.
+package-lock.json -diff linguist-generated

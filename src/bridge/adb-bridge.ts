@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * ADB Bridge — Core subprocess wrapper for all ADB interactions.
  * 
@@ -9,7 +11,7 @@
 import { execFile, ExecFileOptions, spawn, ChildProcess } from "child_process";
 import { config } from "../config/config.js";
 import { Logger } from "../middleware/logger.js";
-import { shellEscape } from "../middleware/sanitize.js";
+import { shellQuote } from "../middleware/sanitize.js";
 
 export interface AdbResult {
   stdout: string;
@@ -31,15 +33,28 @@ export interface AdbExecOptions {
   retries?: number;
 }
 
-/** Patterns in stderr/message that indicate a transient, retryable failure. */
+/**
+ * Patterns in stderr/message that indicate a transient, retryable failure.
+ *
+ * D2: each pattern is specific enough to avoid false positives from a tool's
+ * USER output. "closed" alone would have triggered retries on any tool whose
+ * output contained the word "closed" (e.g., `dumpsys activity | grep closed`);
+ * the anchored variants below only fire on adb's own transport-level errors.
+ */
 const TRANSIENT_PATTERNS = [
   "device not found",
   "device offline",
   "no devices/emulators found",
   "protocol fault",
-  "closed",
-  "Connection reset",
+  "error: closed",                // adb transport-closed (was bare "closed")
+  "connection reset by peer",     // network-level reset (was bare "Connection reset")
   "ECONNRESET",
+  // N1 fix: removed "device unauthorized" — ADB authorization is a one-time
+  // user action (accept prompt on device screen), not a transient transport
+  // hiccup. Retrying it wastes the retry budget; let the operator see the
+  // unauthorized error immediately so they know to look at the device.
+  "daemon not running",
+  "cannot connect to daemon",
 ];
 
 function isTransientError(error: unknown): boolean {
@@ -162,7 +177,7 @@ export class AdbBridge {
 
   /** Execute a root shell command (via su). */
   async rootShell(command: string, options: AdbExecOptions = {}): Promise<AdbResult> {
-    return this.exec(["shell", `su -c '${shellEscape(command)}'`], options);
+    return this.exec(["shell", `su -c ${shellQuote(command)}`], options);
   }
 
   /** Verify ADB is accessible and return version info. */
@@ -188,6 +203,20 @@ export class AdbBridge {
    *
    * In ADB mode: spawns `adb -s <serial> <args...>`
    * LocalBridge overrides this to spawn commands directly.
+   *
+   * N6 CALLER CONTRACT: there is NO built-in size budget on accumulated
+   * stdout/stderr from the returned ChildProcess. A caller that forgets
+   * to drain stdout (no `.on("data", ...)` handler) will accumulate
+   * indefinitely in the OS pipe buffer until the child blocks on write.
+   * Current callers (logcat-watch.ts, ril-intercept.ts) implement their
+   * own ring-buffering with bounded size. Any new caller MUST either:
+   *   (1) drain stdout via a handler that bounds in-memory accumulation,
+   *       OR
+   *   (2) discard stdout via `stdio: ["ignore", "ignore", "ignore"]`
+   *       (override the default below) if output isn't needed,
+   *       OR
+   *   (3) pipe stdout to a file via Node's `pipe()` with rotation.
+   * Forgetting to drain is the most common spawn-based memory leak.
    */
   spawnStreaming(args: string[], device?: string): ChildProcess {
     const serial = device || config.defaultDevice;

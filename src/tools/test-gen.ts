@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Automated Test Generation — Generate workflow JSON from live UI and intent analysis.
  *
@@ -12,10 +14,11 @@
 
 import { z } from "zod";
 import { join } from "path";
-import { mkdirSync, writeFileSync, existsSync } from "fs";
+import { existsSync} from "fs";
+import { ensurePrivateDir, sanitizeFilenameComponent, writeAtomicSync} from "../middleware/fs-utils.js";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArg } from "../middleware/sanitize.js";
+import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 import { captureUiDump, getAttr } from "../middleware/ui-dump.js";
 
 interface UiTarget {
@@ -103,7 +106,7 @@ export function registerTestGenTools(ctx: ToolContext): void {
         for (let i = 0; i < targets.length; i++) {
           const el = targets[i];
           const label = el.text || el.contentDesc || el.resourceId || `element_${i}`;
-          const safeLabel = label.replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 30);
+          const safeLabel = sanitizeFilenameComponent(label).substring(0, 30);
 
           // Tap the element
           steps.push({
@@ -121,10 +124,16 @@ export function registerTestGenTools(ctx: ToolContext): void {
           }
 
           // Check for crash
+          // BD7 fix: use {{pkg}} variable substitution for consistency with
+          // adb_test_gen_from_intents (L233). Both tools now produce workflows
+          // that interpolate the package via workflow.ts substituteVars rather
+          // than embedding the package name verbatim. This makes the generated
+          // workflows portable: an operator can save the workflow and re-run
+          // it against a different package by changing only the variable.
           steps.push({
             name: `crash_check_${safeLabel}`,
             action: "shell",
-            command: `logcat -d -b crash -t 5 | grep -Fc "${packageName}" || echo 0`,
+            command: `logcat -d -b crash -t 5 | grep -Fc "{{pkg}}" || echo 0`,
             capture: `crash_${i}`,
           });
 
@@ -192,7 +201,7 @@ export function registerTestGenTools(ctx: ToolContext): void {
         const serial = resolved.serial;
 
         // Get package dump to find activities
-        const dumpResult = await ctx.bridge.shell(`dumpsys package ${packageName} | grep -E 'Activity|android.intent.action'`, {
+        const dumpResult = await ctx.bridge.shell(`dumpsys package ${shellQuote(packageName)} | grep -E 'Activity|android.intent.action'`, {
           device: serial, timeout: 15000, ignoreExitCode: true,
         });
 
@@ -200,6 +209,7 @@ export function registerTestGenTools(ctx: ToolContext): void {
         const escapedPkg = packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const activityRegex = new RegExp(`(${escapedPkg}[/.]\\S+)`, "g");
         const rawMatches = dumpResult.stdout.match(activityRegex) ?? [];
+        const totalActivityCount = new Set(rawMatches).size;
         const activities = [...new Set(rawMatches)]
           .filter((a) => !a.includes("$") && !a.includes("Resolver"))
           .slice(0, 20); // Cap at 20 activities
@@ -208,6 +218,14 @@ export function registerTestGenTools(ctx: ToolContext): void {
           return { content: [{ type: "text", text: `No activities found for ${packageName}.` }], isError: true };
         }
 
+        // BD6 fix: surface the cap to the operator so they know N activities were
+        // tested out of M total. Large apps (system services, comprehensive
+        // SDKs) routinely exceed 20 activities; without this disclosure the
+        // operator might think the workflow covers everything when it doesn't.
+        const activityCapNote = totalActivityCount > activities.length
+          ? `# Note: tested ${activities.length} of ${totalActivityCount} activities (cap=20 for tractable workflow size). Edit the workflow JSON manually to add more.\n`
+          : "";
+
         // Generate workflow
         const steps: Array<Record<string, unknown>> = [];
         steps.push({ name: "clear_logcat", action: "shell", command: "logcat -c" });
@@ -215,13 +233,13 @@ export function registerTestGenTools(ctx: ToolContext): void {
         for (let i = 0; i < activities.length; i++) {
           const activity = activities[i];
           const shortName = activity.split("/").pop() ?? activity.split(".").pop() ?? `activity_${i}`;
-          const safeName = shortName.replace(/[^a-zA-Z0-9_]/g, "_").substring(0, 30);
+          const safeName = sanitizeFilenameComponent(shortName, 30);
 
           // Launch the activity
           steps.push({
             name: `launch_${safeName}`,
             action: "shell",
-            command: `am start -n ${activity}`,
+            command: `am start -n ${shellQuote(activity)}`,
           });
           steps.push({ name: `wait_${safeName}`, action: "sleep", ms: 1500 });
           steps.push({ name: `screenshot_${safeName}`, action: "screenshot" });
@@ -261,6 +279,7 @@ export function registerTestGenTools(ctx: ToolContext): void {
         const workflowJson = JSON.stringify(workflow, null, 2);
 
         const summary: string[] = [];
+        if (activityCapNote) summary.push(activityCapNote);
         summary.push(`Generated intent test workflow for ${activities.length} activities:\n`);
         for (let i = 0; i < activities.length; i++) {
           summary.push(`  [${i + 1}] ${activities[i]}`);
@@ -297,11 +316,11 @@ export function registerTestGenTools(ctx: ToolContext): void {
         }
 
         const dir = getWorkflowDir(ctx.config.tempDir);
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        if (!existsSync(dir)) ensurePrivateDir(dir);
 
-        const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_");
+        const safeName = sanitizeFilenameComponent(name);
         const filePath = join(dir, `${safeName}.json`);
-        writeFileSync(filePath, JSON.stringify(parsed, null, 2));
+        writeAtomicSync(filePath, JSON.stringify(parsed, null, 2));
 
         return { content: [{ type: "text", text: `Workflow saved: ${filePath}\nRun with: adb_workflow_run workflow="${safeName}"` }] };
       } catch (error) {

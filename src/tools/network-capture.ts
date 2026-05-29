@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Network Capture Tools — On-device packet capture via tcpdump.
  * 
@@ -10,7 +12,7 @@ import { z } from "zod";
 import { join } from "path";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArg, shellEscape } from "../middleware/sanitize.js";
+import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 
 /** Track active captures. Key = device serial. */
 const activeCaptures = new Map<string, { remotePath: string; startedAt: number }>();
@@ -50,13 +52,36 @@ export function registerNetworkCaptureTools(ctx: ToolContext): void {
         const ifaceErr = validateShellArg(iface, "interface");
         if (ifaceErr) return { content: [{ type: "text", text: ifaceErr }], isError: true };
         if (filter) {
-          const filterErr = validateShellArg(filter, "filter");
-          if (filterErr) return { content: [{ type: "text", text: filterErr }], isError: true };
+          // AM2 fix: tcpdump filter expressions legitimately need parens
+          // (`(tcp port 80) and (host x)`), keyword combinations, and bitwise
+          // ops (`tcp[13] & 2 != 0`). The previous `validateShellArg(filter)`
+          // rejected parens and bitwise ops, breaking legitimate filters.
+          //
+          // We allow those chars and rely on single-quote wrapping at the
+          // interpolation site below to contain shell-meaningful characters.
+          // Inside single quotes the only dangerous chars are `\'` (terminates
+          // the quote), NUL (terminates the string), and CR/LF (line-splits
+          // the command).
+          if (filter.length > 1000) {
+            return { content: [{ type: "text", text: "tcpdump filter too long (max 1000 chars)" }], isError: true };
+          }
+          if (filter.includes("'")) {
+            return { content: [{ type: "text", text: "tcpdump filter cannot contain single quotes" }], isError: true };
+          }
+          if (filter.includes("\u0000")) {
+            return { content: [{ type: "text", text: "tcpdump filter cannot contain null bytes" }], isError: true };
+          }
+          if (/[\r\n]/.test(filter)) {
+            return { content: [{ type: "text", text: "tcpdump filter cannot contain newlines" }], isError: true };
+          }
         }
 
-        let cmd = `nohup tcpdump -i ${iface} -w '${shellEscape(remotePath)}'`;
+        let cmd = `nohup tcpdump -i ${shellQuote(iface)} -w ${shellQuote(remotePath)}`;
         if (maxPackets) cmd += ` -c ${maxPackets}`;
-        if (filter) cmd += ` ${filter}`;
+        // AM2 fix (paired with relaxed validation above): wrap filter in
+        // single quotes so parens/bitwise-ops/whitespace pass to tcpdump
+        // verbatim instead of being interpreted by the shell.
+        if (filter) cmd += ` '${filter}'`;
         cmd += " > /dev/null 2>&1 &";
 
         await ctx.bridge.shell(cmd, { device: serial, ignoreExitCode: true });
@@ -109,13 +134,13 @@ export function registerNetworkCaptureTools(ctx: ToolContext): void {
         await ctx.bridge.exec(["pull", capture.remotePath, localPath], { device: serial, timeout: 60000 });
 
         // Get file size
-        const sizeResult = await ctx.bridge.shell(`stat -c %s '${shellEscape(capture.remotePath)}'`, {
+        const sizeResult = await ctx.bridge.shell(`stat -c %s ${shellQuote(capture.remotePath)}`, {
           device: serial, ignoreExitCode: true,
         });
         const sizeBytes = parseInt(sizeResult.stdout.trim(), 10) || 0;
 
         // Clean up device file
-        await ctx.bridge.shell(`rm '${shellEscape(capture.remotePath)}'`, { device: serial, ignoreExitCode: true });
+        await ctx.bridge.shell(`rm ${shellQuote(capture.remotePath)}`, { device: serial, ignoreExitCode: true });
 
         const elapsed = ((Date.now() - capture.startedAt) / 1000).toFixed(1);
         activeCaptures.delete(serial);

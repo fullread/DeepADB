@@ -26,9 +26,11 @@ Every tool that interpolates user-supplied parameters into shell commands valida
 - **`sed` escaping in `adb_file_replace`** (`files.ts`) applies `'\''` closing/reopening to both the pattern and the replacement value, handling single quotes that would otherwise close the outer shell single-quote. Zod also rejects newlines in `find`/`replace` since sed treats embedded newlines as script-command separators.
 - **Device node paths** must start with `/dev/` and cannot contain path traversal (`..`).
 
+**Guarantees and verification.** `shellQuote()` provides a round-trip property: for any input string, its single-quoted output decodes back to exactly that string under POSIX shell rules, so no metacharacter, embedded quote, or newline can escape the argument position. `validateShellArg()` provides the complementary rejection property: any value containing a shell metacharacter is refused rather than escaped. These two properties are exercised by `tests/test-sanitize-fuzz.mjs` using property-based fuzzing (thousands of generated, metacharacter-dense inputs) alongside fixed attack-vector regression cases. The sanitizers prevent a value from escaping its lexical position; they do not authorize commands (the opt-in allowlist below does) or validate semantic correctness (the per-tool Zod schema does).
+
 ### Zod Parameter Bounds (always active)
 
-Every `z.number()` parameter across all 198 tools has explicit `.min()/.max()` constraints. This prevents resource exhaustion from extreme values — for example, requesting a 999999-second sleep or a buffer size of 2^31.
+Every `z.number()` parameter across all 204 tools has explicit `.min()/.max()` constraints. This prevents resource exhaustion from extreme values — for example, requesting a 999999-second sleep or a buffer size of 2^31.
 
 ### Security Middleware (opt-in enforcement)
 
@@ -150,7 +152,7 @@ When installing DeepADB via npm, always pin the version:
 
 ```bash
 # Pinned (recommended)
-npm install -g deepadb@1.1.1
+npm install -g deepadb@1.1.2
 
 # Unpinned (not recommended — vulnerable to supply chain attacks)
 npx -y deepadb

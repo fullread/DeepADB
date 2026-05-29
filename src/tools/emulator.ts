@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Emulator Management Tools — AVD lifecycle management.
  * 
@@ -12,17 +14,19 @@ import { existsSync } from "fs";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { isOnDevice } from "../config/config.js";
-import { registerCleanup } from "../middleware/cleanup.js";
+import { registerCleanup, gracefulKill } from "../middleware/cleanup.js";
 
 /** Track spawned emulator processes for cleanup. Key = AVD name. */
 const emulatorProcesses = new Map<string, ChildProcess>();
 
 // Register cleanup via shared registry to kill orphaned emulators on server exit
 function ensureCleanupRegistered(): void {
-  registerCleanup("emulator", () => {
-    for (const [, proc] of emulatorProcesses) {
-      try { proc.kill(); } catch { /* ignore */ }
-    }
+  registerCleanup("emulator", async () => {
+    // AC3 fix: SIGTERM → SIGKILL fallback so an emulator hung mid-snapshot
+    // or with a wedged video pipe still gets killed on shutdown.
+    await Promise.all(
+      Array.from(emulatorProcesses.values()).map((proc) => gracefulKill(proc, 1500))
+    );
     emulatorProcesses.clear();
   });
 }
@@ -95,7 +99,7 @@ export function registerEmulatorTools(ctx: ToolContext): void {
         return new Promise((resolve) => {
           execFile(emulatorPath, ["-list-avds"], {
             timeout: 15000, windowsHide: true,
-          }, (error, stdout, stderr) => {
+          }, (error, stdout) => {
             if (error && !stdout) {
               resolve({
                 content: [{ type: "text", text: `Failed to list AVDs: ${error.message}\nIs the Android SDK emulator installed and on PATH?` }],
@@ -230,7 +234,10 @@ export function registerEmulatorTools(ctx: ToolContext): void {
         if (avdName) {
           const proc = emulatorProcesses.get(avdName);
           if (proc) {
-            try { proc.kill(); } catch { /* ignore */ }
+            // AC3 fix: graceful kill with SIGKILL fallback after 2s grace
+            // period — explicit stop tool gives the emulator a moment to
+            // save its state before escalating.
+            await gracefulKill(proc, 2000);
             emulatorProcesses.delete(avdName);
           }
           ctx.deviceManager.invalidateCache();

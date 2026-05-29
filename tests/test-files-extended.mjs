@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Extended File Tools Test Suite — New filesystem operations, safety protections,
  * and metrics reporting for all file tools.
@@ -307,11 +309,14 @@ await h.callTool("adb_file_write", { path: `${TEST_DIR}/grep_target.txt`, conten
 await h.testContains("Grep finds case-insensitive match", "adb_grep",
   { pattern: "hello", path: `${TEST_DIR}/grep_target.txt` }, "match");
 
-await h.testContains("Grep case-sensitive excludes uppercase", "adb_grep",
-  { pattern: "hello", path: `${TEST_DIR}/grep_target.txt`, ignoreCase: false }, "1 match");
+// testMatch: grep prints "N match(es)"; the \b before the count rejects "21 match(es)".
+await h.testMatch("Grep case-sensitive excludes uppercase", "adb_grep",
+  { pattern: "hello", path: `${TEST_DIR}/grep_target.txt`, ignoreCase: false }, /\b1 match\(es\)/);
 
-await h.testContains("Grep shows line numbers", "adb_grep",
-  { pattern: "foo", path: `${TEST_DIR}/grep_target.txt` }, "2:");
+// testMatch: "2:" as a substring could match "12:", "20:", or a timestamp.
+// Anchoring to line-start (grep -n emits "LINENUM:content") asserts that line 2 matched.
+await h.testMatch("Grep shows line numbers", "adb_grep",
+  { pattern: "foo", path: `${TEST_DIR}/grep_target.txt` }, /^2:/m);
 
 await h.testContains("Grep no match is clean", "adb_grep",
   { pattern: "nonexistent_xyz", path: `${TEST_DIR}/grep_target.txt` }, "No matches");
@@ -329,8 +334,9 @@ h.section("File Replace");
 // Write a fresh file for replace testing
 await h.callTool("adb_file_write", { path: `${TEST_DIR}/replace_target.txt`, content: "aaa bbb ccc\naaa ddd eee\nfff ggg hhh\n" });
 
-await h.testContains("Replace reports match count", "adb_file_replace",
-  { path: `${TEST_DIR}/replace_target.txt`, find: "aaa", replace: "ZZZ" }, "Lines with matches: 2");
+// testMatch: the trailing \b prevents "Lines with matches: 2" from also matching "...: 20".
+await h.testMatch("Replace reports match count", "adb_file_replace",
+  { path: `${TEST_DIR}/replace_target.txt`, find: "aaa", replace: "ZZZ" }, /Lines with matches: 2\b/);
 
 // Verify replacement happened
 await h.testContains("Replace content verified", "adb_cat",

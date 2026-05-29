@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Output Processor — Truncation, formatting, structured parsing, and binary handling.
  * 
@@ -17,10 +19,18 @@ export class OutputProcessor {
     const limit = maxSize ?? config.maxOutputSize;
     if (text.length <= limit) return text;
 
-    // Scan backward from the limit to find a clean break point
+    // G1 fix: budget the truncation-suffix size into the limit BEFORE
+    // searching for a cut point. The suffix is appended after the cut,
+    // so without this reservation the returned string overshoots `limit`
+    // by ~75 chars (varies with the comma-formatted "remaining" count).
+    // Worst-case remaining count length: ~20 chars (for ~10^16 chars omitted).
+    const SUFFIX_RESERVE = 80;
+    const effectiveLimit = Math.max(0, limit - SUFFIX_RESERVE);
+
+    // Scan backward from the effective limit to find a clean break point
     // Look within the last 500 chars of the allowed range
-    const searchStart = Math.max(0, limit - 500);
-    const searchRegion = text.substring(searchStart, limit);
+    const searchStart = Math.max(0, effectiveLimit - 500);
+    const searchRegion = text.substring(searchStart, effectiveLimit);
 
     // Prefer section separators, then newlines
     let breakOffset = -1;
@@ -34,7 +44,7 @@ export class OutputProcessor {
       }
     }
 
-    const cutPoint = breakOffset > 0 ? breakOffset : limit;
+    const cutPoint = breakOffset > 0 ? breakOffset : effectiveLimit;
     const truncated = text.substring(0, cutPoint);
     const remaining = text.length - cutPoint;
     return `${truncated}\n\n--- OUTPUT TRUNCATED (${remaining.toLocaleString()} characters omitted) ---`;
@@ -62,8 +72,24 @@ export class OutputProcessor {
    * Format a structured error response.
    */
   static formatError(error: unknown): string {
+    // G2 fix: handle structured-object exceptions (some third-party libs
+    // throw plain objects rather than Error instances). Probe for a
+    // .message property first, then fall back to JSON for structured
+    // values, and finally String() for primitives. Avoids the
+    // unhelpful "Error: [object Object]" output.
     if (error instanceof Error) {
       return `Error: ${error.message}`;
+    }
+    if (error && typeof error === "object") {
+      const msg = (error as { message?: unknown }).message;
+      if (typeof msg === "string" && msg.length > 0) {
+        return `Error: ${msg}`;
+      }
+      try {
+        return `Error: ${JSON.stringify(error)}`;
+      } catch {
+        // Circular references or BigInt — fall through.
+      }
     }
     return `Error: ${String(error)}`;
   }
@@ -132,8 +158,17 @@ export class OutputProcessor {
       const plugMap: Record<string, string> = { "0": "Unplugged", "1": "AC", "2": "USB", "4": "Wireless" };
       pairs.push(`Plugged: ${plugMap[plugged] ?? plugged}`);
     }
-    if (temperature) pairs.push(`Temperature: ${(parseInt(temperature, 10) / 10).toFixed(1)}°C`);
-    if (voltage) pairs.push(`Voltage: ${(parseInt(voltage, 10) / 1000).toFixed(3)}V`);
+    // G4 fix: skip non-numeric temperature/voltage values rather than emit
+    // "Temperature: NaN°C" or "Voltage: NaNV". Quirky ROMs or partial dumpsys
+    // output occasionally produce non-integer values here.
+    if (temperature) {
+      const tempNum = parseInt(temperature, 10);
+      if (Number.isFinite(tempNum)) pairs.push(`Temperature: ${(tempNum / 10).toFixed(1)}°C`);
+    }
+    if (voltage) {
+      const voltNum = parseInt(voltage, 10);
+      if (Number.isFinite(voltNum)) pairs.push(`Voltage: ${(voltNum / 1000).toFixed(3)}V`);
+    }
 
     return pairs.length > 0 ? pairs.join(" | ") : raw.trim();
   }

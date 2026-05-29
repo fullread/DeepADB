@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Device Manager — Discovery, caching, state tracking, and device selection.
  * 
@@ -8,6 +10,7 @@
 
 import { AdbBridge } from "./adb-bridge.js";
 import { config } from "../config/config.js";
+import { OutputProcessor } from "../middleware/output-processor.js";
 
 export interface DeviceInfo {
   serial: string;
@@ -115,26 +118,30 @@ export class DeviceManager {
   async getDeviceProps(serial?: string): Promise<Record<string, string>> {
     const device = await this.resolveDevice(serial);
     const result = await this.bridge.shell("getprop", { device: device.serial });
-    const props: Record<string, string> = {};
-
-    for (const line of result.stdout.split("\n")) {
-      const match = line.trim().match(/^\[(.+?)\]: \[(.*)?\]$/);
-      if (match) {
-        props[match[1]] = match[2] ?? "";
-      }
-    }
-    return props;
+    // P2 fix: delegate parsing to the canonical OutputProcessor.parseGetprop
+    // so the getprop format ([key]: [value]) has a single source of truth.
+    return OutputProcessor.parseGetprop(result.stdout);
   }
 
   private parseDeviceLine(line: string): DeviceInfo {
     const parts = line.split(/\s+/);
+    // P1 fix: defend against malformed adb output. Previously a single-token
+    // line ("foo") would produce { serial: "foo", state: undefined } which
+    // then propagated as an undefined-state device into the device list. Now
+    // we require both serial and state, and treat missing state as "unknown".
+    if (parts.length < 2) {
+      return { serial: parts[0] ?? "", state: "unknown" as DeviceInfo["state"] };
+    }
     const serial = parts[0];
     const state = parts[1] as DeviceInfo["state"];
     const info: DeviceInfo = { serial, state };
 
     // Parse key:value pairs like model:Pixel_6a product:bluejay
     for (let i = 2; i < parts.length; i++) {
-      const [key, value] = parts[i].split(":");
+      const colonIdx = parts[i].indexOf(":");
+      if (colonIdx === -1) continue;
+      const key = parts[i].substring(0, colonIdx);
+      const value = parts[i].substring(colonIdx + 1);
       if (key === "model") info.model = value;
       else if (key === "product") info.product = value;
       else if (key === "transport_id") info.transportId = value;

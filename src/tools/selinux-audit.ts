@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * SELinux & Permission Auditing — OS-level security inspection.
  *
@@ -16,7 +18,7 @@
 import { z } from "zod";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArg } from "../middleware/sanitize.js";
+import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 
 interface PermissionGrant {
   permission: string;
@@ -205,7 +207,7 @@ export function registerSelinuxAuditTools(ctx: ToolContext): void {
         sections.push("=== SELinux AVC Denials ===\n");
 
         // Logcat denials
-        const grepFilter = processFilter ? ` | grep -iF '${processFilter}'` : "";
+        const grepFilter = processFilter ? ` | grep -iF ${shellQuote(processFilter)}` : "";
         const logcatResult = await ctx.bridge.shell(
           `logcat -d -b events,main -t 2000 | grep 'avc.*denied'${grepFilter} | tail -${maxLines}`,
           { device: serial, timeout: 15000, ignoreExitCode: true }
@@ -264,7 +266,10 @@ export function registerSelinuxAuditTools(ctx: ToolContext): void {
     "adb_permission_audit",
     "Audit runtime permission grants for a package. Lists all granted dangerous permissions grouped by category (Camera, Location, Phone, SMS, etc.) and flags potentially over-provisioned permissions. Compares grants against the dangerous permission manifest to identify unnecessary access.",
     {
-      packageName: z.string().describe("Package name to audit (e.g., 'com.example.app')"),
+      packageName: z.string().regex(
+        /^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/,
+        "Package name must be a dotted Java identifier (e.g., 'com.example.app'). Each segment must start with a letter and contain only letters, digits, or underscores."
+      ).describe("Package name to audit (e.g., 'com.example.app'). AZ7 fix: enforces Java-identifier shape so injection attempts are rejected at the schema layer before reaching validateShellArg."),
       device: z.string().optional().describe("Device serial"),
     },
     async ({ packageName, device }) => {
@@ -277,7 +282,7 @@ export function registerSelinuxAuditTools(ctx: ToolContext): void {
 
         // Get permission state from dumpsys
         const dumpResult = await ctx.bridge.shell(
-          `dumpsys package ${packageName} | grep -A 200 'runtime permissions'`,
+          `dumpsys package ${shellQuote(packageName)} | grep -A 200 'runtime permissions'`,
           { device: serial, timeout: 15000, ignoreExitCode: true }
         );
 
@@ -289,7 +294,7 @@ export function registerSelinuxAuditTools(ctx: ToolContext): void {
 
         // Also get requested permissions from the manifest
         const requestedResult = await ctx.bridge.shell(
-          `dumpsys package ${packageName} | grep -A 500 'requested permissions:' | grep 'android.permission' | head -100`,
+          `dumpsys package ${shellQuote(packageName)} | grep -A 500 'requested permissions:' | grep 'android.permission' | head -100`,
           { device: serial, timeout: 10000, ignoreExitCode: true }
         );
         const requestedPerms = requestedResult.stdout.split("\n")

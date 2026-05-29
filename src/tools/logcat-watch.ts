@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Logcat Watch Tools — Background logcat accumulator with poll-based retrieval.
  * 
@@ -11,7 +13,8 @@ import { z } from "zod";
 import { ChildProcess } from "child_process";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { registerCleanup } from "../middleware/cleanup.js";
+import { resultHandleSchemaFields, withResultHandle } from "./result-handles.js";
+import { registerCleanup, gracefulKill } from "../middleware/cleanup.js";
 
 interface WatchSession {
   process: ChildProcess;
@@ -25,6 +28,11 @@ interface WatchSession {
 
 /** Global map of active watch sessions by ID. */
 const sessions = new Map<string, WatchSession>();
+// AI7 note: sessionCounter is monotonic within a single server process and
+// resets to 0 on server restart. External scripts that cache session IDs
+// across restarts will see the same ID refer to a new (or absent) session.
+// Document this in scripts that depend on session-ID stability — there is
+// no persistent mapping table. The Map itself is in-memory only.
 let sessionCounter = 0;
 
 /** Maximum concurrent watcher sessions to prevent resource exhaustion. */
@@ -35,15 +43,16 @@ const MAX_WATCH_SESSIONS = 10;
  * orphaned adb logcat processes — critical on Windows where child
  * processes can persist after parent exits.
  */
-function cleanupAllSessions(): void {
-  for (const [id, session] of sessions) {
-    try {
-      session.process.kill();
-    } catch {
-      // Process may already be dead — ignore
-    }
-    sessions.delete(id);
-  }
+async function cleanupAllSessions(): Promise<void> {
+  // Same SIGTERM → SIGKILL hazard as AC3/AK8: a wedged logcat reader
+  // on a stuck device can ignore SIGTERM and leave an orphan adb child.
+  // Use gracefulKill for the two-stage escalation.
+  await Promise.all(
+    Array.from(sessions.entries()).map(async ([id, session]) => {
+      await gracefulKill(session.process, 1500);
+      sessions.delete(id);
+    })
+  );
 }
 
 // Register cleanup via shared registry (runs on exit/SIGINT/SIGTERM)
@@ -60,7 +69,7 @@ export function registerLogcatWatchTools(ctx: ToolContext): void {
     "adb_logcat_start",
     "Start a background logcat watcher. Lines accumulate in a ring buffer. Use adb_logcat_poll to retrieve new entries.",
     {
-      tag: z.string().optional().describe("Filter by tag (e.g., 'MyApp')"),
+      tag: z.string().regex(/^[a-zA-Z0-9_]+$/, "Logcat tag must be alphanumeric or underscore (e.g., 'MyApp', 'AT_Cmd')").optional().describe("Filter by tag (e.g., 'MyApp'). Must match /^[a-zA-Z0-9_]+$/ — Android tags are identifier-shaped in practice."),
       priority: z.enum(["V", "D", "I", "W", "E", "F"]).optional().describe("Minimum priority level"),
       bufferSize: z.number().min(100).max(50000).optional().default(2000).describe("Max lines to keep in ring buffer (100-50000, default 2000)"),
       device: z.string().optional().describe("Device serial"),
@@ -163,8 +172,9 @@ export function registerLogcatWatchTools(ctx: ToolContext): void {
     {
       session: z.string().describe("Session ID from adb_logcat_start (e.g., 'watch_1')"),
       maxLines: z.number().min(1).max(10000).optional().default(200).describe("Max lines to return per poll (1-10000)"),
+      ...resultHandleSchemaFields,
     },
-    async ({ session: sessionId, maxLines }) => {
+    async ({ session: sessionId, maxLines, result_handle, result_handle_ttl }) => {
       try {
         const session = sessions.get(sessionId);
         if (!session) {
@@ -200,7 +210,11 @@ export function registerLogcatWatchTools(ctx: ToolContext): void {
           text += `\n\n--- ${remaining} more lines available, poll again to continue ---`;
         }
 
-        return { content: [{ type: "text", text: OutputProcessor.process(text) }] };
+        return withResultHandle(
+          { content: [{ type: "text" as const, text: OutputProcessor.process(text) }] },
+          "logcat_poll",
+          { result_handle, result_handle_ttl },
+        );
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
       }
@@ -226,7 +240,7 @@ export function registerLogcatWatchTools(ctx: ToolContext): void {
           return { content: [{ type: "text", text: `Session "${sessionId}" not found.` }], isError: true };
         }
         const lineCount = session.buffer.length;
-        session.process.kill();
+        await gracefulKill(session.process, 1500);
         sessions.delete(sessionId);
         return { content: [{ type: "text", text: `Stopped ${sessionId}. Captured ${lineCount} total lines.` }] };
       } catch (error) {

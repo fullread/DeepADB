@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Plugin Architecture — Dynamic tool module loading.
  * 
@@ -13,8 +15,8 @@
  *   }
  */
 
-import { join } from "path";
-import { readdirSync, existsSync } from "fs";
+import { join, resolve as resolvePath } from "path";
+import { readdirSync, existsSync, realpathSync } from "fs";
 import { pathToFileURL } from "url";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
@@ -31,6 +33,24 @@ const loadedPlugins: LoadedPlugin[] = [];
 /**
  * Scan the plugins directory and load any .js modules that export a register function.
  * Called once at startup.
+ *
+ * V1 trust model: this function performs **no signature or hash verification**
+ * on plugin files. Any `.js` file in DA_PLUGIN_DIR (or `{tempDir}/plugins/`)
+ * is loaded via dynamic `import()` and gains full Node.js privileges in the
+ * server process — equivalent to arbitrary code execution.
+ *
+ * This is by design under the single-operator threat model: the operator
+ * controls the plugin directory and is responsible for what they put there.
+ * Operators who install plugins via `adb_registry_install` get SHA-256
+ * download verification (see `registry.ts` for the install-time check) —
+ * tampering after install is the operator's local-disk-integrity problem,
+ * not this loader's.
+ *
+ * If you ever need a stronger model (multi-user host, untrusted operator,
+ * supply-chain assumption-of-breach), add at minimum: (a) an Ed25519
+ * signature verified against an operator-pinned public key, (b) refusing
+ * to load files whose mtime is newer than a recorded manifest, and (c)
+ * a startup warning if the plugin directory has world-writable permissions.
  */
 export async function loadPlugins(ctx: ToolContext): Promise<void> {
   const pluginDir = process.env.DA_PLUGIN_DIR ?? join(ctx.config.tempDir, "plugins");
@@ -46,8 +66,32 @@ export async function loadPlugins(ctx: ToolContext): Promise<void> {
     return;
   }
 
+  // AQ4 fix: realpath the plugin directory once so we can compare each plugin's
+  // resolved path against it. This catches symlinks that point outside the
+  // plugin directory — e.g., a malicious actor creating a symlink to
+  // /tmp/hostile.js inside the plugin dir would otherwise be loaded as a
+  // trusted plugin. Under the documented single-operator threat model this
+  // is paranoid, but the threat model is layered (a compromised tempdir on
+  // a shared machine is exactly this scenario) and the cost is one realpath
+  // per plugin at startup.
+  const pluginDirReal = resolvePath(realpathSync(pluginDir));
   for (const file of files) {
     const pluginPath = join(pluginDir, file);
+    let pluginPathReal: string;
+    try {
+      pluginPathReal = resolvePath(realpathSync(pluginPath));
+    } catch (err) {
+      ctx.logger.warn(`Plugin ${file} could not be realpath-resolved: ${err instanceof Error ? err.message : err} — skipped.`);
+      continue;
+    }
+    // The resolved plugin must live directly under the resolved plugin dir.
+    // The +path.sep guard prevents prefix-confusion (e.g., /plugins-evil/x.js
+    // matching /plugins/).
+    const sep = process.platform === "win32" ? "\\" : "/";
+    if (!pluginPathReal.startsWith(pluginDirReal + sep)) {
+      ctx.logger.warn(`Plugin ${file} resolves outside the plugin directory (${pluginPathReal} vs ${pluginDirReal}) — skipped. If this was intentional, place the actual file in the plugin directory rather than symlinking.`);
+      continue;
+    }
     try {
       const moduleUrl = pathToFileURL(pluginPath).href;
       const mod = await import(moduleUrl);

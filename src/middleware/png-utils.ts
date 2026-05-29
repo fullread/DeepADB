@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * PNG Utilities — Zero-dependency PNG decode and encode for screenshot analysis and annotation.
  *
@@ -77,16 +79,27 @@ export const ELEMENT_COLORS: ReadonlyArray<readonly [number, number, number]> = 
 
 // ── Pixel operations ───────────────────────────────────────────────────
 
-/** Write one pixel into a packed row-major RGB/RGBA pixel buffer. No-op if x is out of range. */
+/** Write one pixel into a packed row-major RGB/RGBA pixel buffer. No-op if
+ *  x or y is out of range. Defense in depth: callers (drawRect, drawLabel)
+ *  already pre-check bounds, but having the guard here too means a future
+ *  caller that forgets the check cannot silently corrupt a different row
+ *  — without the y-bound check, a y >= imgHeight produces a positive offset
+ *  that still falls inside the buffer (it just points to a wrong row, or
+ *  past the end where Node's Buffer silently no-ops). */
 function setPixel(
-  pixels: Buffer, imgWidth: number, bpp: number,
+  pixels: Buffer, imgWidth: number, imgHeight: number, bpp: number,
   x: number, y: number, r: number, g: number, b: number,
 ): void {
   if (x < 0 || x >= imgWidth) return;
+  if (y < 0 || y >= imgHeight) return;
+  // I1 fix: clamp R/G/B to [0, 255]. Previously out-of-range values were
+  // silently truncated by Buffer coercion — pixels[off]=300 wraps to 44
+  // (300 & 0xFF). Clamping surfaces the caller bug as a visible saturated
+  // pixel instead of producing arbitrary wrong colors.
   const off = (y * imgWidth + x) * bpp;
-  pixels[off]     = r;
-  pixels[off + 1] = g;
-  pixels[off + 2] = b;
+  pixels[off]     = Math.max(0, Math.min(255, r | 0));
+  pixels[off + 1] = Math.max(0, Math.min(255, g | 0));
+  pixels[off + 2] = Math.max(0, Math.min(255, b | 0));
   if (bpp === 4) pixels[off + 3] = 255;
 }
 
@@ -110,12 +123,12 @@ export function drawRect(
     const top = y1 + t, bot = y2 - t, left = x1 + t, right = x2 - t;
     if (top > bot || left > right) break;
     for (let x = left; x <= right; x++) {
-      setPixel(pixels, imgWidth, bpp, x, top, r, g, b);
-      setPixel(pixels, imgWidth, bpp, x, bot, r, g, b);
+      setPixel(pixels, imgWidth, imgHeight, bpp, x, top, r, g, b);
+      setPixel(pixels, imgWidth, imgHeight, bpp, x, bot, r, g, b);
     }
     for (let y = top + 1; y < bot; y++) {
-      setPixel(pixels, imgWidth, bpp, left,  y, r, g, b);
-      setPixel(pixels, imgWidth, bpp, right, y, r, g, b);
+      setPixel(pixels, imgWidth, imgHeight, bpp, left,  y, r, g, b);
+      setPixel(pixels, imgWidth, imgHeight, bpp, right, y, r, g, b);
     }
   }
 }
@@ -153,7 +166,7 @@ export function drawLabel(
   // Fill background rectangle
   for (let dy = 0; dy < labelH && ly + dy < imgHeight; dy++) {
     for (let dx = 0; dx < labelW && lx + dx < imgWidth; dx++) {
-      setPixel(pixels, imgWidth, bpp, lx + dx, ly + dy, bgR, bgG, bgB);
+      setPixel(pixels, imgWidth, imgHeight, bpp, lx + dx, ly + dy, bgR, bgG, bgB);
     }
   }
 
@@ -168,7 +181,7 @@ export function drawLabel(
           const px = lx + PAD + ci * CHAR_W + col;
           const py = ly + PAD + row;
           if (px < imgWidth && py < imgHeight) {
-            setPixel(pixels, imgWidth, bpp, px, py, fr, fg, fb);
+            setPixel(pixels, imgWidth, imgHeight, bpp, px, py, fr, fg, fb);
           }
         }
       }
@@ -284,6 +297,17 @@ export function decodePngPixels(pngPath: string): PngImage | null {
  * bpp must be 3 (RGB) or 4 (RGBA) to match the input data.
  */
 export function encodePng(width: number, height: number, pixels: Buffer, bpp: 3 | 4): Buffer {
+  // I3 fix: pixel buffer size precondition. A mismatched buffer (e.g.,
+  // wrong bpp passed) previously produced a corrupt PNG silently because
+  // pixels.copy(..., over-read) is a no-op. Surface the mismatch as an
+  // error so the caller bug is caught at the boundary.
+  const expectedSize = width * height * bpp;
+  if (pixels.length < expectedSize) {
+    throw new Error(
+      `encodePng: pixel buffer too small. Got ${pixels.length} bytes, expected at least ${expectedSize} (${width}x${height} at ${bpp} bpp).`
+    );
+  }
+
   const SIG = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
 
   const ihdr = Buffer.allocUnsafe(13);

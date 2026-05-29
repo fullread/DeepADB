@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Accessibility Auditing Tools — Automated a11y checks on the UI hierarchy.
  *
@@ -9,12 +11,26 @@
 import { z } from "zod";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { captureUiDump, UI_ATTR_REGEXES } from "../middleware/ui-dump.js";
+import { captureUiDump, parseUiNodes } from "../middleware/ui-dump.js";
 
 /** Minimum touch target size in dp (WCAG / Material Design guideline). */
 const MIN_TOUCH_TARGET_DP = 48;
 
 /** Default screen density for dp conversion (mdpi baseline). */
+// S2 fix: `wm density` output may contain TWO densities — Physical and
+// Override. The previous regex `/(\d+)/` captured the first digit run,
+// always Physical. If the user has set an Override density, that's the
+// effective value for dp conversion. Parse Override first, fall back to
+// Physical, then the bare digit pattern.
+function parseWmDensity(stdout: string, fallback: number): number {
+  const override = stdout.match(/Override density:\s*(\d+)/);
+  if (override) return parseInt(override[1], 10);
+  const physical = stdout.match(/Physical density:\s*(\d+)/);
+  if (physical) return parseInt(physical[1], 10);
+  const digits = stdout.match(/(\d+)/);
+  return digits ? parseInt(digits[1], 10) : fallback;
+}
+
 const DEFAULT_DENSITY = 160;
 
 interface A11yElement {
@@ -37,45 +53,26 @@ interface A11yIssue {
   element: string;
 }
 
-const ATTR_REGEXES = UI_ATTR_REGEXES;
-
+/**
+ * S1 fix: delegate to the canonical `parseUiNodes` in ui-dump.ts and
+ * post-process to derive A11yElement-specific fields (widthPx, heightPx).
+ * Previously this duplicated the entire `<node>` regex + attr extraction
+ * + bounds parsing already implemented in ui-dump. Single source of truth.
+ */
 function parseElements(xml: string): A11yElement[] {
-  const elements: A11yElement[] = [];
-  const nodeRegex = /<node\s+([^>]+)\/?>/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = nodeRegex.exec(xml)) !== null) {
-    const attrs = match[1];
-    const get = (name: string): string => {
-      const regex = ATTR_REGEXES[name];
-      if (!regex) return "";
-      const m = attrs.match(regex);
-      return m ? m[1] : "";
-    };
-
-    const boundsStr = get("bounds");
-    const boundsMatch = boundsStr.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
-    if (!boundsMatch) continue;
-
-    const left = parseInt(boundsMatch[1], 10);
-    const top = parseInt(boundsMatch[2], 10);
-    const right = parseInt(boundsMatch[3], 10);
-    const bottom = parseInt(boundsMatch[4], 10);
-
-    elements.push({
-      className: get("class").replace("android.widget.", "").replace("android.view.", ""),
-      text: get("text"),
-      contentDesc: get("content-desc"),
-      resourceId: get("resource-id"),
-      clickable: get("clickable") === "true",
-      focusable: get("focusable") === "true",
-      enabled: get("enabled") !== "false",
-      bounds: { left, top, right, bottom },
-      widthPx: right - left,
-      heightPx: bottom - top,
-    });
-  }
-  return elements;
+  const nodes = parseUiNodes(xml, /* clickableOnly */ false);
+  return nodes.map((n) => ({
+    className: n.className,
+    text: n.text,
+    contentDesc: n.contentDesc,
+    resourceId: n.resourceId,
+    clickable: n.clickable,
+    focusable: n.focusable,
+    enabled: n.enabled,
+    bounds: { left: n.bounds.left, top: n.bounds.top, right: n.bounds.right, bottom: n.bounds.bottom },
+    widthPx: n.bounds.right - n.bounds.left,
+    heightPx: n.bounds.bottom - n.bounds.top,
+  }));
 }
 
 function elementLabel(el: A11yElement): string {
@@ -175,8 +172,7 @@ export function registerAccessibilityTools(ctx: ToolContext): void {
 
         // Get screen density for dp conversion
         const densityResult = await ctx.bridge.shell("wm density", { device: serial, ignoreExitCode: true });
-        const densityMatch = densityResult.stdout.match(/(\d+)/);
-        const density = densityMatch ? parseInt(densityMatch[1], 10) : DEFAULT_DENSITY;
+        const density = parseWmDensity(densityResult.stdout, DEFAULT_DENSITY);
 
         const elements = parseElements(xml);
         const clickable = elements.filter((el) => el.clickable);
@@ -232,8 +228,7 @@ export function registerAccessibilityTools(ctx: ToolContext): void {
         }
 
         const densityResult = await ctx.bridge.shell("wm density", { device: serial, ignoreExitCode: true });
-        const densityMatch = densityResult.stdout.match(/(\d+)/);
-        const density = densityMatch ? parseInt(densityMatch[1], 10) : DEFAULT_DENSITY;
+        const density = parseWmDensity(densityResult.stdout, DEFAULT_DENSITY);
         const dpScale = density / DEFAULT_DENSITY;
 
         const elements = parseElements(xml);

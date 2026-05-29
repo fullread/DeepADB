@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Bearer Token Authentication — Optional auth layer for network transports.
  *
@@ -56,11 +58,22 @@ export function validateTokenStrength(): void {
     warnings.push(`Or with Node.js: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`);
   }
 
-  // Check 2: Character diversity — estimate entropy
+  // Check 2: Character diversity — proper entropy estimate (F1 fix).
+  //
+  // The previous check used a unique/total ratio < 0.3 — which false-positives
+  // on the documented best-practice generator `openssl rand -hex 32` (64 hex
+  // chars drawn from 16-char alphabet has ratio ≈ 0.25). Users who followed
+  // the documentation saw spurious "weak token" warnings at startup.
+  //
+  // Switched to Shannon-style entropy estimate: `length × log2(uniqueChars)`
+  // gives an upper bound on bits of entropy in the token. A 64-hex token has
+  // 64 × log2(16) = 256 bits → strong. A 24-char "passwordpassword..." has
+  // 24 × log2(~8) ≈ 72 bits → correctly flagged. 128 bits is the threshold
+  // used for symmetric secrets.
   const uniqueChars = new Set(AUTH_TOKEN).size;
-  const entropyRatio = uniqueChars / AUTH_TOKEN.length;
-  if (AUTH_TOKEN.length >= 8 && entropyRatio < 0.3) {
-    warnings.push(`Token has very low character diversity (${uniqueChars} unique characters in ${AUTH_TOKEN.length} total).`);
+  const entropyBits = AUTH_TOKEN.length * Math.log2(Math.max(2, uniqueChars));
+  if (AUTH_TOKEN.length >= 8 && entropyBits < 128) {
+    warnings.push(`Token has low estimated entropy (~${Math.floor(entropyBits)} bits from ${uniqueChars} unique characters across ${AUTH_TOKEN.length} total). Consider a longer or more varied token; 128+ bits is recommended.`);
   }
 
   // Check 3: Common weak patterns
@@ -71,11 +84,24 @@ export function validateTokenStrength(): void {
   }
 
   if (warnings.length > 0) {
+    // F2 fix: pad dynamic-content lines so the right edge stays aligned with
+    // the fixed-text lines. Box interior is 62 cells (matches the 62 '═' in
+    // the border lines). "║  " prefix is 3 cells, "  ║" suffix is 3 cells,
+    // so the content has 56 cells of width. Lines longer than 56 are emitted
+    // unpadded (no truncation — operators need full warnings).
+    const BOX_WIDTH = 62;
+    const PREFIX = "║  ";
+    const SUFFIX = "  ║";
+    const CONTENT_WIDTH = BOX_WIDTH - PREFIX.length - SUFFIX.length;
     console.error("╔══════════════════════════════════════════════════════════════╗");
     console.error("║  ⚠  WARNING: DA_AUTH_TOKEN may be weak                        ║");
     console.error("╠══════════════════════════════════════════════════════════════╣");
     for (const w of warnings) {
-      console.error(`║  ${w}`);
+      if (w.length <= CONTENT_WIDTH) {
+        console.error(`${PREFIX}${w.padEnd(CONTENT_WIDTH)}${SUFFIX}`);
+      } else {
+        console.error(`${PREFIX}${w}`);
+      }
     }
     console.error("║                                                                  ║");
     console.error("║  A strong token should be at least 32 random hex characters:     ║");
@@ -128,7 +154,18 @@ export function hasValidToken(req: IncomingMessage): boolean {
   // Compare buffer byte lengths (not string char lengths) to handle multi-byte
   // UTF-8 tokens correctly — string length can match while byte lengths differ,
   // which would cause timingSafeEqual to throw.
+  //
+  // F3 fix: on length mismatch we still run timingSafeEqual against a
+  // same-length buffer so the function takes roughly the same time as a
+  // successful-length-mismatch comparison. Without this, the response time
+  // leaks the configured token's byte length (an attacker could probe with
+  // tokens of various lengths). The result of the self-compare is discarded.
   const tokenBuf = Buffer.from(token);
-  if (tokenBuf.length !== AUTH_TOKEN_BUF.length) return false;
+  if (tokenBuf.length !== AUTH_TOKEN_BUF.length) {
+    // Self-compare to burn equivalent CPU to the success path. Result is
+    // necessarily true and is discarded — we still return false.
+    timingSafeEqual(AUTH_TOKEN_BUF, AUTH_TOKEN_BUF);
+    return false;
+  }
   return timingSafeEqual(tokenBuf, AUTH_TOKEN_BUF);
 }

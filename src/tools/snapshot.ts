@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Snapshot Tools — Save and compare device state for reproducible testing.
  * 
@@ -7,10 +9,11 @@
 
 import { z } from "zod";
 import { join } from "path";
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync } from "fs";
+import { ensurePrivateDir, writeAtomicSync, sanitizeFilenameComponent, isWithinDir} from "../middleware/fs-utils.js";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArgs } from "../middleware/sanitize.js";
+import { validateShellArgs, shellQuote } from "../middleware/sanitize.js";
 
 interface DeviceSnapshot {
   timestamp: string;
@@ -63,17 +66,12 @@ export function registerSnapshotTools(ctx: ToolContext): void {
           return map;
         };
 
-        const parseProps = (r: PromiseSettledResult<{ stdout: string }>): Record<string, string> => {
-          if (r.status !== "fulfilled") return {};
-          const map: Record<string, string> = {};
-          for (const line of r.value.stdout.split("\n")) {
-            const match = line.trim().match(/^\[(.+?)\]: \[(.*)?\]$/);
-            if (match) map[match[1]] = match[2] ?? "";
-          }
-          return map;
-        };
-
-        const props = parseProps(propResult);
+        // AT5 fix: delegate to canonical OutputProcessor.parseGetprop so the
+        // [key]: [value] format has a single source of truth (matches P2 fix
+        // in device-manager.ts).
+        const props = propResult.status === "fulfilled"
+          ? OutputProcessor.parseGetprop(propResult.value.stdout)
+          : {};
         const snapshot: DeviceSnapshot = {
           timestamp: new Date().toISOString(),
           device: serial,
@@ -89,13 +87,13 @@ export function registerSnapshotTools(ctx: ToolContext): void {
           properties: props,
         };
 
-        const safeName = (name ?? `snapshot_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, "_");
+        const safeName = sanitizeFilenameComponent(name ?? `snapshot_${Date.now()}`);
         const filePath = join(ctx.config.tempDir, "snapshots", `${safeName}.json`);
         const dir = join(ctx.config.tempDir, "snapshots");
         if (!existsSync(dir)) {
-          mkdirSync(dir, { recursive: true });
+          ensurePrivateDir(dir);
         }
-        writeFileSync(filePath, JSON.stringify(snapshot, null, 2));
+        writeAtomicSync(filePath, JSON.stringify(snapshot, null, 2));
 
         return {
           content: [{
@@ -118,6 +116,12 @@ export function registerSnapshotTools(ctx: ToolContext): void {
     },
     async ({ snapshotPath, device }) => {
       try {
+        // Path scoping: only read snapshots from inside tempDir. Defends
+        // against a misled LLM being steered into reading arbitrary host
+        // files via this parameter.
+        if (!isWithinDir(snapshotPath, ctx.config.tempDir)) {
+          return { content: [{ type: "text", text: `Snapshot path must be inside the temp directory (${ctx.config.tempDir}). Got: ${snapshotPath}` }], isError: true };
+        }
         if (!existsSync(snapshotPath)) {
           return { content: [{ type: "text", text: `Snapshot file not found: ${snapshotPath}` }], isError: true };
         }
@@ -138,7 +142,7 @@ export function registerSnapshotTools(ctx: ToolContext): void {
         const settingsChanges: string[] = [];
         for (const ns of ["global", "secure"] as const) {
           const savedNs = saved.settings[ns];
-          const currentResult = await ctx.bridge.shell(`settings list ${ns}`, { device: serial });
+          const currentResult = await ctx.bridge.shell(`settings list ${shellQuote(ns)}`, { device: serial });
           const currentNs: Record<string, string> = {};
           for (const line of currentResult.stdout.split("\n")) {
             const idx = line.indexOf("=");
@@ -181,6 +185,9 @@ export function registerSnapshotTools(ctx: ToolContext): void {
     },
     async ({ snapshotPath, namespace, device }) => {
       try {
+        if (!isWithinDir(snapshotPath, ctx.config.tempDir)) {
+          return { content: [{ type: "text", text: `Snapshot path must be inside the temp directory (${ctx.config.tempDir}). Got: ${snapshotPath}` }], isError: true };
+        }
         if (!existsSync(snapshotPath)) {
           return { content: [{ type: "text", text: `Snapshot file not found: ${snapshotPath}` }], isError: true };
         }
@@ -202,7 +209,20 @@ export function registerSnapshotTools(ctx: ToolContext): void {
                 errors.push(`${ns}/${key}: skipped — ${argErr}`);
                 continue;
               }
-              await ctx.bridge.shell(`settings put ${ns} ${key} ${value}`, { device: serial });
+              // AT1 (D6 instance, fix queued — see Fix #1 / shellQuote promotion):
+              // validateShellArgs above rejects shell metacharacters but does
+              // NOT prevent whitespace word-splitting. A value like "two words"
+              // would interpolate as
+              //   settings put global key two words
+              // splitting into 4 args instead of 3 and corrupting the restore.
+              //
+              // shellEscape ALONE does NOT solve this — it only escapes any
+              // inner single quotes (' → '\''), it does NOT add wrapping
+              // single quotes around the value. The real fix (queued in this
+              // release) is `shellQuote` from sanitize.ts, which both escapes
+              // inner quotes AND wraps the result in single quotes so the
+              // whole value becomes one shell arg.
+              await ctx.bridge.shell(`settings put ${shellQuote(ns)} ${shellQuote(key)} ${shellQuote(value)}`, { device: serial });
               restored++;
             } catch (err) {
               errors.push(`${ns}/${key}: ${err instanceof Error ? err.message : err}`);

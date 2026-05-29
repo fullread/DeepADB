@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Health Check Tools — Validate the ADB chain and diagnose connection issues.
  * Runs through: ADB binary → ADB server → device connection → authorization.
@@ -5,6 +7,7 @@
 
 import { z } from "zod";
 import { existsSync } from "fs";
+import { shellQuote } from "../middleware/sanitize.js";
 import { ToolContext } from "../tool-context.js";
 import { isOnDevice } from "../config/config.js";
 
@@ -40,7 +43,6 @@ export function registerHealthTools(ctx: ToolContext): void {
         checks.push(`✓ ADB server: ${firstLine}`);
       } catch (error) {
         checks.push(`✗ ADB server: unreachable — ${error instanceof Error ? error.message : error}`);
-        allPassed = false;
         checks.push("\n--- Health check aborted: ADB server must be running ---");
         return { content: [{ type: "text", text: checks.join("\n") }], isError: true };
       }
@@ -97,7 +99,16 @@ export function registerHealthTools(ctx: ToolContext): void {
         }
 
         // Temp dir writable
-        const tempCheck = await ctx.bridge.shell('touch /sdcard/.DA_health_check && rm /sdcard/.DA_health_check && echo OK', {
+        // AG1 fix: include PID + timestamp + random suffix in the probe filename
+        // so two concurrent health checks (from different DeepADB processes
+        // sharing the same device) don't race on a fixed path. The race is
+        // benign — both succeed since touch+rm is idempotent — but if one
+        // process's rm runs between the other's touch and rm, the OK echo
+        // could fire incorrectly. Using a per-invocation unique name eliminates
+        // the cross-process interleaving entirely.
+        const probeId = `${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const probePath = `/sdcard/.DA_health_check_${probeId}`;
+        const tempCheck = await ctx.bridge.shell(`touch ${shellQuote(probePath)} && rm ${shellQuote(probePath)} && echo OK`, {
           device: resolved.serial, ignoreExitCode: true,
         });
         if (tempCheck.stdout.includes("OK")) {
@@ -107,7 +118,7 @@ export function registerHealthTools(ctx: ToolContext): void {
           allPassed = false;
         }
 
-      } catch (error) {
+      } catch {
         // No target device — already reported above
         if (!device) {
           checks.push("\n○ No target device to deep-check (expected if no device connected)");

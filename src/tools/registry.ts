@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Plugin Registry Tools — Discover, install, and manage community plugins.
  *
@@ -10,8 +12,9 @@
  */
 
 import { z } from "zod";
-import { join, resolve } from "path";
-import { writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync } from "fs";
+import { join } from "path";
+import { existsSync, readdirSync } from "fs";
+import { ensurePrivateDir, isWithinDir, writeAtomicSync, tryReadJsonOrWarn} from "../middleware/fs-utils.js";
 import { createHash } from "crypto";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
@@ -26,14 +29,33 @@ interface PluginManifestEntry {
   sha256?: string;
 }
 
-const DEFAULT_REGISTRY_URL = "https://raw.githubusercontent.com/anthropics/DeepADB-plugins/main/registry.json";
-
 function getPluginDir(ctx: ToolContext): string {
   return process.env.DA_PLUGIN_DIR ?? join(ctx.config.tempDir, "plugins");
 }
 
-function getRegistryUrl(): string {
-  return process.env.DA_REGISTRY_URL ?? DEFAULT_REGISTRY_URL;
+/**
+ * Registry URL — operator must opt in by setting DA_REGISTRY_URL.
+ *
+ * No default URL is shipped: a default would either commit DeepADB to
+ * hosting a public registry (a maintenance/supply-chain liability) or
+ * point at a namespace it does not control. Soft fail-closed: registry
+ * tools register normally, but every operation returns a friendly
+ * "registry not configured" error until the operator sets the env var
+ * to a manifest URL they trust.
+ */
+function getRegistryUrl(): string | null {
+  return process.env.DA_REGISTRY_URL ?? null;
+}
+
+/** Standard "registry not configured" error response. Reused at every call site. */
+function notConfiguredError() {
+  return {
+    content: [{
+      type: "text" as const,
+      text: `Plugin registry not configured.\nSet DA_REGISTRY_URL to a manifest URL you trust to enable plugin discovery and installation.\nDeepADB does not ship a default registry — selecting a source is an operator-side supply-chain decision. See SECURITY.md for guidance.`,
+    }],
+    isError: true as const,
+  };
 }
 
 function getInstalledPlugins(pluginDir: string): Map<string, string> {
@@ -45,10 +67,11 @@ function getInstalledPlugins(pluginDir: string): Map<string, string> {
     const metaPath = join(pluginDir, file.replace(/\.js$/, ".meta.json"));
     let version = "unknown";
     if (existsSync(metaPath)) {
-      try {
-        const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
-        version = meta.version ?? "unknown";
-      } catch { /* ignore */ }
+      // BN7 fix (site 1): tryReadJsonOrWarn surfaces corrupt .meta.json files
+      // via stderr; without it the version silently stayed "unknown" with no
+      // diagnostic for the operator.
+      const meta = tryReadJsonOrWarn<{ version?: string }>(metaPath, "registry_installed_meta");
+      if (meta?.version) version = meta.version;
     }
     installed.set(file.replace(/\.js$/, ""), version);
   }
@@ -66,6 +89,7 @@ export function registerRegistryTools(ctx: ToolContext): void {
     async ({ query }) => {
       try {
         const registryUrl = getRegistryUrl();
+        if (registryUrl === null) return notConfiguredError();
         let manifest: PluginManifestEntry[];
         try {
           manifest = await fetchJson(registryUrl) as PluginManifestEntry[];
@@ -127,6 +151,7 @@ export function registerRegistryTools(ctx: ToolContext): void {
     async ({ name, force }) => {
       try {
         const registryUrl = getRegistryUrl();
+        if (registryUrl === null) return notConfiguredError();
         let manifest: PluginManifestEntry[];
         try {
           manifest = await fetchJson(registryUrl) as PluginManifestEntry[];
@@ -144,13 +169,16 @@ export function registerRegistryTools(ctx: ToolContext): void {
         }
 
         const pluginDir = getPluginDir(ctx);
-        if (!existsSync(pluginDir)) mkdirSync(pluginDir, { recursive: true });
+        if (!existsSync(pluginDir)) ensurePrivateDir(pluginDir);
 
-        // Path traversal protection — ensure resolved paths stay within plugin directory
+        // Path traversal protection — ensure resolved paths stay within
+        // plugin directory. Uses path-separator boundary so a manifest name
+        // like "../plugins_evil/foo" is correctly rejected (the previous
+        // bare-startsWith check passed it because the absolute path
+        // string-prefix-matched the pluginDir prefix).
         const pluginPath = join(pluginDir, `${name}.js`);
         const metaPath = join(pluginDir, `${name}.meta.json`);
-        const resolvedPluginDir = resolve(pluginDir);
-        if (!resolve(pluginPath).startsWith(resolvedPluginDir) || !resolve(metaPath).startsWith(resolvedPluginDir)) {
+        if (!isWithinDir(pluginPath, pluginDir) || !isWithinDir(metaPath, pluginDir)) {
           return { content: [{ type: "text", text: `Invalid plugin name: "${name}" resolves outside the plugin directory.` }], isError: true };
         }
 
@@ -167,7 +195,18 @@ export function registerRegistryTools(ctx: ToolContext): void {
           return { content: [{ type: "text", text: `Failed to download plugin: ${error instanceof Error ? error.message : error}` }], isError: true };
         }
 
-        // Basic sanity check — should export a register function
+        // Basic sanity check — should export a register function.
+        // BN8 note: `code.includes("register")` is a HEURISTIC, not a real
+        // export check. A plugin's source could contain "register" in a
+        // comment or string literal while not actually exporting register().
+        // Conversely, it could export register as a property of an object
+        // and this check would miss it. Acceptable as a two-layer defense:
+        //   Layer 1 (here, install-time): heuristic warning surface, soft.
+        //   Layer 2 (plugins.ts AQ3, load-time): real per-plugin try/catch
+        //     around the dynamic import and `typeof mod.register === "function"`
+        //     check — that's the authoritative validation.
+        // The install-time check exists to flag obvious misshapenness early,
+        // before the operator wastes time hunting load-time failures.
         if (!code.includes("register")) {
           ctx.logger.warn(`Plugin ${name} may not export a register() function.`);
         }
@@ -186,11 +225,17 @@ export function registerRegistryTools(ctx: ToolContext): void {
           }
           ctx.logger.info(`Plugin ${name}: SHA-256 integrity verified.`);
         } else {
-          ctx.logger.warn(`Plugin ${name}: no SHA-256 hash in manifest — integrity not verified.`);
+          return {
+            content: [{
+              type: "text",
+              text: `Refusing to install plugin "${name}" without a SHA-256 integrity hash.\nThe registry manifest must include a "sha256" field for this entry.\nWithout an integrity hash, a compromised registry could deliver arbitrary code that runs in the DeepADB server process. The registry maintainer should add a SHA-256 hash to the manifest entry to enable installation.`,
+            }],
+            isError: true,
+          };
         }
 
-        writeFileSync(pluginPath, code);
-        writeFileSync(metaPath, JSON.stringify({
+        writeAtomicSync(pluginPath, code);
+        writeAtomicSync(metaPath, JSON.stringify({
           name: plugin.name,
           version: plugin.version,
           author: plugin.author,
@@ -226,7 +271,9 @@ export function registerRegistryTools(ctx: ToolContext): void {
         // Try to fetch registry to check for updates
         let manifest: PluginManifestEntry[] = [];
         try {
-          manifest = await fetchJson(getRegistryUrl()) as PluginManifestEntry[];
+          const updateUrl = getRegistryUrl();
+          if (updateUrl === null) return notConfiguredError();
+          manifest = await fetchJson(updateUrl) as PluginManifestEntry[];
         } catch { /* offline is fine */ }
 
         const registryMap = new Map(manifest.map((p) => [p.name, p.version]));
@@ -237,11 +284,16 @@ export function registerRegistryTools(ctx: ToolContext): void {
           let detail = `${name} v${version}`;
 
           if (existsSync(metaPath)) {
-            try {
-              const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
-              if (meta.author) detail += ` by ${meta.author}`;
-              if (meta.installedAt) detail += ` (installed: ${meta.installedAt.substring(0, 10)})`;
-            } catch { /* ignore */ }
+            // BN7 fix (site 2): tryReadJsonOrWarn surfaces corruption to the
+            // operator via ctx.logger.warn instead of dropping plugin details
+            // without a hint why.
+            const meta = tryReadJsonOrWarn<{ author?: string; installedAt?: string }>(
+              metaPath,
+              "registry_status_meta",
+              ctx.logger
+            );
+            if (meta?.author) detail += ` by ${meta.author}`;
+            if (meta?.installedAt) detail += ` (installed: ${meta.installedAt.substring(0, 10)})`;
           }
 
           const registryVersion = registryMap.get(name);

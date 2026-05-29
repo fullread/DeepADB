@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Analysis Test Suite — Comparative analysis, screenshot diffing, test generation,
  * RIL interception, and AT detection.

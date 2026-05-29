@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * HTTP/SSE Transport — Alternative to stdio for browser-based MCP clients.
  *
@@ -17,6 +19,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { Logger } from "./middleware/logger.js";
 import { checkAuth } from "./middleware/auth.js";
+import { VERSION } from "./config/config.js";
 
 export interface HttpTransportOptions {
   port: number;
@@ -39,11 +42,29 @@ export async function startHttpTransport(
   const httpServer = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     try {
       // CORS headers — restrict to configured origin (default: deny cross-origin)
-      const allowedOrigin = process.env.DA_HTTP_CORS_ORIGIN ?? "";
-      if (allowedOrigin) {
-        res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
-        res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+      // BO7 fix: support comma-separated list of allowed origins. Production
+      // deployments often need dev + staging + prod URLs; previously only
+      // one was supported per process. The request's Origin header is
+      // matched against the configured list; only the matched origin is
+      // reflected in the response. Empty config = deny all cross-origin.
+      const rawAllowedOrigins = process.env.DA_HTTP_CORS_ORIGIN ?? "";
+      if (rawAllowedOrigins) {
+        const allowedList = rawAllowedOrigins.split(",").map(s => s.trim()).filter(Boolean);
+        const requestOrigin = req.headers.origin;
+        if (typeof requestOrigin === "string" && allowedList.includes(requestOrigin)) {
+          res.setHeader("Access-Control-Allow-Origin", requestOrigin);
+          res.setHeader("Vary", "Origin");
+          res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+          res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        } else if (allowedList.length === 1 && !requestOrigin) {
+          // Backwards compat: if exactly one origin is configured and no
+          // Origin header is present (e.g., server-to-server), reflect the
+          // single origin as before. Pre-BO7 behavior was unconditional.
+          res.setHeader("Access-Control-Allow-Origin", allowedList[0]);
+          res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+          res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        }
+        // No match: omit CORS headers entirely → browser blocks the request.
       }
 
       if (req.method === "OPTIONS") {
@@ -57,7 +78,11 @@ export async function startHttpTransport(
       // Health check (unauthenticated — only returns status info)
       if (url.pathname === "/health" && req.method === "GET") {
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "ok", transport: "sse", version: options.version ?? "unknown" }));
+        // BO6 fix: fall back to imported VERSION constant rather than the
+        // string "unknown" when options.version is omitted. Keeps /health
+        // useful for diagnostics even if the transport is constructed
+        // without explicit version.
+        res.end(JSON.stringify({ status: "ok", transport: "sse", version: options.version ?? VERSION }));
         return;
       }
 
@@ -68,9 +93,19 @@ export async function startHttpTransport(
       if (url.pathname === "/sse" && req.method === "GET") {
         logger.info(`SSE client connected from ${req.socket.remoteAddress}`);
 
-        // Close previous transport if any (single-client model)
+        // W1: close the previous transport before replacing it (single-client
+        // model). Without the explicit close, the old transport's response
+        // stream stays open until GC reclaims it, briefly leaking a file
+        // descriptor and a half-open SSE channel that the previous client
+        // might still be writing to.
         if (activeTransport) {
           logger.warn("New SSE connection replacing existing one.");
+          try {
+            await activeTransport.close();
+          } catch (err) {
+            logger.warn(`Failed to close previous SSE transport: ${err instanceof Error ? err.message : err}`);
+          }
+          activeTransport = null;
         }
 
         const transport = new SSEServerTransport("/message", res);

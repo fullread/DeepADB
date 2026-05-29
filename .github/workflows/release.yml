@@ -1,0 +1,47 @@
+name: Release
+
+# Triggered by pushing a version tag (v1.1.2, v1.2.0, etc.).
+# Publishes the package to npm with Sigstore provenance, providing a
+# verifiable attestation that the published tarball was built from this
+# exact GitHub commit by this exact workflow run.
+#
+# Prerequisites (one-time setup):
+#   - Repo Settings → Secrets and variables → Actions → New repository secret
+#     NPM_TOKEN: granular automation token scoped to the `deepadb` package
+#     (npmjs.com → Access Tokens → Granular Access Token, Publish permission,
+#     restrict to package `deepadb`).
+#
+# MCP Registry publication remains a separate manual step via mcp-publisher.exe.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write  # Required for npm provenance via Sigstore OIDC
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish to npm with provenance
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -2,7 +2,7 @@
 
 MCP (Model Context Protocol) server providing full Android Debug Bridge (ADB) integration for AI agents. Enables MCP clients to directly interact with connected Android devices — inspecting state, running commands, managing apps, capturing logs, controlling device settings, analyzing UI hierarchies, recording screens, managing emulators, running structured test sessions, orchestrating multi-device operations, capturing network traffic, running CI pipelines, auditing accessibility, detecting performance regressions, executing cloud device farm tests, debugging over WiFi, building projects, and managing community plugins.
 
-**198 tools, 4 resources, and 4 prompts across 44 modules** — the most comprehensive ADB MCP server available, with triple transport (stdio + HTTP/SSE + WebSocket), optional GraphQL API, defense-in-depth security, modem firmware analysis, workflow marketplace, AT command interface with multi-chipset support, RIL message interception, device profiling, baseband/modem integration, automated test generation, OTA update monitoring, SELinux auditing, thermal/power profiling, network device discovery, visual regression detection, workflow orchestration, accessibility auditing, and contextual truncation.
+**204 tools, 5 resources, and 4 prompts across 45 modules** — the most comprehensive ADB MCP server available, with triple transport (stdio + HTTP/SSE + WebSocket), optional GraphQL API, defense-in-depth security, modem firmware analysis, workflow marketplace, AT command interface with multi-chipset support, RIL message interception, device profiling, baseband/modem integration, automated test generation, OTA update monitoring, SELinux auditing, thermal/power profiling, network device discovery, visual regression detection, workflow orchestration, accessibility auditing, and contextual truncation.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ MCP (Model Context Protocol) server providing full Android Debug Bridge (ADB) in
 │               DeepADB Server                     │
 │                                                  │
 │  ┌─────────────────────────────────────────────┐ │
-│  │           Tool Modules (44)                 │ │
+│  │           Tool Modules (45)                 │ │
 │  │  device │ shell │ packages │ files │ logs   │ │
 │  │  diagnostics │ ui │ build │ health          │ │
 │  │  wireless │ control │ logcat-watch          │ │
@@ -33,7 +33,7 @@ MCP (Model Context Protocol) server providing full Android Debug Bridge (ADB) in
 │  │  thermal-power │ network-discovery          │ │
 │  │  input-gestures │ wireless-firmware         │ │
 │  ├─────────────────────────────────────────────┤ │
-│  │  Resources (4) │ Prompts (4)                │ │
+│  │  Resources (5) │ Prompts (4)                │ │
 │  └───────────────────┬─────────────────────────┘ │
 │                      │                           │
 │  ┌───────────────────▼─────────────────────────┐ │
@@ -79,20 +79,20 @@ DeepADB operates in two modes, auto-detected at startup:
 ```
 AI Agent (PC) ←→ MCP ←→ DeepADB (PC) ←→ ADB (USB) ←→ Android Device
 ```
-Standard mode: DeepADB runs on a PC/Mac/Linux host and communicates with the device over USB via ADB. All 198 tools work through the ADB bridge with automatic retry on transient failures.
+Standard mode: DeepADB runs on a PC/Mac/Linux host and communicates with the device over USB via ADB. All 204 tools work through the ADB bridge with automatic retry on transient failures.
 
 ### On-Device Mode — direct local execution
 ```
 AI Agent (Termux) ←→ MCP (stdio/HTTP) ←→ DeepADB (Termux) ←→ sh/su (local)
 ```
-When DeepADB runs directly on the Android device (e.g., inside Termux), it auto-detects the environment and switches to `LocalBridge`. Commands execute directly via `sh`/`su` — no ADB server, no USB, no serialization overhead. All 198 tools work identically, with significantly lower latency.
+When DeepADB runs directly on the Android device (e.g., inside Termux), it auto-detects the environment and switches to `LocalBridge`. Commands execute directly via `sh`/`su` — no ADB server, no USB, no serialization overhead. All 204 tools work identically, with significantly lower latency.
 
-**Validated on hardware** (Pixel 6a, Android 16, Termux + Magisk + QEMU 10.2.1) across a four-cell test matrix, 0 failures in any cell:
+**Validated on hardware** (Pixel 6a, Android 16, Termux + Magisk + QEMU 10.2.1) across a four-cell test matrix — host (ADB) and on-device (LocalBridge), each with and without a device PIN — with **0 failures in every cell**. The full suite is 577 tests in the host/ADB configuration and 613 on-device; the difference is the QEMU virtualization and Alpine VM-boot suites, which run only on-device:
 
-- **ADB mode, no PIN:** 383 passed / 10 skipped (393 total). Skips: 5 QEMU (on-device only), 1 shell round-trip (requires /bin/sh on host, skipped on Windows), 4 screen-state (require DA_TEST_PIN).
-- **ADB mode, with PIN:** 387 passed / 6 skipped. The 4 screen-state tests unlock.
-- **On-device mode, no PIN:** 419 passed / 4 skipped (423 total). All QEMU tests unlock including Alpine Linux VM boot with KVM acceleration, big.LITTLE CPU topology detection, guest ADB connectivity error handling, and clean VM shutdown. Skips: 4 screen-state (require PIN).
-- **On-device mode, with PIN:** 420 passed / 3 skipped. Every test enabled by the environment runs; the 3 skips are setup-phase steps that no-op when Alpine kernel/initrd/disk are already cached.
+- **ADB mode, no PIN:** 556 passed / 0 failed / 21 skipped (577 total). Skips: 5 QEMU (on-device only), 7 gracefulKill unit tests (require POSIX signals, skipped on the Windows host), 3 tcpdump sanitization (tcpdump is root-only and unreachable over a non-root ADB shell), 2 host-shell round-trips (require a POSIX /bin/sh), 4 screen-state (require DA_TEST_PIN).
+- **ADB mode, with PIN:** 560 passed / 0 failed / 17 skipped (577 total). The 4 screen-state tests unlock and run.
+- **On-device mode, no PIN:** 606 passed / 0 failed / 7 skipped (613 total). All QEMU tests run, including Alpine Linux VM boot with KVM acceleration, big.LITTLE CPU topology detection, guest ADB connectivity error handling, and clean VM shutdown; the tcpdump and gracefulKill suites also run here (root + POSIX). Skips: 3 QEMU setup steps that no-op when the Alpine kernel/initrd/disk are already cached, 4 screen-state (require PIN).
+- **On-device mode, with PIN:** 610 passed / 0 failed / 3 skipped (613 total). Every test enabled by the environment runs; the 3 skips are the cached-VM setup steps.
 
 **Privilege escalation:** In ADB mode, all shell commands run as uid=2000 (the `shell` user) which has system-level permissions. In Termux, commands run as a regular app user. LocalBridge automatically elevates privileged commands through `su` when root (Magisk) is available:
 - **Command allowlist:** 16 system commands (`settings`, `dumpsys`, `am`, `input`, `screencap`, `screenrecord`, `uiautomator`, `app_process`, `getenforce`, `setenforce`, `cmd`, `pm`, `wm`, `svc`, `ip`, `ifconfig`) are routed through `su -c` to match ADB-mode behavior.
@@ -142,7 +142,7 @@ DA_GRAPHQL_PORT=4000 npm start
 }
 ```
 
-## Available Tools (198)
+## Available Tools (204)
 
 ### Health (1 tool)
 - `adb_health_check` — Comprehensive toolchain validation: ADB binary, server, device connection, authorization, root access, and storage writability
@@ -241,12 +241,15 @@ DA_GRAPHQL_PORT=4000 npm start
 - `adb_disconnect` — Disconnect wireless device(s)
 - `adb_tcpip` — Switch USB device to TCP/IP mode (auto-detects device IP)
 
-### Port Forwarding (5 tools)
+### Port Forwarding (8 tools)
 - `adb_forward` — Forward a local port to a device port (host → device)
 - `adb_reverse` — Reverse-forward a device port to the host (device → host)
 - `adb_forward_list` — List all active forward and reverse port mappings
 - `adb_forward_remove` — Remove a port forward or all forwards
 - `adb_reverse_remove` — Remove a reverse forward or all reverse forwards
+- `adb_tunnel_open` — Open a managed tunnel with opaque ID. Auto-picks a free host port for forward direction when omitted; registers cleanup so the tunnel is removed on server exit
+- `adb_tunnel_list` — List active managed tunnels (those opened via adb_tunnel_open). Optional device filter; shows ID, direction, endpoints, and age
+- `adb_tunnel_close` — Close a managed tunnel by ID, or close all at once with id="all"
 
 ### Emulator Management (3 tools)
 - `adb_avd_list` — List available AVDs (PC mode) or detect KVM/QEMU virtualization capabilities (on-device mode)
@@ -430,7 +433,12 @@ DA_GRAPHQL_PORT=4000 npm start
 - `adb_sensor_read` — Read current hardware sensor values via dumpsys sensorservice. Enumerates all sensors with vendor, type, mode, rate range, and wake capability. Returns last-known readings with timestamps and axis-labeled formatting. Category filter (13 categories) and listOnly discovery mode. No root required
 - `adb_iio_read` — Read raw hardware data from the Linux IIO subsystem. Auto-discovers IIO devices, classifies by kernel driver. On Tensor/Exynos: exposes per-rail ODPM power monitors showing real-time power consumption per SoC subsystem. Generic IIO path handles raw channels with calibrated scale+offset. Root required
 
-## MCP Resources (4)
+### Result Handles (3 tools)
+- `adb_result_list` — List active result handles in the tempdir-backed cache. Shows tool, name, size, age, and remaining TTL for each handle
+- `adb_result_get` — Retrieve the content of a stored handle by tool + name. Returns the original content blocks as the source tool produced them; updates last-accessed time. For URI-based retrieval, use the `result://{tool}/{name}` MCP Resource instead
+- `adb_result_drop` — Delete a stored result handle, or clear all handles in the current namespace. Pass both `tool` and `name` to drop one specific handle, or `all: true` to drop everything. Useful before changing DA_AUTH_TOKEN (which would otherwise leave orphans under the old token-hash directory)
+
+## MCP Resources (5)
 
 Read-only device state surfaces accessible by MCP clients:
 
@@ -438,6 +446,7 @@ Read-only device state surfaces accessible by MCP clients:
 - `device://info/{serial}` — Device properties (model, OS, build, ABI)
 - `device://battery/{serial}` — Parsed battery status (level, charging, temperature, voltage)
 - `device://telephony/{serial}` — Telephony registry state for cellular analysis
+- `result://{tool}/{name}` — Stored tool result handle. Resolve by URI; created by tools that opt into result-handle storage via the `result_handle` parameter. Listed by adb_result_list
 
 ## MCP Prompts (4)
 
@@ -469,7 +478,7 @@ Full view tree capture via `uiautomator dump` with parsed XML extraction. Return
 Multi-layered security activated via `DA_SECURITY=true`. Provides command blocklist/allowlist filtering, rate limiting (commands per minute), and audit logging with automatic credential redaction. Security checks are integrated into `adb_shell`, `adb_root_shell`, `adb_multi_shell`, `adb_multi_compare`, `adb_input`, `adb_batch_actions`, and `adb_start_activity`. Configurable via environment variables for different deployment scenarios.
 
 ### Input Sanitization
-All tools that interpolate user-supplied parameters into shell command strings validate inputs against shell metacharacters before execution. Package names, property keys, service names, setting keys, test identifiers, network interface names, and tcpdump filters are all validated through a centralized `validateShellArg()` function that rejects `;`, `|`, `&`, `$`, backticks, parentheses, and other injection vectors. File paths use single-quoted shell escaping to prevent `$()` command substitution. The `adb_input` tool applies type-specific validation: `tap`/`swipe` accept only numeric coordinates, `keyevent` accepts only alphanumeric keycodes, and `text` is shell-escaped for literal delivery. The `adb_batch_actions` tool enforces the same per-action-type validation (digits-only for coordinates, alphanumeric for keycodes, shell-escape for text) and routes every assembled command through the security middleware. Deserialized JSON from snapshot files is validated before shell interpolation. Every `z.number()` parameter across all 198 tools has explicit `.min()/.max()` Zod bounds to prevent resource exhaustion from extreme values. The LocalBridge has explicit handlers for every ADB subcommand used by tool modules, preventing unquoted fallthrough to the default shell handler. In on-device mode, privilege escalation uses a frozen 16-command allowlist and restricted-path regex — the elevation set is `ReadonlySet` + `Object.freeze`, not configurable at runtime. The HTTP/SSE transport denies cross-origin requests by default (configurable via `DA_HTTP_CORS_ORIGIN`), the plugin registry verifies SHA-256 integrity hashes and prevents path traversal via directory containment checks, and the workflow engine enforces step count (200), sleep duration (5 min), and repeat iteration (100) limits. Fetch helpers enforce a 5 MB response body limit. Getprop output parsing handles Windows `\r\n` line endings via `.trim()` before regex matching, and dual SIM slot counts are capped at 4 to prevent resource exhaustion from corrupted device properties.
+All tools that interpolate user-supplied parameters into shell command strings validate inputs against shell metacharacters before execution. Package names, property keys, service names, setting keys, test identifiers, network interface names, and tcpdump filters are all validated through a centralized `validateShellArg()` function that rejects `;`, `|`, `&`, `$`, backticks, parentheses, and other injection vectors. File paths use single-quoted shell escaping to prevent `$()` command substitution. The `adb_input` tool applies type-specific validation: `tap`/`swipe` accept only numeric coordinates, `keyevent` accepts only alphanumeric keycodes, and `text` is shell-escaped for literal delivery. The `adb_batch_actions` tool enforces the same per-action-type validation (digits-only for coordinates, alphanumeric for keycodes, shell-escape for text) and routes every assembled command through the security middleware. Deserialized JSON from snapshot files is validated before shell interpolation. Every `z.number()` parameter across all 204 tools has explicit `.min()/.max()` Zod bounds to prevent resource exhaustion from extreme values. The LocalBridge has explicit handlers for every ADB subcommand used by tool modules, preventing unquoted fallthrough to the default shell handler. In on-device mode, privilege escalation uses a frozen 16-command allowlist and restricted-path regex — the elevation set is `ReadonlySet` + `Object.freeze`, not configurable at runtime. The HTTP/SSE transport denies cross-origin requests by default (configurable via `DA_HTTP_CORS_ORIGIN`), the plugin registry verifies SHA-256 integrity hashes and prevents path traversal via directory containment checks, and the workflow engine enforces step count (200), sleep duration (5 min), and repeat iteration (100) limits. Fetch helpers enforce a 5 MB response body limit. Getprop output parsing handles Windows `\r\n` line endings via `.trim()` before regex matching, and dual SIM slot counts are capped at 4 to prevent resource exhaustion from corrupted device properties.
 
 ### Multi-Device Orchestration
 Run commands, install APKs, and compare outputs across multiple connected devices in parallel. Essential for comparative testing across Android versions and device models.
@@ -559,7 +568,7 @@ Scans the local network for ADB-enabled devices via ARP table queries and option
 On-device virtual machine management using QEMU with KVM hardware acceleration. Enables running guest Android VMs directly on the physical device — a capability unique to DeepADB. Dynamic resource allocation auto-detects host CPU cores and physical RAM, reserving 1 core and 35% of memory for the host OS to prevent starvation. Multi-VM support tracks resource consumption across concurrent VMs, refusing new VMs when the pool is exhausted rather than degrading host performance. Disk image management with qcow2 (sparse, snapshot-capable) and raw formats. ADB port forwarding to guest VMs enables DeepADB's full tool suite to target both host and guest devices simultaneously. Process lifecycle tracked via the centralized cleanup registry with SIGTERM/SIGKILL shutdown. Path containment verification on all image operations prevents directory traversal.
 
 ### ToolContext Architecture
-All 44 tool modules receive a unified `ToolContext` dependency bundle containing server, bridge, deviceManager, logger, security, and config. Adding new cross-cutting dependencies requires no module signature changes.
+All 45 tool modules receive a unified `ToolContext` dependency bundle containing server, bridge, deviceManager, logger, security, and config. Adding new cross-cutting dependencies requires no module signature changes.
 
 ## Environment Variables
 
@@ -576,10 +585,18 @@ All 44 tool modules receive a unified `ToolContext` dependency bundle containing
 | `DA_RETRY_COUNT` | `1` | Number of retries for transient ADB failures |
 | `DA_RETRY_DELAY` | `500` | Base retry delay in ms (doubles each attempt) |
 | `DA_LOG_LEVEL` | `info` | Log level: debug, info, warn, error |
+| `DA_ASCII_ONLY` | (auto-detect) | Set to `1` to force ASCII-only output in the startup warning banner. Default auto-detects via `WT_SESSION`/`TERM_PROGRAM`/`TERM` for Unicode-capable terminals; falls back to ASCII on legacy `cmd.exe`. |
+| `DA_RESOURCE_CACHE_TTL_MS` | `0` (disabled) | MCP Resource cache TTL in ms. Set to a positive value to cache resource reads (device://info, device://battery, etc.) for that duration. |
+| `DA_RESULT_HANDLE_DIR` | `{tempDir}/result-handles` | Storage root for tempdir-backed tool result handles. Override to relocate the store off the default temp directory. |
+| `DA_RESULT_HANDLE_TTL` | `43200` (12h) | Per-handle TTL in seconds. Handles older than this are evicted on startup sweep and during periodic eviction. Bounded to [60, 7 days]. |
+| `DA_RESULT_HANDLE_MAX_BYTES` | `5242880` (5 MB) | Per-handle size cap. Tools attempting to store a content block larger than this fail with an error. |
+| `DA_RESULT_HANDLE_TOTAL_BYTES` | `104857600` (100 MB) | Total result-handle store size cap across all handles. Triggers LRU eviction when exceeded. |
+| `DA_RESULT_HANDLE_MAX_COUNT` | `100` | Maximum number of active handles. Triggers LRU eviction when exceeded. |
 | `DA_SECURITY` | `false` | Enable security middleware (command filtering, rate limiting) |
 | `DA_BLOCKED_COMMANDS` | (none) | Comma-separated list of blocked shell command substrings |
 | `DA_ALLOWED_COMMANDS` | (none) | Comma-separated allowlist (if set, only matching commands run) |
 | `DA_RATE_LIMIT` | `0` | Max commands per minute (0 = unlimited) |
+| `DA_CI_PING_TARGET` | `1.1.1.1` | Network reachability target used by `adb_ci_device_ready` (network reachability is one of the readiness checks alongside boot completion, ADB authorization, and package manager availability). Override to point at an internal target if `1.1.1.1` is firewalled. |
 | `DA_AUDIT_LOG` | `true` | Log all executed commands for audit trail (set to `false` to disable) |
 | `DA_PLUGIN_DIR` | `{tempDir}/plugins` | Directory to scan for plugin .js modules at startup |
 | `DA_REGISTRY_URL` | GitHub default | URL of the community plugin registry JSON manifest |
@@ -592,6 +609,7 @@ All 44 tool modules receive a unified `ToolContext` dependency bundle containing
 | `DA_GRAPHQL_PORT` | (disabled) | Set to a port number to enable the GraphQL API endpoint (requires `npm install graphql`) |
 | `DA_GRAPHQL_CORS_ORIGIN` | (none — deny) | Allowed CORS origin for GraphQL API |
 | `DA_WORKFLOW_REGISTRY_URL` | (derived from DA_REGISTRY_URL) | URL of the workflow marketplace JSON manifest |
+| `DA_TEST_PIN` | (none) | Numeric PIN used by `tests/test-ui-control.mjs` to exercise screen-lock/unlock tests. Without it, the 4 lock-state tests skip. Format: `DA_TEST_PIN=0000 npm test`. |
 
 ## Project Structure
 
@@ -622,7 +640,7 @@ DeepADB/
 │   │   ├── screen-record.ts    # Screen video recording start/stop (2 tools)
 │   │   ├── control.ts          # Airplane, WiFi, data, location, screen, settings, reboot (9 tools)
 │   │   ├── wireless.ts         # WiFi pairing, connect, disconnect, TCP/IP (4 tools)
-│   │   ├── forwarding.ts       # Port forwarding — forward, reverse, list, remove (5 tools)
+│   │   ├── forwarding.ts       # Port forwarding — forward, reverse, list, remove, managed tunnels with auto-port-pick (8 tools)
 │   │   ├── emulator.ts         # AVD list, start, stop with on-device KVM/QEMU detection (3 tools)
 │   │   ├── qemu.ts             # QEMU/KVM VM management — setup, images, start, stop, status, guest ADB connect/disconnect/shell (8 tools)
 │   │   ├── testing.ts          # Structured test sessions with numbered steps (3 tools)
@@ -651,9 +669,10 @@ DeepADB/
 │   │   ├── thermal-power.ts    # Thermal zones, CPU frequency, battery drain (3 tools)
 │   │   ├── network-discovery.ts # ADB-over-network scanning and auto-connect (3 tools)
 │   │   ├── sensors.ts          # Hardware sensor enumeration, IIO power monitor reading (2 tools)
+│   │   ├── result-handles.ts   # Tempdir-backed result handle store — list, drop, drop-all (3 tools) + the result://{tool}/{name} resource
 │   │   ├── wireless-firmware.ts # WiFi, Bluetooth, NFC, GPS firmware identification (4 tools)
 │   │   ├── build.ts            # Gradle build and install (2 tools)
-│   │   ├── resources.ts        # MCP Resources — device state surfaces (4 resources)
+│   │   ├── resources.ts        # MCP Resources — 4 device-state surfaces: device://info|battery|telephony|list (5th, result://, lives in result-handles.ts)
 │   │   └── prompts.ts          # MCP Prompts — workflow templates (4 prompts)
 │   ├── middleware/
 │   │   ├── auth.ts             # Bearer token authentication for network transports (DA_AUTH_TOKEN)
@@ -665,7 +684,10 @@ DeepADB/
 │   │   ├── png-utils.ts        # Zero-dependency PNG decode/encode/draw primitives for screenshot annotation and diffing
 │   │   ├── ui-dump.ts          # Shared uiautomator XML capture with concurrent-safe paths, on-device /data/local/tmp routing, and cleanup
 │   │   ├── cleanup.ts          # Centralized process cleanup registry for SIGINT/SIGTERM/exit
-│   │   └── logger.ts           # stderr-safe logging (MCP-compliant)
+│   │   ├── logger.ts           # stderr-safe logging (MCP-compliant)
+│   │   ├── fs-utils.ts         # Filename sanitization, atomic write, private-dir helpers, within-dir containment check
+│   │   ├── parse-utils.ts      # Shared parseIntSafe for env-var numeric parsing (single source of truth)
+│   │   └── result-handle.ts    # Tempdir-backed tool result content cache with TTL, LRU, and token-hash isolation
 │   └── config/
 │       └── config.ts           # Configuration, env vars, startup validation
 ├── package.json
@@ -675,21 +697,25 @@ DeepADB/
 ├── README.md
 ├── SECURITY.md                  # Threat model, security architecture, deployment hardening, vulnerability reporting
 ├── CHANGELOG.md                 # Version history from v0.1.0 to current
-├── LICENSE                      # MIT license
+├── LICENSE                      # Apache 2.0 license
 └── tests/
     ├── run-all.mjs              # Run all test suites sequentially with summary (tracks skipped counts)
     ├── test-hw.mjs              # Hardware core: health, identity, baseband, thermal, profiles, wireless firmware, crash analysis (34 tests)
     ├── test-shell-files.mjs     # Shell, filesystem, packages, diagnostics (24 tests)
     ├── test-ui-control.mjs      # UI hierarchy, screenshots, settings, input gestures, UI automation, device awareness, accessibility, screen lock/unlock, multi-touch (46 tests)
-    ├── test-monitoring.mjs      # Logcat watchers, snapshots, OTA, regression, workflows (25 tests)
-    ├── test-security.mjs        # Input sanitization, shell injection, AT command safety, QEMU shell escaping, heap-dump validation (46 tests)
+    ├── test-monitoring.mjs      # Logcat watchers, snapshots, OTA, regression, workflows (43 tests)
+    ├── test-security.mjs        # Input sanitization, shell injection, AT command safety, QEMU shell escaping, heap-dump validation (116 on-device, 105 host)
     ├── test-lifecycle.mjs       # App lifecycle, file push/pull, input, port forwarding, screen recording, test sessions (24 tests)
     ├── test-analysis.mjs        # Thermal/snapshot/regression comparison, firmware diff, screenshot diff, test gen, RIL intercept, AT cross-validation, permission management (23 tests)
-    ├── test-boundaries.mjs      # Zod bounds enforcement, input injection, error paths, sensitive data protection, wireless ADB coverage, multi-device basics (46 tests)
+    ├── test-boundaries.mjs      # Zod bounds enforcement, input injection, error paths, sensitive data protection, wireless ADB coverage, multi-device basics, tunnel automation, device-free coverage boundaries (78 tests)
     ├── test-sensors.mjs         # HAL sensors, IIO power monitors, category filters, formatting, wake-up, rate display (30 tests)
     ├── test-files-extended.mjs  # File tool coverage — write, find, stat, checksum, mkdir, rm, move, copy, chmod, touch, fsinfo, chown, grep, replace; push safety; sed-escape regression (95 tests)
+    ├── test-result-handles.mjs # Result handle store — listing, retrieval, drop, isolation, eviction (19 tests)
     ├── test-qemu.mjs            # QEMU/KVM setup, image management, VM status, guest connectivity errors (13 on-device tests)
     ├── test-qemu-boot.mjs       # QEMU Alpine VM boot with auto-fetch of kernel/initrd, KVM acceleration, topology detection, guest ADB connectivity (17 on-device tests)
+    ├── test-supply-chain.mjs    # Supply-chain hardening checks for fetch and network paths (24 tests)
+    ├── test-sanitize-fuzz.mjs   # Property-based fuzzing of shell sanitizers — shellQuote/shellEscape round-trip, validateShellArg rejection (19 tests)
+    ├── test-transports.mjs      # Transport smoke — HTTP/SSE + WebSocket MCP round-trip, GraphQL health query (8 tests)
     └── lib/
         └── harness.mjs          # Shared test harness (stdio JSON-RPC transport, assertion primitives)
 ```
@@ -699,9 +725,9 @@ DeepADB/
 - **Runtime**: Node.js ≥22 (ES2024, ESM)
 - **Language**: TypeScript 6.0 (strict mode, NodeNext module resolution)
 - **MCP SDK**: `@modelcontextprotocol/sdk` ^1.24.0 (currently resolves to 1.29.0)
-- **Validation**: Zod ^3.25.0
+- **Validation**: Zod ^4.4.3
 - **Transport**: stdio (JSON-RPC), HTTP/SSE, WebSocket (optional `ws`), GraphQL API (optional `graphql`)
 
 ## License
 
-MIT
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). The v1.1.2 release migrated from MIT to Apache 2.0 for the explicit patent grant and contributor attribution requirements; existing forks/installs remain valid under the prior MIT terms.

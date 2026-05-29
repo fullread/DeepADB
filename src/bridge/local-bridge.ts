@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Local Bridge — On-device execution without ADB.
  *
@@ -17,7 +19,7 @@ import { existsSync } from "fs";
 import { AdbBridge, AdbResult, AdbExecOptions, AdbError } from "./adb-bridge.js";
 import { config } from "../config/config.js";
 import { Logger } from "../middleware/logger.js";
-import { shellEscape } from "../middleware/sanitize.js";
+import { shellEscape, shellQuote } from "../middleware/sanitize.js";
 
 export class LocalBridge extends AdbBridge {
   private localLogger: Logger;
@@ -91,10 +93,6 @@ export class LocalBridge extends AdbBridge {
     this.localLogger = logger;
   }
 
-  /** Quote a string for safe use as a shell argument (wraps in single quotes with escaping). */
-  private shellQuote(str: string): string {
-    return `'${shellEscape(str)}'`;
-  }
 
   /**
    * Check if root (su) is available. Result is cached after first probe.
@@ -124,7 +122,7 @@ export class LocalBridge extends AdbBridge {
    * This is the same escaping path used by AdbBridge.rootShell().
    */
   private elevate(command: string): string {
-    return `su -c '${shellEscape(command)}'`;
+    return `su -c ${shellQuote(command)}`;
   }
 
   /**
@@ -239,6 +237,16 @@ export class LocalBridge extends AdbBridge {
    * Android filesystem paths that require elevated access in on-device mode.
    * Commands referencing these paths need su to bypass scoped storage restrictions.
    * In ADB mode (uid=2000), these paths are accessible by default.
+   *
+   * E1 note: this is a SUBSTRING match against the raw command text, not an
+   * analysis of which paths the command actually accesses. `echo '/sdcard'`
+   * therefore triggers `su` wrapping even though no file is touched. That is
+   * a deliberate conservative bias — wrapping in `su` when not strictly
+   * needed is harmless (the command still works), while skipping the wrap
+   * for a command that DOES touch a restricted path would fail at runtime.
+   * The over-trigger pattern is the safe direction; do not "optimize" it to
+   * be more precise without first auditing every call site that depends on
+   * the existing behavior.
    */
   private static readonly RESTRICTED_PATH_PATTERNS = /\/sdcard\b|\/storage\b|\/system\//;
 
@@ -253,7 +261,15 @@ export class LocalBridge extends AdbBridge {
    * uses shellEscape() to prevent injection within the single-quote context.
    */
   private commandNeedsElevation(command: string): boolean {
-    // Check command name against system tool allowlist
+    // O4 note: this method does first-token extraction via simple whitespace
+    // split. CONTRACT: the `command` string passed in must already be a
+    // properly-formed shell command — i.e., embedded quoted strings with
+    // internal whitespace are not respected. `"my package" install` would
+    // tokenize as `"my`. All current callers build `command` from validated
+    // input (shellQuote-wrapped paths, alphanumeric package names from Zod),
+    // so this is safe in practice. Future callers must preserve this
+    // contract or use a proper shell-parser if they need to pass quoted
+    // first-token commands.
     const firstToken = command.trimStart().split(/\s+/)[0] ?? "";
     // Handle absolute paths: "/system/bin/am" → "am"
     const cmdName = firstToken.includes("/") ? firstToken.split("/").pop() ?? "" : firstToken;
@@ -304,7 +320,7 @@ export class LocalBridge extends AdbBridge {
       case "push":
         // Local → device path. Elevate to write to restricted paths like /sdcard/.
         {
-          const pushCmd = `cp -f ${this.shellQuote(args[1])} ${this.shellQuote(args[2])}`;
+          const pushCmd = `cp -f ${shellQuote(args[1])} ${shellQuote(args[2])}`;
           return this.execLocal(hasRoot ? this.elevate(pushCmd) : pushCmd, options);
         }
 
@@ -314,16 +330,23 @@ export class LocalBridge extends AdbBridge {
         // The > redirect is evaluated by the outer sh (uid=Termux), so the
         // created file inherits the Termux user's ownership.
         if (hasRoot) {
-          const pullCmd = `su -c 'cat ${shellEscape(args[1])}' > ${this.shellQuote(args[2])}`;
+          const pullCmd = `su -c 'cat ${shellEscape(args[1])}' > ${shellQuote(args[2])}`;
           return this.execLocal(pullCmd, options);
         }
-        return this.execLocal(`cp -f ${this.shellQuote(args[1])} ${this.shellQuote(args[2])}`, options);
+        return this.execLocal(`cp -f ${shellQuote(args[1])} ${shellQuote(args[2])}`, options);
 
       case "install":
         // args = ["install", ...flags, path] → pm install
         // Flags are hardcoded (-r, -d), only the last arg (APK path) needs quoting
+        // O5 note: SANITIZATION-AT-CALLER CONTRACT. The flag tokens between
+        // index 1 and length-1 are NOT shellQuote-wrapped because they come
+        // from a closed set of literals (-r, -d, -t, etc.) hardcoded in
+        // tool modules. If a future caller passes operator-supplied flag
+        // values here, they MUST shellQuote them or the unquoted join() will
+        // break out of the shell context. Audit any new install-tool caller
+        // for adherence.
         {
-          const installCmd = `pm install ${args.slice(1, -1).join(" ")} ${this.shellQuote(args[args.length - 1])}`;
+          const installCmd = `pm install ${args.slice(1, -1).join(" ")} ${shellQuote(args[args.length - 1])}`;
           return this.execLocal(hasRoot ? this.elevate(installCmd) : installCmd, options);
         }
 
@@ -334,20 +357,32 @@ export class LocalBridge extends AdbBridge {
           const imArgs = args.slice(1);
           const flags = imArgs.filter(a => a.startsWith("-"));
           const paths = imArgs.filter(a => !a.startsWith("-"));
-          const imCmd = `pm install-multiple ${flags.join(" ")} ${paths.map(p => this.shellQuote(p)).join(" ")}`;
+          const imCmd = `pm install-multiple ${flags.join(" ")} ${paths.map(p => shellQuote(p)).join(" ")}`;
           return this.execLocal(hasRoot ? this.elevate(imCmd) : imCmd, options);
         }
 
       case "uninstall":
         // args = ["uninstall", ...flags, package] → pm uninstall
-        // Package name is validated by validateShellArg before reaching here
+        // O6 fix: shellQuote non-flag args so a package name surviving
+        // upstream validation but containing whitespace (validateShellArg
+        // doesn't reject whitespace per D1) doesn't word-split here. Flags
+        // (starting with "-") are passed through unquoted since they are
+        // server-controlled enum values, never user-supplied.
         {
-          const uninstallCmd = `pm uninstall ${args.slice(1).join(" ")}`;
+          const unArgs = args.slice(1).map(a => a.startsWith("-") ? a : shellQuote(a)).join(" ");
+          const uninstallCmd = `pm uninstall ${unArgs}`;
           return this.execLocal(hasRoot ? this.elevate(uninstallCmd) : uninstallCmd, options);
         }
 
       case "logcat":
         // args = ["logcat", ...flags] → direct logcat
+        // O7 note: SANITIZATION-AT-CALLER CONTRACT (matches O5). Logcat
+        // flags are hardcoded literals from tool modules (-v, -b, -d, --pid,
+        // --regex) plus operator-supplied values for some of them (tag,
+        // pid). Tools that pass tag/pid values are responsible for
+        // shellQuote-wrapping at construction time — the join(" ") here
+        // does not re-wrap. Current callers all wrap; new callers MUST
+        // preserve this contract.
         return this.execLocal(`logcat ${args.slice(1).join(" ")}`, options);
 
       case "reboot":
@@ -385,8 +420,8 @@ export class LocalBridge extends AdbBridge {
           const okMatch = bzResult.stdout.match(/OK:(.+)/);
           if (okMatch && destPath) {
             const generatedPath = okMatch[1].trim();
-            const cpCmd = `cp -f ${this.shellQuote(generatedPath)} ${this.shellQuote(destPath)}`;
-            const rmCmd = `rm -f ${this.shellQuote(generatedPath)}`;
+            const cpCmd = `cp -f ${shellQuote(generatedPath)} ${shellQuote(destPath)}`;
+            const rmCmd = `rm -f ${shellQuote(generatedPath)}`;
             await this.execLocal(hasRoot ? this.elevate(cpCmd) : cpCmd, { ignoreExitCode: true });
             await this.execLocal(hasRoot ? this.elevate(rmCmd) : rmCmd, { ignoreExitCode: true });
           }

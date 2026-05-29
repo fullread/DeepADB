@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Shell Tools — Execute arbitrary shell commands on the device.
  */
@@ -65,6 +67,13 @@ export function registerShellTools(ctx: ToolContext): void {
         let output = result.stdout;
         if (result.stderr) {
           output += `\n--- STDERR ---\n${result.stderr}`;
+        }
+        // BB6 fix: surface non-zero exit code for parity with adb_shell.
+        // Before this fix, a failing root command silently returned stdout
+        // (possibly empty) while adb_shell surfaced the exit code suffix.
+        // Asymmetric — corrected.
+        if (result.exitCode !== 0) {
+          output += `\n--- Exit code: ${result.exitCode} ---`;
         }
         return { content: [{ type: "text", text: OutputProcessor.process(output) }] };
       } catch (error) {

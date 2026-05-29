@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Shell, Files & Packages Test Suite — Command execution, filesystem, and app management.
  * Tests: shell, root_shell, ls, cat, push/pull, packages, permissions.
@@ -10,7 +12,9 @@ h.section("Shell Execution");
 await h.testContains("Shell → echo", "adb_shell", { command: "echo hello_DeepADB" }, "hello_DeepADB");
 await h.testContains("Shell → uname", "adb_shell", { command: "uname -a" }, "Linux");
 await h.testContains("Shell → id", "adb_shell", { command: "id" }, "uid=");
-await h.testContains("Shell → date", "adb_shell", { command: "date" }, "2026");
+// testMatch (not testContains): `date` output embeds the year, but hardcoding it
+// would make this test fail every January 1st. The pattern matches any 20xx year.
+await h.testMatch("Shell → date", "adb_shell", { command: "date" }, /\b20\d\d\b/);
 await h.testContains("Root Shell → id", "adb_root_shell", { command: "id" }, "uid=0");
 await h.testContains("Root Shell → whoami", "adb_root_shell", { command: "whoami" }, "root");
 

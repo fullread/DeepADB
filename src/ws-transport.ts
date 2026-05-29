@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * WebSocket Transport — Bidirectional streaming MCP transport.
  *
@@ -20,6 +22,7 @@ import { createServer as createHttpServer, IncomingMessage, ServerResponse } fro
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Logger } from "./middleware/logger.js";
 import { hasValidToken } from "./middleware/auth.js";
+import { VERSION } from "./config/config.js";
 
 /** MCP Transport interface — matches the SDK's Transport contract. */
 interface McpTransport {
@@ -80,8 +83,15 @@ class WebSocketMcpTransport implements McpTransport {
   }
 
   async send(message: unknown): Promise<void> {
+    // BP7 fix: named constant instead of magic number 1. Per WHATWG WebSocket
+    // spec (https://websockets.spec.whatwg.org/#dom-websocket-readystate),
+    // readyState values are: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED. We
+    // can't reference WebSocket.OPEN directly here because the typed cast
+    // intentionally avoids importing the ws module's type (would create a
+    // dependency cycle), so the value is mirrored as a local constant.
+    const WS_OPEN = 1;
     const socket = this.ws as { readyState: number; send: (data: string) => void };
-    if (socket.readyState === 1) { // OPEN
+    if (socket.readyState === WS_OPEN) {
       socket.send(JSON.stringify(message));
     }
   }
@@ -136,7 +146,8 @@ export async function startWsTransport(
 
     if (req.url === "/health" && req.method === "GET") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "ok", transport: "websocket", version: options.version ?? "unknown" }));
+      // BP8 fix: same as BO6 — fall back to imported VERSION rather than "unknown".
+      res.end(JSON.stringify({ status: "ok", transport: "websocket", version: options.version ?? VERSION }));
       return;
     }
 
@@ -144,12 +155,20 @@ export async function startWsTransport(
     res.end(JSON.stringify({ error: "Upgrade to WebSocket required. Connect to ws://host:port/ws" }));
   });
 
+  // X1: cap incoming WebSocket message size. The ws library's default
+  // maxPayload is 100 MB — large enough that an authenticated client (or
+  // anyone if DA_AUTH_TOKEN is unset and CORS is permissive) could submit
+  // multi-MB payloads, triggering JSON.parse on heap-pressuring strings.
+  // 10 MB is generous for MCP JSON-RPC messages (which are normally
+  // sub-100KB) while bounding worst-case memory pressure.
+  const WS_MAX_PAYLOAD_BYTES = 10 * 1024 * 1024;
+
   // Create WebSocket server attached to the HTTP server
-  const WssConstructor = WebSocketServer as new (options: { server: unknown; path: string }) => {
+  const WssConstructor = WebSocketServer as new (options: { server: unknown; path: string; maxPayload?: number }) => {
     on: (event: string, handler: (...args: unknown[]) => void) => void;
   };
 
-  const wss = new WssConstructor({ server: httpServer, path: "/ws" });
+  const wss = new WssConstructor({ server: httpServer, path: "/ws", maxPayload: WS_MAX_PAYLOAD_BYTES });
 
   wss.on("connection", async (ws: unknown, req: unknown) => {
     const incomingReq = req as IncomingMessage;

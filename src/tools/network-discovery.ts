@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * ADB-over-Network Device Discovery — Scan for ADB devices on the local network.
  *
@@ -248,7 +250,7 @@ export function registerNetworkDiscoveryTools(ctx: ToolContext): void {
 
   ctx.server.tool(
     "adb_network_auto_connect",
-    "Discover and automatically connect to ADB devices on the local network. Combines network scanning with adb connect in one step.",
+    "Discover and automatically connect to ADB devices on the local network. Combines network scanning with adb connect in one step. Probes a single port (default 5555) on each candidate; if you need to cover the full ADB port range (5555-5558) use adb_network_scan first, then adb_connect with the discovered host:port.",
     {
       ipRange: z.string().optional().describe("IP range to scan (e.g., '192.168.1.1-254')"),
       port: z.number().min(1).max(65535).optional().default(5555).describe("ADB port to probe and connect (1-65535, default 5555)"),
@@ -276,7 +278,14 @@ export function registerNetworkDiscoveryTools(ctx: ToolContext): void {
           for (const m of arpResult.stdout.matchAll(/(\d+\.\d+\.\d+\.\d+)/g)) {
             if (!m[1].startsWith("127.") && !m[1].endsWith(".255")) candidates.add(m[1]);
           }
-        } catch { /* no device for ARP */ }
+        } catch (err) {
+          // AN6 fix: surface why ARP discovery was skipped. Previously the
+          // silent catch left the operator wondering "why didn't it find my
+          // device?" when really the candidate list never got ARP'd because
+          // there was no anchor device to ssh into.
+          const detail = err instanceof Error ? err.message : String(err);
+          sections.push(`(ARP-based discovery skipped — ${detail || "no anchor device available"})`);
+        }
 
         if (candidates.size === 0) {
           sections.push("No candidate IPs. Provide ipRange (e.g., '192.168.1.1-254').");

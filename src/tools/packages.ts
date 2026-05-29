@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Package Tools — App installation, management, and permissions.
  */
@@ -5,7 +7,7 @@
 import { z } from "zod";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArg, validateShellArgs } from "../middleware/sanitize.js";
+import { validateShellArg, validateShellArgs, shellQuote } from "../middleware/sanitize.js";
 
 export function registerPackageTools(ctx: ToolContext): void {
 
@@ -96,7 +98,7 @@ export function registerPackageTools(ctx: ToolContext): void {
     "adb_package_info",
     "Get detailed info about an installed package (version, permissions, paths)",
     {
-      packageName: z.string().describe("Package name"),
+      packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
       device: z.string().optional().describe("Device serial"),
     },
     async ({ packageName, device }) => {
@@ -104,7 +106,7 @@ export function registerPackageTools(ctx: ToolContext): void {
         const pkgErr = validateShellArg(packageName, "packageName");
         if (pkgErr) return { content: [{ type: "text", text: pkgErr }], isError: true };
         const resolved = await ctx.deviceManager.resolveDevice(device);
-        const result = await ctx.bridge.shell(`dumpsys package ${packageName}`, { device: resolved.serial });
+        const result = await ctx.bridge.shell(`dumpsys package ${shellQuote(packageName)}`, { device: resolved.serial });
         return { content: [{ type: "text", text: OutputProcessor.process(result.stdout) }] };
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
@@ -114,17 +116,22 @@ export function registerPackageTools(ctx: ToolContext): void {
 
   ctx.server.tool(
     "adb_clear_data",
-    "Clear all data for a package (equivalent to clearing storage in settings)",
+    "Clear all data for a package (equivalent to clearing storage in settings). DESTRUCTIVE — irreversibly wipes all app data, cache, databases, shared preferences, and login state. AP5 fix: requires `confirm: <packageName>` to proceed.",
     {
-      packageName: z.string().describe("Package name"),
+      packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
+      confirm: z.string().optional().describe("Must equal packageName to confirm the destructive operation. AP5 fix: prevents accidental data loss from misclicks/mistyped invocations."),
       device: z.string().optional().describe("Device serial"),
     },
-    async ({ packageName, device }) => {
+    async ({ packageName, confirm, device }) => {
       try {
         const pkgErr = validateShellArg(packageName, "packageName");
         if (pkgErr) return { content: [{ type: "text", text: pkgErr }], isError: true };
+        // AP5 fix: confirm guard
+        if (confirm !== packageName) {
+          return { content: [{ type: "text", text: `Refusing to clear data for "${packageName}" without confirmation. This action wipes all app data, cache, databases, and login state — it cannot be undone. To proceed, pass \`confirm: "${packageName}"\` as a parameter.` }], isError: true };
+        }
         const resolved = await ctx.deviceManager.resolveDevice(device);
-        const result = await ctx.bridge.shell(`pm clear ${packageName}`, { device: resolved.serial });
+        const result = await ctx.bridge.shell(`pm clear ${shellQuote(packageName)}`, { device: resolved.serial });
         return { content: [{ type: "text", text: result.stdout.trim() }] };
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
@@ -136,7 +143,7 @@ export function registerPackageTools(ctx: ToolContext): void {
     "adb_grant_permission",
     "Grant a runtime permission to a package",
     {
-      packageName: z.string().describe("Package name"),
+      packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
       permission: z.string().describe("Full permission string (e.g., 'android.permission.READ_PHONE_STATE')"),
       device: z.string().optional().describe("Device serial"),
     },
@@ -260,7 +267,7 @@ export function registerPackageTools(ctx: ToolContext): void {
         const pkgErr = validateShellArg(packageName, "packageName");
         if (pkgErr) return { content: [{ type: "text", text: pkgErr }], isError: true };
         const resolved = await ctx.deviceManager.resolveDevice(device);
-        await ctx.bridge.shell(`am force-stop ${packageName}`, { device: resolved.serial });
+        await ctx.bridge.shell(`am force-stop ${shellQuote(packageName)}`, { device: resolved.serial });
         return { content: [{ type: "text", text: `Force-stopped: ${packageName}` }] };
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
@@ -310,7 +317,7 @@ export function registerPackageTools(ctx: ToolContext): void {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
         // Force stop
-        await ctx.bridge.shell(`am force-stop ${packageName}`, { device: serial });
+        await ctx.bridge.shell(`am force-stop ${shellQuote(packageName)}`, { device: serial });
         // Brief settle
         await new Promise((r) => setTimeout(r, delayMs));
         // Re-launch
@@ -341,7 +348,7 @@ export function registerPackageTools(ctx: ToolContext): void {
         if (pkgErr) return { content: [{ type: "text", text: pkgErr }], isError: true };
         const resolved = await ctx.deviceManager.resolveDevice(device);
         // Get the full package dump and extract resolver sections
-        const result = await ctx.bridge.shell(`dumpsys package ${packageName}`, {
+        const result = await ctx.bridge.shell(`dumpsys package ${shellQuote(packageName)}`, {
           device: resolved.serial, timeout: 15000,
         });
         const dump = result.stdout;

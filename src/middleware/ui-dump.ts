@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * UI Dump Utilities — Shared uiautomator XML capture and attribute parsing.
  *
@@ -6,8 +8,8 @@
  */
 
 import { AdbBridge } from "../bridge/adb-bridge.js";
-import { isOnDevice } from "../config/config.js";
-import { shellEscape } from "./sanitize.js";
+import { shellQuote } from "./sanitize.js";
+import { randomBytes } from "crypto";
 
 /**
  * Pre-compiled regexes for uiautomator XML attribute extraction.
@@ -45,14 +47,32 @@ export async function captureUiDump(
   serial: string,
   dumpPath?: string,
 ): Promise<string | null> {
-  // On-device: use /data/local/tmp/ which is world-readable/writable — avoids
-  // scoped storage issues with /sdcard/ on Android 16+.
-  // ADB mode: use /sdcard/ which is the standard ADB scratch location.
-  const defaultDir = isOnDevice() ? "/data/local/tmp" : "/sdcard";
-  const path = dumpPath ?? `${defaultDir}/DA_uidump_${Date.now()}.xml`;
+  // Use /data/local/tmp on the device — owned by the shell user, readable
+  // and writable in both rooted on-device and standard ADB modes, and not
+  // affected by Android 16+ scoped storage on /sdcard.
+  //
+  // Default filename embeds pid + timestamp + 4 random bytes so concurrent
+  // captureUiDump() calls cannot collide on the same path. Without the random
+  // suffix, two calls within the same millisecond (plausible under MCP tool
+  // fan-out) would write to the same file and race on read/cleanup.
+  const defaultDir = "/data/local/tmp";
+  const suffix = randomBytes(4).toString("hex");
+  // L1 fix: if a caller supplies dumpPath, ensure it stays under
+  // /data/local/tmp or /sdcard. Without this, a buggy caller could pass
+  // e.g., /system/etc/hostile.xml — uiautomator dump runs as shell user
+  // which can write some places it shouldn't be using as scratch. The
+  // device-side rm in the finally block would then delete from those
+  // places. Restricting to known scratch dirs eliminates the misuse.
+  if (dumpPath !== undefined) {
+    const allowed = ["/data/local/tmp/", "/sdcard/"];
+    if (!allowed.some(prefix => dumpPath.startsWith(prefix))) {
+      throw new Error(`captureUiDump dumpPath must start with one of ${allowed.join(", ")}; got: ${dumpPath}`);
+    }
+  }
+  const path = dumpPath ?? `${defaultDir}/DA_uidump_${process.pid}_${Date.now()}_${suffix}.xml`;
   try {
-    await bridge.shell(`uiautomator dump '${shellEscape(path)}'`, { device: serial, timeout: 15000 });
-    const catResult = await bridge.shell(`cat '${shellEscape(path)}'`, { device: serial });
+    await bridge.shell(`uiautomator dump ${shellQuote(path)}`, { device: serial, timeout: 15000 });
+    const catResult = await bridge.shell(`cat ${shellQuote(path)}`, { device: serial });
 
     const xml = catResult.stdout;
     if (!xml || xml.includes("ERROR") || !xml.includes("<hierarchy")) {
@@ -61,7 +81,7 @@ export async function captureUiDump(
     return xml;
   } finally {
     // Always clean up the device-side dump file, even if cat/dump throws
-    await bridge.shell(`rm '${shellEscape(path)}'`, { device: serial, ignoreExitCode: true }).catch(() => {});
+    await bridge.shell(`rm ${shellQuote(path)}`, { device: serial, ignoreExitCode: true }).catch(() => {});
   }
 }
 

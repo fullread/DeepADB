@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Device Profile Library — Device-specific knowledge base.
  *
@@ -14,7 +16,8 @@
 
 import { z } from "zod";
 import { join } from "path";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from "fs";
+import { readFileSync, existsSync, readdirSync} from "fs";
+import { ensurePrivateDir, sanitizeFilenameComponent, writeAtomicSync} from "../middleware/fs-utils.js";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { MODEM_PATHS, detectChipsetFamily, detectSimConfig } from "../middleware/chipset.js";
@@ -166,7 +169,7 @@ export function registerDeviceProfileTools(ctx: ToolContext): void {
         // Probe modem device nodes using shared MODEM_PATHS
         const paths = MODEM_PATHS[family] ?? MODEM_PATHS.generic;
         let existingNodes: string[] = [];
-        let respondingPort: string | null = null;
+        const respondingPort: string | null = null;
 
         if (rootAvailable) {
           const existCmd = paths.map((p) => `test -e ${p} && echo "EXISTS:${p}"`).join("; ");
@@ -222,10 +225,10 @@ export function registerDeviceProfileTools(ctx: ToolContext): void {
         // Save if requested
         if (save) {
           const dir = getProfileDir(ctx.config.tempDir);
-          if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-          const safeName = profile.device.replace(/[^a-zA-Z0-9_-]/g, "_");
+          if (!existsSync(dir)) ensurePrivateDir(dir);
+          const safeName = sanitizeFilenameComponent(profile.device);
           const filePath = join(dir, `${safeName}.json`);
-          writeFileSync(filePath, JSON.stringify(profile, null, 2));
+          writeAtomicSync(filePath, JSON.stringify(profile, null, 2));
           profile.quirks.push(`(saved to ${filePath})`);
         }
 
@@ -267,6 +270,39 @@ export function registerDeviceProfileTools(ctx: ToolContext): void {
     }
   );
 
+  // Z1 fix: Zod schema for DeviceProfile so save-time validation rejects
+  // malformed payloads (wrong types, missing required fields, mistyped
+  // booleans, etc.). Uses z.looseObject() (the Zod 4 replacement for the
+  // deprecated z.object().passthrough() pattern) so extra fields are kept
+  // as the structure evolves while the known fields stay locked. The
+  // optional sections match the Partial<DeviceProfile> shape used by
+  // built-in profiles.
+  const deviceProfileSchema = z.looseObject({
+    name: z.string().min(1),
+    timestamp: z.string().optional(),
+    source: z.enum(["auto-detected", "manual", "built-in"]).optional(),
+    model: z.string().optional(),
+    manufacturer: z.string().optional(),
+    device: z.string().optional(),
+    hardware: z.string().optional(),
+    boardPlatform: z.string().optional(),
+    chipname: z.string().optional(),
+    socModel: z.string().optional(),
+    chipsetFamily: z.string().optional(),
+    basebandVersion: z.string().optional(),
+    rilImplementation: z.string().optional(),
+    modemDeviceNodes: z.array(z.string()).optional(),
+    respondingAtPort: z.string().nullable().optional(),
+    rootAvailable: z.boolean().optional(),
+    androidVersion: z.string().optional(),
+    sdkLevel: z.number().int().min(1).max(99).optional(),
+    abPartition: z.boolean().optional(),
+    supports5G: z.boolean().optional(),
+    dualSim: z.boolean().optional(),
+    simSlots: z.number().int().min(0).max(8).optional(),
+    quirks: z.array(z.string()).optional(),
+  });
+
   ctx.server.tool(
     "adb_profile_save",
     "Save a device profile to the profiles library. Use after adb_profile_detect to persist the profile, or create a manual profile with custom quirks and notes.",
@@ -276,19 +312,47 @@ export function registerDeviceProfileTools(ctx: ToolContext): void {
     },
     async ({ name, profile }) => {
       try {
+        // Z5 fix: cap profile string size at 1 MB. A profile JSON has no
+        // legitimate reason to exceed ~10 KB (manufacturer/model strings,
+        // ~20 properties); 1 MB is a cheap defense against an operator
+        // typo or paste mistake filling the temp directory.
+        const Z5_MAX_PROFILE_BYTES = 1024 * 1024;
+        if (profile.length > Z5_MAX_PROFILE_BYTES) {
+          return { content: [{ type: "text", text: `Profile JSON too large (${profile.length} bytes, max ${Z5_MAX_PROFILE_BYTES}). Real device profiles should be under ~10 KB; if you intentionally need to store more, increase the cap in device-profiles.ts.` }], isError: true };
+        }
         let parsed: unknown;
         try {
           parsed = JSON.parse(profile);
         } catch (err) {
           return { content: [{ type: "text", text: `Invalid JSON: ${err instanceof Error ? err.message : err}` }], isError: true };
         }
+        // Z1 fix: validate against schema after JSON parse
+        const validation = deviceProfileSchema.safeParse(parsed);
+        if (!validation.success) {
+          const issues = validation.error.issues.map(i => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+          return { content: [{ type: "text", text: `Profile schema validation failed: ${issues}` }], isError: true };
+        }
+        const validated = validation.data;
+
+        // Z2 fix: validate that the `name` parameter (filename) matches
+        // `profile.name` (internal field). Divergence creates confusing
+        // listings where adb_profile_list shows one name but the file
+        // is called something else. If the operator omits `profile.name`
+        // we auto-derive from `name`; if it's present and differs, reject.
+        if (validated.name && validated.name !== name) {
+          return { content: [{ type: "text", text: `Profile name mismatch: parameter "name" is "${name}" but profile.name is "${validated.name}". They must match, or omit profile.name and it will be auto-derived from the parameter.` }], isError: true };
+        }
+        if (!validated.name) {
+          validated.name = name;
+        }
+        const parsedFinal = validated;
 
         const dir = getProfileDir(ctx.config.tempDir);
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        if (!existsSync(dir)) ensurePrivateDir(dir);
 
-        const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_");
+        const safeName = sanitizeFilenameComponent(name);
         const filePath = join(dir, `${safeName}.json`);
-        writeFileSync(filePath, JSON.stringify(parsed, null, 2));
+        writeAtomicSync(filePath, JSON.stringify(parsedFinal, null, 2));
 
         return { content: [{ type: "text", text: `Profile saved: ${filePath}` }] };
       } catch (error) {

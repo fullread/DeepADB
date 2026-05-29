@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Log Tools — Logcat capture with filtering, tag selection, and snapshots.
  */
@@ -5,7 +7,8 @@
 import { z } from "zod";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArg, shellEscape } from "../middleware/sanitize.js";
+import { resultHandleSchemaFields, withResultHandle } from "./result-handles.js";
+import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 
 export function registerLogTools(ctx: ToolContext): void {
 
@@ -21,8 +24,9 @@ export function registerLogTools(ctx: ToolContext): void {
       device: z.string().optional().describe("Device serial"),
       buffer: z.enum(["main", "system", "crash", "events", "all"]).optional().default("main")
         .describe("Logcat buffer to read from"),
+      ...resultHandleSchemaFields,
     },
-    async ({ lines, tag, priority, grep, device, buffer }) => {
+    async ({ lines, tag, priority, grep, device, buffer, result_handle, result_handle_ttl }) => {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const maxLines = Math.min(lines, ctx.config.maxLogcatLines);
@@ -45,14 +49,18 @@ export function registerLogTools(ctx: ToolContext): void {
           cmd += ` *:${priority}`;
         }
         if (grep) {
-          cmd += ` | grep -iF '${shellEscape(grep)}'`;
+          cmd += ` | grep -iF ${shellQuote(grep)}`;
         }
         const result = await ctx.bridge.shell(cmd, { device: resolved.serial, timeout: 15000 });
         const output = result.stdout.trim();
         if (!output) {
           return { content: [{ type: "text", text: "No log entries matching the filter." }] };
         }
-        return { content: [{ type: "text", text: OutputProcessor.process(output) }] };
+        return withResultHandle(
+          { content: [{ type: "text" as const, text: OutputProcessor.process(output) }] },
+          "logcat",
+          { result_handle, result_handle_ttl },
+        );
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
       }

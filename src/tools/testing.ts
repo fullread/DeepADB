@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Test Session Tools — Structured test workflow organization.
  * 
@@ -7,11 +9,11 @@
 
 import { z } from "zod";
 import { join } from "path";
-import { mkdirSync, writeFileSync } from "fs";
+import { writeFileSync } from "fs";
+import { ensurePrivateDir, sanitizeFilenameComponent } from "../middleware/fs-utils.js";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { isOnDevice } from "../config/config.js";
-import { shellEscape } from "../middleware/sanitize.js";
+import { shellQuote } from "../middleware/sanitize.js";
 
 interface TestSession {
   name: string;
@@ -24,6 +26,16 @@ interface TestSession {
 }
 
 /** Active test session. Only one at a time. */
+// BE6 note: single-session global state. The MCP server runs a single-
+// threaded JS event loop, so the only theoretical race is the gap between
+// the `if (activeSession)` check at session-start and the assignment a few
+// lines down — across that gap, the awaited `resolveDevice` call can yield
+// to another concurrent tool invocation. Operator workflows are sequential
+// in practice (the operator types one command and waits), so this race
+// has never been observed. Tightening would mean writing a sentinel
+// before the await; left as-is because the cost (lock-contention complexity)
+// outweighs the realistic risk. If a future use case wants multiple
+// concurrent sessions, replace this with a Map<sessionId, TestSession>.
 let activeSession: TestSession | null = null;
 
 export function registerTestingTools(ctx: ToolContext): void {
@@ -46,11 +58,11 @@ export function registerTestingTools(ctx: ToolContext): void {
 
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-").substring(0, 19);
-        const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_");
+        const safeName = sanitizeFilenameComponent(name);
         const dirName = `${safeName}_${timestamp}`;
         const directory = join(ctx.config.tempDir, "tests", dirName);
 
-        mkdirSync(directory, { recursive: true });
+        ensurePrivateDir(directory);
 
         // Clear logcat so our captures start fresh
         await ctx.bridge.shell("logcat -c", { device: resolved.serial, ignoreExitCode: true });
@@ -100,20 +112,26 @@ export function registerTestingTools(ctx: ToolContext): void {
         const session = activeSession;
         session.stepCount++;
         const stepNum = String(session.stepCount).padStart(3, "0");
-        const stepPrefix = `${stepNum}_${description.replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 40)}`;
+        const stepPrefix = `${stepNum}_${sanitizeFilenameComponent(description, 40)}`;
         const results: string[] = [`Step ${stepNum}: ${description}`];
 
         // Screenshot
         if (captureScreenshot) {
           const screenshotFile = `${stepPrefix}.png`;
-          const remoteDir = isOnDevice() ? "/data/local/tmp" : "/sdcard";
-          const remotePath = `${remoteDir}/DA_test_${stepNum}.png`;
+          const remoteDir = "/data/local/tmp";
+          // BE7 note: step screenshot remote path does NOT include PID or
+        // `Date.now()` uniqueness. Safe because activeSession is enforced
+        // to be single (BE6 above), so two concurrent sessions cannot exist
+        // and therefore cannot collide on stepNum. If multi-session support
+        // is ever added, this path must adopt the collision-defense pattern
+        // from middleware/ui-dump.ts captureUiDump (process.pid + Date.now + randomBytes).
+        const remotePath = `${remoteDir}/DA_test_${stepNum}.png`;
           const localPath = join(session.directory, screenshotFile);
           try {
-            await ctx.bridge.shell(`screencap -p '${shellEscape(remotePath)}'`, { device: session.device, timeout: 15000 });
+            await ctx.bridge.shell(`screencap -p ${shellQuote(remotePath)}`, { device: session.device, timeout: 15000 });
             await ctx.bridge.exec(["pull", remotePath, localPath], { device: session.device, timeout: 30000 });
           } finally {
-            await ctx.bridge.shell(`rm '${shellEscape(remotePath)}'`, { device: session.device, ignoreExitCode: true }).catch(() => {});
+            await ctx.bridge.shell(`rm ${shellQuote(remotePath)}`, { device: session.device, ignoreExitCode: true }).catch(() => {});
           }
           results.push(`Screenshot: ${screenshotFile}`);
         }

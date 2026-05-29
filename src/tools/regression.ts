@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Regression Detection Tools — Automated comparison of device state over time.
  *
@@ -8,11 +10,11 @@
 
 import { z } from "zod";
 import { join } from "path";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from "fs";
+import { readFileSync, existsSync, readdirSync } from "fs";
+import { ensurePrivateDir, writeAtomicSync, sanitizeFilenameComponent, sanitizeFilenameComponentDotted, isWithinDir, tryReadJsonOrWarn} from "../middleware/fs-utils.js";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArg } from "../middleware/sanitize.js";
-
+import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 interface PerfBaseline {
   timestamp: string;
   device: string;
@@ -30,18 +32,53 @@ function getBaselineDir(tempDir: string): string {
   return join(tempDir, "regression");
 }
 
-function parseMemoryKb(output: string): number | null {
-  const match = output.match(/TOTAL[:\s]+(\d+)/);
+/**
+ * AU7 fix: parser hardening + export for testability.
+ *
+ * dumpsys output format varies by Android version. The original regex
+ * /TOTAL[:\s]+(\d+)/ matched A11's "TOTAL:   215644" but FAILED on A12+
+ * which emits "TOTAL PSS:   215644            TOTAL RSS:   281392".
+ * The space between TOTAL and PSS broke the greedy [:\s]+ since it
+ * expects a digit immediately after, but found 'P'.
+ *
+ * Robust regex: optionally accepts "TOTAL PSS:" (A12+), "TOTAL:" (A11),
+ * with the PSS suffix being the canonical memory metric across all
+ * versions. Falls back to first TOTAL match if no PSS qualifier present.
+ */
+export function parseMemoryKb(output: string): number | null {
+  // Prefer "TOTAL PSS:" (A12+ canonical form)
+  let match = output.match(/TOTAL\s+PSS[:\s]+(\d+)/);
+  if (match) return parseInt(match[1], 10);
+  // Fall back to bare "TOTAL:" (A11 form)
+  match = output.match(/TOTAL[:\s]+(\d+)/);
   return match ? parseInt(match[1], 10) : null;
 }
 
-function parseCpuPercent(output: string, pkg: string): number | null {
+/**
+ * parseCpuPercent — extract CPU% for a package from `dumpsys cpuinfo`.
+ *
+ * Format is stable across A11-A14: each line is roughly
+ *   "  3.4% 12345/com.example.app: 2.1% user + 1.3% kernel / faults: ..."
+ * but the leading whitespace and field ordering can vary slightly. The
+ * regex captures the leading percentage and matches it against the
+ * line containing the package name.
+ */
+export function parseCpuPercent(output: string, pkg: string): number | null {
   const escapedPkg = pkg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = output.match(new RegExp(`(\\d+\\.?\\d*)%.*${escapedPkg}`));
   return match ? parseFloat(match[1]) : null;
 }
 
-function parseFrameStats(output: string): { total: number | null; janky: number | null } {
+/**
+ * parseFrameStats — extract frame counters from `dumpsys gfxinfo`.
+ *
+ * Format is stable across A11-A14:
+ *   "Total frames rendered: 1234"
+ *   "Janky frames: 56 (4.54%)"
+ * The percentage suffix on the janky line doesn't interfere since the
+ * regex captures only the integer.
+ */
+export function parseFrameStats(output: string): { total: number | null; janky: number | null } {
   const totalMatch = output.match(/Total frames rendered:\s*(\d+)/);
   const jankyMatch = output.match(/Janky frames:\s*(\d+)/);
   return {
@@ -73,9 +110,9 @@ export function registerRegressionTools(ctx: ToolContext): void {
         const serial = resolved.serial;
 
         const [memResult, cpuResult, gfxResult, batteryResult, netTypeResult] = await Promise.allSettled([
-          ctx.bridge.shell(`dumpsys meminfo ${packageName} | grep TOTAL`, { device: serial, timeout: 10000, ignoreExitCode: true }),
-          ctx.bridge.shell(`dumpsys cpuinfo | grep -F ${packageName}`, { device: serial, timeout: 10000, ignoreExitCode: true }),
-          ctx.bridge.shell(`dumpsys gfxinfo ${packageName} | grep -E 'Total frames|Janky frames'`, { device: serial, timeout: 10000, ignoreExitCode: true }),
+          ctx.bridge.shell(`dumpsys meminfo ${shellQuote(packageName)} | grep TOTAL`, { device: serial, timeout: 10000, ignoreExitCode: true }),
+          ctx.bridge.shell(`dumpsys cpuinfo | grep -F ${shellQuote(packageName)}`, { device: serial, timeout: 10000, ignoreExitCode: true }),
+          ctx.bridge.shell(`dumpsys gfxinfo ${shellQuote(packageName)} | grep -E 'Total frames|Janky frames'`, { device: serial, timeout: 10000, ignoreExitCode: true }),
           ctx.bridge.shell("dumpsys battery", { device: serial, timeout: 5000, ignoreExitCode: true }),
           ctx.bridge.shell("getprop gsm.network.type", { device: serial, ignoreExitCode: true }),
         ]);
@@ -101,12 +138,12 @@ export function registerRegressionTools(ctx: ToolContext): void {
         };
 
         const dir = getBaselineDir(ctx.config.tempDir);
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-        const safeLabel = label.replace(/[^a-zA-Z0-9_-]/g, "_");
-        const safePkg = packageName.replace(/[^a-zA-Z0-9_.-]/g, "_");
+        if (!existsSync(dir)) ensurePrivateDir(dir);
+        const safeLabel = sanitizeFilenameComponent(label);
+        const safePkg = sanitizeFilenameComponentDotted(packageName);
         const filename = `${safePkg}_${safeLabel}_${Date.now()}.json`;
         const filePath = join(dir, filename);
-        writeFileSync(filePath, JSON.stringify(baseline, null, 2));
+        writeAtomicSync(filePath, JSON.stringify(baseline, null, 2));
 
         const summary: string[] = [`Baseline captured: ${label}`];
         summary.push(`Package: ${packageName}`);
@@ -136,6 +173,9 @@ export function registerRegressionTools(ctx: ToolContext): void {
     },
     async ({ baselinePath, memoryThreshold, cpuThreshold, jankThreshold, device }) => {
       try {
+        if (!isWithinDir(baselinePath, ctx.config.tempDir)) {
+          return { content: [{ type: "text", text: `Baseline path must be inside the temp directory (${ctx.config.tempDir}). Got: ${baselinePath}` }], isError: true };
+        }
         if (!existsSync(baselinePath)) {
           return { content: [{ type: "text", text: `Baseline not found: ${baselinePath}` }], isError: true };
         }
@@ -147,9 +187,9 @@ export function registerRegressionTools(ctx: ToolContext): void {
         const pkg = baseline.packageName;
 
         const [memResult, cpuResult, gfxResult] = await Promise.allSettled([
-          ctx.bridge.shell(`dumpsys meminfo ${pkg} | grep TOTAL`, { device: serial, timeout: 10000, ignoreExitCode: true }),
-          ctx.bridge.shell(`dumpsys cpuinfo | grep -F ${pkg}`, { device: serial, timeout: 10000, ignoreExitCode: true }),
-          ctx.bridge.shell(`dumpsys gfxinfo ${pkg} | grep -E 'Total frames|Janky frames'`, { device: serial, timeout: 10000, ignoreExitCode: true }),
+          ctx.bridge.shell(`dumpsys meminfo ${shellQuote(pkg)} | grep TOTAL`, { device: serial, timeout: 10000, ignoreExitCode: true }),
+          ctx.bridge.shell(`dumpsys cpuinfo | grep -F ${shellQuote(pkg)}`, { device: serial, timeout: 10000, ignoreExitCode: true }),
+          ctx.bridge.shell(`dumpsys gfxinfo ${shellQuote(pkg)} | grep -E 'Total frames|Janky frames'`, { device: serial, timeout: 10000, ignoreExitCode: true }),
         ]);
 
         const memOut = memResult.status === "fulfilled" ? memResult.value.stdout : "";
@@ -225,14 +265,14 @@ export function registerRegressionTools(ctx: ToolContext): void {
           return { content: [{ type: "text", text: "No regression baselines found." }] };
         }
 
+        // AU6 fix: route through tryReadJsonOrWarn so corrupt baselines
+        // surface via ctx.logger.warn rather than being silently dropped.
         const baselines: PerfBaseline[] = [];
         for (const file of files) {
-          try {
-            const data: PerfBaseline = JSON.parse(readFileSync(join(dir, file), "utf-8"));
-            if (!packageName || data.packageName === packageName) {
-              baselines.push(data);
-            }
-          } catch { /* skip corrupt files */ }
+          const data = tryReadJsonOrWarn<PerfBaseline>(join(dir, file), "regression_history", ctx.logger);
+          if (data && (!packageName || data.packageName === packageName)) {
+            baselines.push(data);
+          }
         }
 
         if (baselines.length === 0) {

@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Wireless Tools — WiFi-based ADB: pair, connect, disconnect.
  * Enables untethered device interaction for field testing.
@@ -7,13 +9,48 @@ import { z } from "zod";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 
+/**
+ * N1: Host format validation for adb wireless commands.
+ *
+ * ADB accepts `host:port` where host is an IPv4 literal, a bracketed IPv6
+ * literal, or a DNS name. The previous schema (`z.string()`) accepted any
+ * string and relied on adb's own argv-style invocation to be injection-safe,
+ * which it is — but a bad value still produced a confusing low-level adb
+ * error rather than a clear schema error. This regex catches obvious
+ * mistakes (missing port, stray whitespace, non-host characters) before
+ * we ever shell out.
+ *
+ * Pattern accepts:
+ *   IPv4:port      — 192.168.1.100:5555
+ *   [IPv6]:port    — [fe80::1]:5555
+ *   hostname:port  — phone.local:5555, my-pixel:41567
+ *
+ * Port: 1-65535 (5 digits max). The regex does not range-check the digit
+ * value; adb itself will reject port 0 or > 65535 at invocation time.
+ */
+/**
+ * BI5 note: this regex does NOT range-check IPv4 octets (must be 0-255)
+ * or the port (must be 1-65535). `999.999.999.999:99999` passes this
+ * regex. Acceptable degradation: adb itself rejects invalid port numbers
+ * at invocation time (`failed to parse port number`) and IP misconfig
+ * surfaces as a connection-refused error. A tighter regex matching the
+ * full octet alternation would be 4× longer (`(?:25[0-5]|2[0-4]\d|[01]?\d\d?)`)
+ * with no real security benefit — this is a syntax check, not a network
+ * validator. The intent is to catch shell-metacharacter smuggling, which
+ * is what the bracket-delimited character classes accomplish.
+ */
+const HOST_PORT_RE = /^(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[[0-9a-fA-F:]+\]|[a-zA-Z0-9][a-zA-Z0-9.-]*):\d{1,5}$/;
+const HOST_PORT_MSG = "Expected 'host:port' format — e.g., '192.168.1.100:5555', '[fe80::1]:5555', or 'phone.local:5555'.";
+const hostSchema = z.string().regex(HOST_PORT_RE, HOST_PORT_MSG);
+const hostSchemaOptional = z.string().regex(HOST_PORT_RE, HOST_PORT_MSG).optional();
+
 export function registerWirelessTools(ctx: ToolContext): void {
 
   ctx.server.tool(
     "adb_pair",
     "Pair with a device over WiFi using the pairing code from Developer Options → Wireless debugging → Pair device",
     {
-      host: z.string().describe("Device IP and pairing port (e.g., '192.168.1.100:37123')"),
+      host: hostSchema.describe("Device IP and pairing port (e.g., '192.168.1.100:37123')"),
       code: z.string().describe("6-digit pairing code shown on the device"),
     },
     async ({ host, code }) => {
@@ -35,7 +72,7 @@ export function registerWirelessTools(ctx: ToolContext): void {
     "adb_connect",
     "Connect to a device over WiFi/TCP. Device must be paired first or have TCP/IP enabled.",
     {
-      host: z.string().describe("Device IP and port (e.g., '192.168.1.100:5555' or '192.168.1.100:41567')"),
+      host: hostSchema.describe("Device IP and port (e.g., '192.168.1.100:5555' or '192.168.1.100:41567')"),
     },
     async ({ host }) => {
       try {
@@ -55,7 +92,7 @@ export function registerWirelessTools(ctx: ToolContext): void {
     "adb_disconnect",
     "Disconnect from a wireless device, or all wireless devices if no host specified",
     {
-      host: z.string().optional().describe("Device IP:port to disconnect (omit for all)"),
+      host: hostSchemaOptional.describe("Device IP:port to disconnect (omit for all)"),
     },
     async ({ host }) => {
       try {

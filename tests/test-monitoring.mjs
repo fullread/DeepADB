@@ -1,10 +1,105 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Monitoring & Workflows Test Suite — Logcat watchers, snapshots, OTA, regression, workflows.
  * Tests lifecycle operations: start → interact → stop patterns.
  */
 import { createHarness } from "./lib/harness.mjs";
+import { parseMemoryKb, parseCpuPercent, parseFrameStats } from "../build/tools/regression.js";
 
 const h = await createHarness("Monitoring & Workflows");
+
+// ── AU7 Regression Parser Unit Tests ──────────────────────────
+// Synthesized dumpsys output across Android version variants. The parsers
+// must produce the expected values for each version, or the parser hardening
+// regresses silently. These are pure unit tests — no device required.
+
+h.section("AU7: Regression Parsers (Android version coverage)");
+
+// parseMemoryKb fixtures — dumpsys meminfo "TOTAL" line variants
+const memA11 = `** MEMINFO in pid 1234 [com.example.app] **
+                   Pss  Private  Private     Swap      Rss     Heap     Heap     Heap
+                 Total    Dirty    Clean    Dirty    Total     Size    Alloc     Free
+                ------   ------   ------   ------   ------   ------   ------   ------
+  Native Heap    12345    12000      0         0    24000    32000    20000    12000
+                   ====
+         TOTAL:   215644   TOTAL SWAP PSS:        0`;
+
+const memA12 = `** MEMINFO in pid 1234 [com.example.app] **
+                   Pss  Private  Private     Swap      Rss     Heap     Heap     Heap
+                 Total    Dirty    Clean    Dirty    Total     Size    Alloc     Free
+                ------   ------   ------   ------   ------   ------   ------   ------
+  Native Heap    12345    12000      0         0    24000    32000    20000    12000
+                   ====
+         TOTAL PSS:   215644            TOTAL RSS:   281392     TOTAL SWAP PSS:       0`;
+
+const memA13 = `** MEMINFO in pid 1234 [com.example.app] **
+  Native Heap    12345    12000      0         0    24000    32000    20000    12000
+                   ====
+         TOTAL PSS:   194512            TOTAL RSS:   263460     TOTAL SWAP PSS:    1234`;
+
+const memA14 = `** MEMINFO in pid 1234 [com.example.app] **
+  Native Heap    12345    12000      0         0    24000    32000    20000    12000
+                   ====
+         TOTAL PSS:   178900            TOTAL RSS:   245112     TOTAL SWAP PSS:     876`;
+
+h.assertEq("parseMemoryKb: A11 'TOTAL:' format", parseMemoryKb(memA11), 215644);
+h.assertEq("parseMemoryKb: A12 'TOTAL PSS:' format", parseMemoryKb(memA12), 215644);
+h.assertEq("parseMemoryKb: A13 'TOTAL PSS:' format", parseMemoryKb(memA13), 194512);
+h.assertEq("parseMemoryKb: A14 'TOTAL PSS:' format", parseMemoryKb(memA14), 178900);
+h.assertEq("parseMemoryKb: empty input returns null", parseMemoryKb(""), null);
+h.assertEq("parseMemoryKb: no TOTAL line returns null", parseMemoryKb("garbage output\nno total here"), null);
+
+// parseCpuPercent fixtures — dumpsys cpuinfo line variants
+const cpuA11 = `Load: 1.23 / 0.97 / 0.85
+CPU usage from 4567ms to 0ms ago (2024-01-15 10:30:45.123 to 2024-01-15 10:30:49.690):
+  3.4% 12345/com.example.app: 2.1% user + 1.3% kernel / faults: 1234 minor 5 major
+  1.8% 6789/system_server: 1.2% user + 0.6% kernel / faults: 567 minor`;
+
+const cpuA12 = `CPU usage from 4567ms to 0ms ago:
+  5.2% 12345/com.example.app: 3.4% user + 1.8% kernel
+  2.1% 6789/system_server: 1.5% user + 0.6% kernel`;
+
+const cpuA13 = `CPU usage from 4567ms to 0ms ago:
+  4.7% 12345/com.example.app: 3.1% user + 1.6% kernel / faults: 234 minor
+  1.9% 6789/system_server: 1.3% user + 0.6% kernel`;
+
+h.assertEq("parseCpuPercent: A11 format", parseCpuPercent(cpuA11, "com.example.app"), 3.4);
+h.assertEq("parseCpuPercent: A12 format", parseCpuPercent(cpuA12, "com.example.app"), 5.2);
+h.assertEq("parseCpuPercent: A13 format", parseCpuPercent(cpuA13, "com.example.app"), 4.7);
+h.assertEq("parseCpuPercent: package not present returns null", parseCpuPercent(cpuA13, "com.nonexistent"), null);
+h.assertEq("parseCpuPercent: integer percentage parses correctly",
+  parseCpuPercent("  7% 12345/com.test:", "com.test"), 7);
+h.assertEq("parseCpuPercent: dotted package name escapes regex chars",
+  parseCpuPercent("  2.5% 999/co.uk.example.app:", "co.uk.example.app"), 2.5);
+
+// parseFrameStats fixtures — dumpsys gfxinfo format
+const gfxA11 = `Stats since: 12345678901ns
+Total frames rendered: 1234
+Janky frames: 56 (4.54%)
+50th percentile: 8ms
+90th percentile: 15ms`;
+
+const gfxA13 = `Stats since: 12345678901ns
+Total frames rendered: 9999
+Janky frames: 123 (1.23%)
+50th percentile: 6ms
+99th percentile: 33ms`;
+
+const gfxEmpty = "Stats since: 12345ns\n(no frames data)";
+
+const gfxA11Result = parseFrameStats(gfxA11);
+h.assertEq("parseFrameStats: A11 total", gfxA11Result.total, 1234);
+h.assertEq("parseFrameStats: A11 janky", gfxA11Result.janky, 56);
+
+const gfxA13Result = parseFrameStats(gfxA13);
+h.assertEq("parseFrameStats: A13 total", gfxA13Result.total, 9999);
+h.assertEq("parseFrameStats: A13 janky", gfxA13Result.janky, 123);
+
+const gfxEmptyResult = parseFrameStats(gfxEmpty);
+h.assertEq("parseFrameStats: no frames data → total null", gfxEmptyResult.total, null);
+h.assertEq("parseFrameStats: no frames data → janky null", gfxEmptyResult.janky, null);
+
 
 // ── Logcat Snapshots ───────────────────────────────────────
 

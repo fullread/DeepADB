@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Chipset Detection — Shared chipset family identification, modem path mapping,
  * and SIM configuration detection.
@@ -51,6 +53,14 @@ export const MODEM_PATHS: Record<string, string[]> = {
     "/dev/ttyACM0",
     "/dev/ttyACM1",
   ],
+  // J3 note: `/dev/ttyACM0` and `/dev/ttyACM1` appear in BOTH the `intel`
+  // and `generic` lists. If autodetect falls through to `generic` after
+  // `intel` failed, the same two paths get probed a second time. Callers
+  // (autoDetectAtPort, adb_at_detect) iterate and bail on first success,
+  // so the worst-case redundancy is two extra `test -e` calls — negligible.
+  // Intentional: keeps each family list self-sufficient if used standalone,
+  // and the generic fallback should be a superset, not require composition
+  // with the more-specific lists.
   // Generic USB/serial modems
   generic: [
     "/dev/ttyUSB0",
@@ -81,7 +91,12 @@ export function detectChipsetFamily(props: Record<string, string>): string {
   }
 
   // Qualcomm detection (includes platform codenames for recent SoCs)
-  if (platform.includes("msm") || platform.includes("sdm") || platform.includes("sm") ||
+  // J1 fix: `platform.includes("sm")` was overly broad — any string with
+  // the substring "sm" matched (samsung, cosmic, osmium, etc.). Tighten to
+  // require a digit immediately after "sm" (e.g., sm8550, sm7325) which is
+  // the actual Qualcomm naming convention. Other prefixes (msm, sdm, qcom)
+  // are specific enough to keep as substring matches.
+  if (platform.includes("msm") || platform.includes("sdm") || /\bsm\d/.test(platform) ||
       platform.includes("qcom") || chipname.includes("snapdragon") ||
       hardware.includes("qcom") || platform.includes("lahaina") ||
       platform.includes("taro") || platform.includes("kalama")) {

@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * UI & Device Control Test Suite — Screen interaction, UI analysis, and settings.
  * Tests: screencap, ui_dump, ui_find, current_activity, settings, screen, control toggles.

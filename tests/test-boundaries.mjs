@@ -1,9 +1,14 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Boundary & Error Handling Test Suite — Edge cases, Zod bounds enforcement,
  * input injection via adb_input, error paths, and tools with zero prior coverage.
  *
  * These tests validate defensive boundaries without requiring a connected device
- * for most checks (Zod rejection happens before device communication).
+ * for most checks (Zod rejection happens before device communication). The
+ * subset of assertions that do exercise a live device (package queries, data
+ * clears, APK extraction, baseband read, multi-device shell) auto-skip cleanly
+ * when no authorized device is attached — see the deviceAvailable probe below.
  */
 import { createHarness } from "./lib/harness.mjs";
 import { existsSync } from "fs";
@@ -14,6 +19,22 @@ const h = await createHarness("Boundaries & Error Handling");
 // differently in on-device mode (LocalBridge stubs wireless ops; shell
 // commands run as root rather than the shell user).
 const onDevice = existsSync("/data/data/com.termux");
+
+// Device-availability probe (mirrors test-result-handles.mjs). A handful of
+// assertions below run a tool against a live device; probe adb_devices for an
+// authorized "(device)" connection so those tests skip cleanly rather than fail
+// hard when no device is attached or USB debugging authorization has lapsed. In
+// on-device (Termux) mode the LocalBridge reports the local device, so this is
+// true there too.
+let deviceAvailable = false;
+try {
+  const dev = await h.callTool("adb_devices", {});
+  if (!h.isError(dev)) {
+    deviceAvailable = /\(device\)/.test(h.getText(dev));
+  }
+} catch {
+  deviceAvailable = false;
+}
 
 // ══════════════════════════════════════════════════════════
 // Zod Parameter Boundary Enforcement
@@ -121,8 +142,12 @@ await h.testRejects("Invalid device serial",
 
 // Package operations on nonexistent package — tool succeeds with empty dumpsys output
 // (this is correct behavior; dumpsys returns empty, not an error)
-await h.test("Package info for nonexistent package (graceful)",
-  "adb_package_info", { packageName: "com.nonexistent.fake.package.xyz" });
+if (deviceAvailable) {
+  await h.test("Package info for nonexistent package (graceful)",
+    "adb_package_info", { packageName: "com.nonexistent.fake.package.xyz" });
+} else {
+  h.skip("Package info for nonexistent package (graceful)", "no device authorized");
+}
 
 // getprop with empty key
 await h.testRejects("Settings get with empty key",
@@ -135,13 +160,30 @@ await h.testRejects("Settings get with empty key",
 h.section("Previously Untested Tools");
 
 // adb_clear_data — clear a known safe test package (if it existed, this is idempotent)
-// We test that the tool runs without crashing, even if the package has no data
-await h.test("Clear data (Magisk — safe, idempotent)", "adb_clear_data",
+// We test that the tool runs without crashing, even if the package has no data.
+// AP5 fix: now requires `confirm` parameter matching packageName.
+if (deviceAvailable) {
+  await h.test("Clear data (Magisk — safe, idempotent)", "adb_clear_data",
+    { packageName: "com.topjohnwu.magisk", confirm: "com.topjohnwu.magisk" });
+} else {
+  h.skip("Clear data (Magisk — safe, idempotent)", "no device authorized");
+}
+
+// AP5 regression: clear_data must reject when confirm omitted
+await h.testRejects("Clear data without confirm rejected (AP5)", "adb_clear_data",
   { packageName: "com.topjohnwu.magisk" });
 
+// AP5 regression: clear_data must reject when confirm doesn't match packageName
+await h.testRejects("Clear data with mismatched confirm rejected (AP5)", "adb_clear_data",
+  { packageName: "com.topjohnwu.magisk", confirm: "com.different.package" });
+
 // adb_extract_apks — extract splits for a known package
-await h.testContains("Extract APKs (Magisk)", "adb_extract_apks",
-  { packageName: "com.topjohnwu.magisk" }, "base.apk");
+if (deviceAvailable) {
+  await h.testContains("Extract APKs (Magisk)", "adb_extract_apks",
+    { packageName: "com.topjohnwu.magisk" }, "base.apk");
+} else {
+  h.skip("Extract APKs (Magisk)", "no device authorized");
+}
 
 // adb_snapshot_restore_settings — verify graceful error on nonexistent file
 await h.testRejects("Snapshot restore (nonexistent file → graceful error)", "adb_snapshot_restore_settings",
@@ -163,8 +205,12 @@ h.section("Sensitive Data Protection");
 
 // IMEI value should NOT appear by default — the tool shows an opt-in message instead.
 // Checking for "includeImei" confirms the IMEI was suppressed with an explanatory note.
-await h.testContains("Baseband IMEI hidden by default", "adb_baseband_info",
-  {}, "includeImei");
+if (deviceAvailable) {
+  await h.testContains("Baseband IMEI hidden by default", "adb_baseband_info",
+    {}, "includeImei");
+} else {
+  h.skip("Baseband IMEI hidden by default", "no device authorized");
+}
 
 // Health check should not leak internal paths or stack traces
 await h.testNotContains("Health check hides stack traces", "adb_health_check",
@@ -187,19 +233,31 @@ await h.testRejects("tcpip port below min (0)",
 await h.testRejects("tcpip port above max (99999)",
   "adb_tcpip", { port: 99999 });
 
-// adb_connect with a malformed host: adb CLI doesn't actually validate
-// the host string — it prints an error message to stdout but exits 0,
-// which the tool surfaces as a "success" with the error text inside.
-// Verify graceful handling (no crash) and that the output mentions
-// the failed host.
-// On-device mode: LocalBridge stubs adb_connect with a "not applicable"
-// message since there's no ADB server. Just verify it doesn't crash.
+// adb_connect graceful-error path (option C, post-N1/BI1 hardening):
+//
+// The HOST_PORT_RE schema regex now rejects obviously-malformed hosts
+// at the Zod boundary BEFORE adb is invoked — see wireless.ts HOST_PORT_RE (N1).
+// We test two distinct surfaces:
+//   1. Schema rejection of malformed input (regression for N1/BI1).
+//   2. Graceful runtime-error surfacing when the host parses but the
+//      target is unreachable. Use 127.0.0.1:1 — valid format, no
+//      listener, so connect() returns ECONNREFUSED immediately
+//      (avoids the blackhole-timeout problem of TEST-NET-1).
+//
+// On-device mode: LocalBridge stubs adb_connect with "not applicable"
+// since there's no ADB server. Schema rejection still applies.
+
+// Surface 1: schema rejection (N1/BI1 hardening).
+await h.testRejects("Connect with malformed host is rejected at schema (N1/BI1)",
+  "adb_connect", { host: "not-a-valid-host:format:here" });
+
+// Surface 2: runtime-error surfacing for valid-format-but-unreachable host.
 if (onDevice) {
-  await h.testContains("Connect to malformed host surfaces error (stub)",
-    "adb_connect", { host: "not-a-valid-host:format:here" }, "not applicable", 5000);
+  await h.testContains("Connect to unreachable host surfaces error (stub)",
+    "adb_connect", { host: "127.0.0.1:1" }, "not applicable", 5000);
 } else {
-  await h.testContains("Connect to malformed host surfaces error",
-    "adb_connect", { host: "not-a-valid-host:format:here" }, "not-a-valid-host", 5000);
+  await h.testContains("Connect to unreachable host surfaces error",
+    "adb_connect", { host: "127.0.0.1:1" }, "127.0.0.1", 5000);
 }
 
 // adb_disconnect with no host should succeed (disconnects all wireless)
@@ -232,12 +290,14 @@ h.section("Multi-Device — Basic");
 // LocalBridge, it returns the Termux app user (e.g. "u0_a287") or "root"
 // depending on elevation path. Rather than hardcode expected output, verify
 // the tool executed and produced some non-empty output.
-{
+if (deviceAvailable) {
   const res = await h.callTool("adb_multi_shell", { command: "whoami" });
   const out = h.getText(res);
   h.assert("multi_shell on single device (whoami)",
     !h.isError(res) && out.trim().length > 0,
     h.isError(res) ? `tool errored: ${out.substring(0, 120)}` : "empty output");
+} else {
+  h.skip("multi_shell on single device (whoami)", "no device authorized");
 }
 
 // adb_multi_compare requires ≥2 devices — rejection path
@@ -249,15 +309,23 @@ await h.testContains("multi_test lists profiles when no args",
   "adb_multi_test", {}, "firmware");
 
 // adb_multi_test with firmware profile runs safe read-only checks
-await h.testContains("multi_test firmware profile",
-  "adb_multi_test", { profile: "firmware" }, "Baseband version");
+if (deviceAvailable) {
+  await h.testContains("multi_test firmware profile",
+    "adb_multi_test", { profile: "firmware" }, "Baseband version");
+} else {
+  h.skip("multi_test firmware profile", "no device authorized");
+}
 
 // adb_multi_test with custom command injection via command field
 // Each custom command goes through ctx.security.checkCommand which should
 // reject dangerous patterns when security middleware is enabled — with it
 // disabled (default), the command runs literally; verify execution at least.
-await h.test("multi_test custom command",
-  "adb_multi_test", { commands: [{ label: "uptime", command: "uptime" }] });
+if (deviceAvailable) {
+  await h.test("multi_test custom command",
+    "adb_multi_test", { commands: [{ label: "uptime", command: "uptime" }] });
+} else {
+  h.skip("multi_test custom command", "no device authorized");
+}
 
 // ══════════════════════════════════════════════════════════
 // Other Previously-Untested Tools
@@ -304,6 +372,144 @@ await h.testRejects("tcpdump_stop when not running",
 // because the tool succeeds in reporting no devices found.
 await h.testContains("network_auto_connect (empty range) reports none",
   "adb_network_auto_connect", { ipRange: "192.0.2.1-2", port: 5555 }, "No ADB listeners found", 15000);
+
+// ══════════════════════════════════════════════════════════
+// Tunnel automation (adb_tunnel_open / list / close)
+// Boundary checks — exercising schema validation, empty-state
+// list, unknown-ID close, reverse-without-hostSpec required check.
+// Tests that actually open a tunnel are skipped without a real
+// device since adb forward needs a connected target.
+// ══════════════════════════════════════════════════════════
+
+h.section("Tunnel Automation Boundaries");
+
+// Zod: bad direction
+await h.testRejects("tunnel_open rejects bad direction",
+  "adb_tunnel_open", { direction: "sideways", deviceSpec: "tcp:3000" });
+
+// Zod: bad deviceSpec (shell metachar smuggling attempt)
+await h.testRejects("tunnel_open rejects shell-metachar in deviceSpec",
+  "adb_tunnel_open", { direction: "forward", deviceSpec: "tcp:3000; rm -rf /" });
+
+// Zod: bad deviceSpec (unknown scheme)
+await h.testRejects("tunnel_open rejects unknown spec scheme",
+  "adb_tunnel_open", { direction: "forward", deviceSpec: "udp:3000" });
+
+// Zod: bad hostSpec format
+await h.testRejects("tunnel_open rejects bad hostSpec",
+  "adb_tunnel_open", { direction: "forward", deviceSpec: "tcp:3000", hostSpec: "not-a-spec" });
+
+// Required hostSpec for reverse direction — tool returns isError:true
+// with a clear message explaining why. testRejects rather than testContains
+// because the message-content check happens via isError flag, not text match.
+await h.testRejects("tunnel_open requires hostSpec for reverse",
+  "adb_tunnel_open", { direction: "reverse", deviceSpec: "tcp:3000" });
+
+// tunnel_list when empty (always works — no device required)
+await h.testContains("tunnel_list when empty",
+  "adb_tunnel_list", {}, "No managed tunnels open");
+
+// tunnel_list with device filter when empty
+await h.testContains("tunnel_list device-filtered when empty",
+  "adb_tunnel_list", { device: "nonexistent_serial" }, "No managed tunnels open");
+
+// tunnel_close with unknown ID
+await h.testRejects("tunnel_close rejects unknown ID",
+  "adb_tunnel_close", { id: "tun_deadbe" });
+
+// tunnel_close 'all' when empty
+await h.testContains("tunnel_close 'all' when empty",
+  "adb_tunnel_close", { id: "all" }, "No managed tunnels to close");
+
+// ══════════════════════════════════════════════════════════
+// Coverage Completion — device-free Zod boundaries for tools
+// that previously had zero test references. Every assertion here
+// triggers Zod rejection at the MCP boundary BEFORE any device
+// communication or destructive side effect (radio toggles, reboots,
+// installs, builds, mirroring) — so they run safely without a device.
+// ══════════════════════════════════════════════════════════
+
+h.section("Coverage — Enum Constraints");
+
+// adb_location mode: z.enum(["off","sensors","battery","high"])
+await h.testRejects("location rejects invalid mode",
+  "adb_location", { mode: "ultra" });
+
+// adb_reboot mode: z.enum(["normal","recovery","bootloader"])
+await h.testRejects("reboot rejects invalid mode",
+  "adb_reboot", { mode: "fastboot" });
+
+// adb_farm_matrix type: z.enum(["models","versions"])
+await h.testRejects("farm_matrix rejects invalid type",
+  "adb_farm_matrix", { type: "devices" });
+
+// adb_emulator_start gpuMode: z.enum(["auto","host","swiftshader_indirect","off"])
+await h.testRejects("emulator_start rejects invalid gpuMode",
+  "adb_emulator_start", { avdName: "DA_test_avd", gpuMode: "vulkan" });
+
+h.section("Coverage — Numeric Bounds");
+
+// adb_airplane_cycle delaySeconds: .min(1).max(60)
+await h.testRejects("airplane_cycle delaySeconds below min (0)",
+  "adb_airplane_cycle", { delaySeconds: 0 });
+await h.testRejects("airplane_cycle delaySeconds above max (99)",
+  "adb_airplane_cycle", { delaySeconds: 99 });
+
+// adb_gradle timeout: .min(30000).max(1800000)
+await h.testRejects("gradle timeout below min (100ms)",
+  "adb_gradle", { projectPath: "/tmp/proj", task: "assembleDebug", timeout: 100 });
+await h.testRejects("gradle timeout above max (9999999ms)",
+  "adb_gradle", { projectPath: "/tmp/proj", task: "assembleDebug", timeout: 9999999 });
+
+// adb_build_and_install timeout: .min(30000).max(1800000)
+await h.testRejects("build_and_install timeout below min (100ms)",
+  "adb_build_and_install", { projectPath: "/tmp/proj", timeout: 100 });
+
+// adb_ci_run_tests timeout: .min(10000).max(600000)
+await h.testRejects("ci_run_tests timeout below min (100ms)",
+  "adb_ci_run_tests", { testPackage: "com.example.app.test", timeout: 100 });
+
+// adb_mirror_start maxFps: .min(1).max(120)
+await h.testRejects("mirror_start maxFps below min (0)",
+  "adb_mirror_start", { maxFps: 0 });
+await h.testRejects("mirror_start maxFps above max (999)",
+  "adb_mirror_start", { maxFps: 999 });
+
+h.section("Coverage — Regex & Array Constraints");
+
+// adb_mirror_start bitrate: regex /^\d+(\.\d+)?[KMG]?$/
+await h.testRejects("mirror_start rejects malformed bitrate",
+  "adb_mirror_start", { bitrate: "fast" });
+
+// adb_install_bundle apkPaths: .min(1)
+await h.testRejects("install_bundle rejects empty apkPaths array",
+  "adb_install_bundle", { apkPaths: [] });
+
+h.section("Coverage — Required Parameter Types");
+
+// adb_wifi enabled: required z.boolean()
+await h.testRejects("wifi rejects non-boolean enabled",
+  "adb_wifi", { enabled: "yes" });
+
+// adb_mobile_data enabled: required z.boolean()
+await h.testRejects("mobile_data rejects non-boolean enabled",
+  "adb_mobile_data", { enabled: "true" });
+
+// adb_airplane_mode enabled: required z.boolean()
+await h.testRejects("airplane_mode rejects missing enabled",
+  "adb_airplane_mode", {});
+
+// adb_install apkPath: required z.string()
+await h.testRejects("install rejects missing apkPath",
+  "adb_install", {});
+
+// adb_uninstall packageName: required z.string()
+await h.testRejects("uninstall rejects missing packageName",
+  "adb_uninstall", {});
+
+// adb_farm_run testApk: required (appApk provided, testApk omitted)
+await h.testRejects("farm_run rejects missing testApk",
+  "adb_farm_run", { appApk: "/tmp/app.apk" });
 
 const exitCode = h.finish();
 process.exit(exitCode);

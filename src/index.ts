@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * DeepADB — MCP Server for Android Debug Bridge
  *
@@ -38,28 +40,53 @@ async function main(): Promise<void> {
   const wsPort = parsePort(process.env.DA_WS_PORT);
   const graphqlPort = parsePort(process.env.DA_GRAPHQL_PORT);
 
+  // BL7 fix: HTTP and WebSocket transports are mutually exclusive (HTTP takes
+  // precedence). Without this warning, an operator who set both env vars
+  // silently got HTTP only with no indication their WS_PORT was ignored.
+  if (httpPort && wsPort) {
+    console.error("[DeepADB] ⚠ Both DA_HTTP_PORT and DA_WS_PORT are set — HTTP takes precedence. DA_WS_PORT is ignored.");
+  }
+
   // Warn when binding network transports to non-loopback addresses.
   // This is the #2 most common MCP security finding (Backslash/AgentSeal research):
   // servers exposed on 0.0.0.0 without authentication allow anyone on the network
   // to execute tools, including shell commands, on the host machine.
   const isLoopback = httpHost === "127.0.0.1" || httpHost === "localhost" || httpHost === "::1";
   if (!isLoopback && (httpPort || wsPort || graphqlPort) && !isAuthEnabled()) {
-    console.error("╔══════════════════════════════════════════════════════════════╗");
-    console.error("║  ⚠  WARNING: Network-exposed transport without authentication  ║");
-    console.error("╠══════════════════════════════════════════════════════════════╣");
-    console.error(`║  Binding to ${httpHost} — accessible to other machines on the network.`);
-    console.error("║  DeepADB provides shell execution, file access, and root commands.");
-    console.error("║  Anyone who can reach this port can execute tools without auth.");
-    console.error("║                                                                  ║");
-    console.error("║  Recommendations:                                                ║");
-    console.error("║    • Set a bearer token: DA_AUTH_TOKEN=your-secret-token         ║");
-    console.error("║    • Enable security middleware: DA_SECURITY=true                ║");
-    console.error("║    • Set an allowlist: DA_ALLOWED_COMMANDS=dumpsys,getprop,...    ║");
-    console.error("║    • Restrict CORS: DA_HTTP_CORS_ORIGIN=https://your-app.example ║");
-    console.error("║    • Use a reverse proxy with HTTPS in front of DeepADB          ║");
-    console.error("║                                                                  ║");
-    console.error("║  See SECURITY.md for deployment guidance.                        ║");
-    console.error("╚══════════════════════════════════════════════════════════════╝");
+    // BL6 fix: detect Unicode-capable terminal. Windows Terminal, VS Code,
+    // and any non-Windows host can render the box-drawing characters
+    // (╔═╗║╠╣╚╝). Legacy cmd.exe on the OEM code page (CP437/CP850) cannot
+    // and renders them as mojibake. Detection heuristic: anything other
+    // than Windows = OK; Windows + WT_SESSION (Windows Terminal) or
+    // TERM_PROGRAM (VS Code, etc.) = OK; otherwise fall back to ASCII.
+    // Operator can force ASCII by setting DA_ASCII_ONLY=1.
+    const wantsAscii =
+      process.env.DA_ASCII_ONLY === "1" ||
+      (process.platform === "win32" &&
+        !process.env.WT_SESSION &&
+        !process.env.TERM_PROGRAM &&
+        !process.env.TERM);
+    const C = wantsAscii
+      ? { tl: "+", tr: "+", bl: "+", br: "+", h: "-", v: "|", sep: "+", warn: "!!" }
+      : { tl: "╔", tr: "╗", bl: "╚", br: "╝", h: "═", v: "║", sep: "╠", warn: "⚠" };
+    const sepR = wantsAscii ? "+" : "╣";
+    const hLine = C.h.repeat(62);
+    console.error(`${C.tl}${hLine}${C.tr}`);
+    console.error(`${C.v}  ${C.warn}  WARNING: Network-exposed transport without authentication  ${C.v}`);
+    console.error(`${C.sep}${hLine}${sepR}`);
+    console.error(`${C.v}  Binding to ${httpHost} — accessible to other machines on the network.`);
+    console.error(`${C.v}  DeepADB provides shell execution, file access, and root commands.`);
+    console.error(`${C.v}  Anyone who can reach this port can execute tools without auth.`);
+    console.error(`${C.v}                                                                  ${C.v}`);
+    console.error(`${C.v}  Recommendations:                                                ${C.v}`);
+    console.error(`${C.v}    ${wantsAscii ? "*" : "•"} Set a bearer token: DA_AUTH_TOKEN=your-secret-token         ${C.v}`);
+    console.error(`${C.v}    ${wantsAscii ? "*" : "•"} Enable security middleware: DA_SECURITY=true                ${C.v}`);
+    console.error(`${C.v}    ${wantsAscii ? "*" : "•"} Set an allowlist: DA_ALLOWED_COMMANDS=dumpsys,getprop,...    ${C.v}`);
+    console.error(`${C.v}    ${wantsAscii ? "*" : "•"} Restrict CORS: DA_HTTP_CORS_ORIGIN=https://your-app.example ${C.v}`);
+    console.error(`${C.v}    ${wantsAscii ? "*" : "•"} Use a reverse proxy with HTTPS in front of DeepADB          ${C.v}`);
+    console.error(`${C.v}                                                                  ${C.v}`);
+    console.error(`${C.v}  See SECURITY.md for deployment guidance.                        ${C.v}`);
+    console.error(`${C.bl}${hLine}${C.br}`);
   }
 
   // Log auth status for network transports

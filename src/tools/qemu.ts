@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * QEMU/KVM Tools — On-device virtual machine management.
  *
@@ -16,7 +18,9 @@
 
 import { z } from "zod";
 import { join, resolve, basename } from "path";
-import { mkdirSync, existsSync, readdirSync, statSync, unlinkSync } from "fs";
+import { existsSync, readdirSync, statSync, unlinkSync } from "fs";
+import { ensurePrivateDir, sanitizeFilenameComponent, isWithinDir } from "../middleware/fs-utils.js";
+import { shellQuote } from "../middleware/sanitize.js";
 import { execFile, spawn, spawnSync, ChildProcess } from "child_process";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
@@ -145,10 +149,13 @@ async function detectLittleCoresMask(bridge: import("../bridge/adb-bridge.js").A
 
     const littleCores = sortedParts[0][1].sort((a, b) => a - b);
 
-    // Build hex mask for taskset
-    let maskBits = 0;
+    // Build hex mask for taskset. Use BigInt so cores with ID >= 32 don't
+    // wrap (JS bitwise ops are 32-bit). Phones today have at most ~12 cores
+    // so this is practical-irrelevance defense, but server-class ARM systems
+    // (cn10k, AmpereOne, etc.) can exceed 32 cores. AU11 fix.
+    let maskBits = 0n;
     for (const coreId of littleCores) {
-      maskBits |= (1 << coreId);
+      maskBits |= (1n << BigInt(coreId));
     }
     const mask = maskBits.toString(16);
 
@@ -193,9 +200,13 @@ function getImageDir(tempDir: string): string {
   return join(tempDir, "qemu-images");
 }
 
-/** Sanitize a VM/image name for safe filesystem use. */
+/** Sanitize a VM/image name for safe filesystem use. Delegates to the
+ *  shared helper with a 64-char cap because QEMU image paths get joined
+ *  with extensions and the result lands on filesystems with MAX_PATH
+ *  constraints. Wrapper kept so the cap convention is explicit at this
+ *  module level and all call sites read uniformly. */
 function sanitizeName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 64);
+  return sanitizeFilenameComponent(name, 64);
 }
 
 /**
@@ -203,27 +214,28 @@ function sanitizeName(name: string): string {
  *
  * Unconditionally wraps the argument in single quotes and escapes any
  * internal single quotes using the canonical `'\''` close-reopen pattern.
- * This is the same robust escape used by shellEscape() in sanitize.ts,
+ * This is the same robust quote used by shellQuote() in sanitize.ts —
  * applied at the argv level so every QEMU arg is individually safe.
  *
  * A previous heuristic ("only quote if the arg contains =/,/:") missed
  * injection payloads like `append: "; reboot"` that contain no trigger
  * chars but still break shell parsing. Don't be clever — quote everything.
  *
- * Exported for unit testing; see tests/test-security.mjs.
+ * Now an alias for shellQuote from middleware/sanitize.ts — same
+ * algorithm, single source of truth. Kept as a named export for the
+ * existing test-security.mjs regression cases and call-site readability.
  */
-export function escapeQemuShellArg(arg: string): string {
-  return `'${arg.replace(/'/g, "'\\''")}'`;
-}
+export const escapeQemuShellArg = shellQuote;
 
 /**
  * Verify that a path is contained within the image directory.
  * Prevents path traversal attacks via image name manipulation.
  */
 function verifyContainment(filePath: string, imageDir: string): boolean {
-  const resolved = resolve(filePath);
-  const resolvedDir = resolve(imageDir);
-  return resolved.startsWith(resolvedDir + "/") || resolved.startsWith(resolvedDir + "\\");
+  // Delegates to the shared helper in fs-utils.ts. Wrapper kept so the
+  // two existing call sites (image lookup at adb_qemu_start, scan in
+  // adb_qemu_images_list) remain readable with the original local name.
+  return isWithinDir(filePath, imageDir);
 }
 
 /**
@@ -382,7 +394,7 @@ export function registerQemuTools(ctx: ToolContext): void {
 
         // Image directory
         const imageDir = getImageDir(ctx.config.tempDir);
-        if (!existsSync(imageDir)) mkdirSync(imageDir, { recursive: true });
+        if (!existsSync(imageDir)) ensurePrivateDir(imageDir);
         sections.push(`\nImage directory: ${imageDir}`);
 
         // Host resource detection for VM allocation guidance
@@ -427,7 +439,7 @@ export function registerQemuTools(ctx: ToolContext): void {
         }
 
         const imageDir = getImageDir(ctx.config.tempDir);
-        if (!existsSync(imageDir)) mkdirSync(imageDir, { recursive: true });
+        if (!existsSync(imageDir)) ensurePrivateDir(imageDir);
 
         if (action === "list") {
           const files = readdirSync(imageDir)

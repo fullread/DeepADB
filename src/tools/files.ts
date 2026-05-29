@@ -1,9 +1,11 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * File Tools — Filesystem operations on the Android device.
  *
  * 18 tools covering file transfer, inspection, creation, deletion, search,
  * content editing, and filesystem metadata. All path-accepting tools use
- * shellEscape() for injection prevention.
+ * shellQuote() for injection prevention.
  *
  * Safety model:
  *   - Hard-blocked paths: /, /dev, /proc, /sys — kernel virtual filesystems
@@ -32,7 +34,8 @@ import { z } from "zod";
 import { join } from "path";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { shellEscape } from "../middleware/sanitize.js";
+import { resultHandleSchemaFields, withResultHandle } from "./result-handles.js";
+import { shellQuote } from "../middleware/sanitize.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -101,7 +104,7 @@ async function resolveRealPath(
   ctx: ToolContext, serial: string, path: string, root: boolean,
 ): Promise<string> {
   const shell = root ? ctx.bridge.rootShell.bind(ctx.bridge) : ctx.bridge.shell.bind(ctx.bridge);
-  const result = await shell(`realpath '${shellEscape(path)}' 2>/dev/null || echo '${shellEscape(path)}'`, {
+  const result = await shell(`realpath ${shellQuote(path)} 2>/dev/null || echo ${shellQuote(path)}`, {
     device: serial, timeout: 3000, ignoreExitCode: true,
   });
   return result.stdout.trim() || path;
@@ -114,11 +117,11 @@ async function getStorageInfo(
 ): Promise<string> {
   const shell = root ? ctx.bridge.rootShell.bind(ctx.bridge) : ctx.bridge.shell.bind(ctx.bridge);
   // Try the path itself, then fall back to its parent directory
-  const escaped = shellEscape(path);
+  const escaped = shellQuote(path);
   const parentDir = path.replace(/\/[^/]+\/?$/, "") || "/";
-  const parentEscaped = shellEscape(parentDir);
+  const parentEscaped = shellQuote(parentDir);
   const result = await shell(
-    `df -h '${escaped}' 2>/dev/null || df -h '${parentEscaped}' 2>/dev/null`,
+    `df -h ${escaped} 2>/dev/null || df -h ${parentEscaped} 2>/dev/null`,
     { device: serial, timeout: 5000, ignoreExitCode: true },
   );
   const lines = result.stdout.trim().split("\n");
@@ -137,7 +140,7 @@ async function detectFsType(
   ctx: ToolContext, serial: string, path: string, root: boolean,
 ): Promise<{ fsType: string; warning: string | null; readOnly: boolean }> {
   const shell = root ? ctx.bridge.rootShell.bind(ctx.bridge) : ctx.bridge.shell.bind(ctx.bridge);
-  const result = await shell(`stat -f -c '%T' '${shellEscape(path)}' 2>/dev/null`, {
+  const result = await shell(`stat -f -c '%T' ${shellQuote(path)} 2>/dev/null`, {
     device: serial, timeout: 3000, ignoreExitCode: true,
   });
   let fsType = result.stdout.trim().toLowerCase();
@@ -192,7 +195,7 @@ function formatBytes(n: number): string {
  *  so the final shell command remains well-formed. */
 function sedEscapePattern(str: string): string {
   return str
-    .replace(/[[\].*^$\\\/&]/g, "\\$&")
+    .replace(/[[\].*^$\\/&]/g, "\\$&")
     .replace(/'/g, "'\\''");
 }
 
@@ -201,7 +204,7 @@ function sedEscapePattern(str: string): string {
  *  close/reopen the surrounding shell single-quote around any `'`. */
 function sedEscapeReplacement(str: string): string {
   return str
-    .replace(/[\\\/&]/g, "\\$&")
+    .replace(/[\\/&]/g, "\\$&")
     .replace(/'/g, "'\\''");
 }
 
@@ -290,7 +293,7 @@ export function registerFileTools(ctx: ToolContext): void {
       const start = Date.now();
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
-        const cmd = details ? `ls -la '${shellEscape(path)}'` : `ls '${shellEscape(path)}'`;
+        const cmd = details ? `ls -la ${shellQuote(path)}` : `ls ${shellQuote(path)}`;
         const result = await ctx.bridge.shell(cmd, { device: resolved.serial });
         return { content: [{ type: "text", text: `${OutputProcessor.process(result.stdout)}\nExecution time: ${Date.now() - start}ms` }] };
       } catch (error) {
@@ -311,8 +314,8 @@ export function registerFileTools(ctx: ToolContext): void {
       const start = Date.now();
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
-        let cmd = `cat '${shellEscape(path)}'`;
-        if (maxLines) cmd = `head -n ${maxLines} '${shellEscape(path)}'`;
+        let cmd = `cat ${shellQuote(path)}`;
+        if (maxLines) cmd = `head -n ${maxLines} ${shellQuote(path)}`;
         const result = await ctx.bridge.shell(cmd, { device: resolved.serial });
         return { content: [{ type: "text", text: `${OutputProcessor.process(result.stdout)}\nExecution time: ${Date.now() - start}ms` }] };
       } catch (error) {
@@ -366,7 +369,7 @@ export function registerFileTools(ctx: ToolContext): void {
         }
 
         const op = append ? ">>" : ">";
-        const cmd = `cat << '${delimiter}' ${op} '${shellEscape(filePath)}'\n${content}\n${delimiter}`;
+        const cmd = `cat << '${delimiter}' ${op} ${shellQuote(filePath)}\n${content}\n${delimiter}`;
         const result = await shell(cmd, {
           device: serial, timeout: 30000, ignoreExitCode: true,
         });
@@ -379,7 +382,7 @@ export function registerFileTools(ctx: ToolContext): void {
         }
 
         // Post-write verification
-        const verifyResult = await shell(`stat -c '%s' '${shellEscape(filePath)}' 2>/dev/null`, {
+        const verifyResult = await shell(`stat -c '%s' ${shellQuote(filePath)} 2>/dev/null`, {
           device: serial, timeout: 3000, ignoreExitCode: true,
         });
         const writtenSize = verifyResult.stdout.trim();
@@ -418,18 +421,19 @@ export function registerFileTools(ctx: ToolContext): void {
       maxResults: z.number().min(1).max(10000).optional().default(500).describe("Maximum results to return (1-10000, default 500)"),
       root: z.boolean().optional().default(false).describe("Use root shell for system paths"),
       device: z.string().optional().describe("Device serial"),
+      ...resultHandleSchemaFields,
     },
-    async ({ searchPath, name, type, maxDepth, maxResults, root, device }) => {
+    async ({ searchPath, name, type, maxDepth, maxResults, root, device, result_handle, result_handle_ttl }) => {
       const start = Date.now();
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
         const shell = execShell(ctx, root);
 
-        let cmd = `find '${shellEscape(searchPath)}' -maxdepth ${maxDepth}`;
+        let cmd = `find ${shellQuote(searchPath)} -maxdepth ${maxDepth}`;
         if (type === "file") cmd += " -type f";
         else if (type === "directory") cmd += " -type d";
-        cmd += ` -name '${shellEscape(name)}'`;
+        cmd += ` -name ${shellQuote(name)}`;
         // Request one extra to detect truncation
         cmd += ` 2>/dev/null | head -n ${maxResults + 1}`;
 
@@ -450,7 +454,11 @@ export function registerFileTools(ctx: ToolContext): void {
         if (truncated) output += ` (truncated at ${maxResults} — more results exist, increase maxResults or narrow the search)`;
         output += `\nExecution time: ${Date.now() - start}ms`;
 
-        return { content: [{ type: "text", text: output }] };
+        return withResultHandle(
+          { content: [{ type: "text" as const, text: output }] },
+          "find",
+          { result_handle, result_handle_ttl },
+        );
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
       }
@@ -471,11 +479,11 @@ export function registerFileTools(ctx: ToolContext): void {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
         const shell = execShell(ctx, root);
-        const escaped = shellEscape(filePath);
+        const escaped = shellQuote(filePath);
 
         // stat + ls -Z for SELinux context in a single command
         const result = await shell(
-          `stat '${escaped}' 2>&1 && echo '---SELINUX---' && ls -Zd '${escaped}' 2>/dev/null`,
+          `stat ${escaped} 2>&1 && echo '---SELINUX---' && ls -Zd ${escaped} 2>/dev/null`,
           { device: serial, timeout: 10000, ignoreExitCode: true },
         );
 
@@ -514,10 +522,10 @@ export function registerFileTools(ctx: ToolContext): void {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
         const shell = execShell(ctx, root);
-        const escaped = shellEscape(filePath);
+        const escaped = shellQuote(filePath);
 
         // Get size first for timeout estimation
-        const sizeResult = await shell(`stat -c '%s' '${escaped}' 2>/dev/null`, {
+        const sizeResult = await shell(`stat -c '%s' ${escaped} 2>/dev/null`, {
           device: serial, timeout: 3000, ignoreExitCode: true,
         });
         const fileSize = parseInt(sizeResult.stdout.trim(), 10) || 0;
@@ -525,7 +533,7 @@ export function registerFileTools(ctx: ToolContext): void {
         const hashTimeout = Math.max(10000, Math.min(300000, Math.ceil(fileSize / (100 * 1024 * 1024)) * 1000 + 10000));
 
         const hashCmd = algorithm === "md5" ? "md5sum" : algorithm === "sha1" ? "sha1sum" : "sha256sum";
-        const result = await shell(`${hashCmd} '${escaped}' 2>&1`, {
+        const result = await shell(`${hashCmd} ${escaped} 2>&1`, {
           device: serial, timeout: hashTimeout, ignoreExitCode: true,
         });
 
@@ -584,7 +592,7 @@ export function registerFileTools(ctx: ToolContext): void {
         if (fs.readOnly) return { content: [{ type: "text", text: fs.warning! }], isError: true };
 
         const pFlag = parents ? "-p " : "";
-        const result = await shell(`mkdir ${pFlag}'${shellEscape(dirPath)}' 2>&1`, {
+        const result = await shell(`mkdir ${pFlag}${shellQuote(dirPath)} 2>&1`, {
           device: serial, timeout: 10000, ignoreExitCode: true,
         });
 
@@ -648,7 +656,7 @@ export function registerFileTools(ctx: ToolContext): void {
         let itemCount = "1";
         if (recursive) {
           const countResult = await shell(
-            `find '${shellEscape(targetPath)}' 2>/dev/null | wc -l`,
+            `find ${shellQuote(targetPath)} 2>/dev/null | wc -l`,
             { device: serial, timeout: 15000, ignoreExitCode: true },
           );
           itemCount = countResult.stdout.trim() || "unknown";
@@ -656,7 +664,7 @@ export function registerFileTools(ctx: ToolContext): void {
 
         // Execute deletion
         const rmFlag = recursive ? "-rf" : "-f";
-        const result = await shell(`rm ${rmFlag} '${shellEscape(targetPath)}' 2>&1`, {
+        const result = await shell(`rm ${rmFlag} ${shellQuote(targetPath)} 2>&1`, {
           device: serial, timeout: recursive ? 120000 : 10000, ignoreExitCode: true,
         });
 
@@ -724,13 +732,13 @@ export function registerFileTools(ctx: ToolContext): void {
         }
 
         // Get source size for reporting
-        const sizeResult = await shell(`stat -c '%s' '${shellEscape(source)}' 2>/dev/null`, {
+        const sizeResult = await shell(`stat -c '%s' ${shellQuote(source)} 2>/dev/null`, {
           device: serial, timeout: 3000, ignoreExitCode: true,
         });
         const sourceSize = sizeResult.stdout.trim();
 
         // Execute move
-        const result = await shell(`mv '${shellEscape(source)}' '${shellEscape(destination)}' 2>&1`, {
+        const result = await shell(`mv ${shellQuote(source)} ${shellQuote(destination)} 2>&1`, {
           device: serial, timeout: 120000, ignoreExitCode: true,
         });
 
@@ -739,7 +747,7 @@ export function registerFileTools(ctx: ToolContext): void {
         }
 
         // Post-verify: destination exists
-        const verifyResult = await shell(`test -e '${shellEscape(destination)}' && echo EXISTS`, {
+        const verifyResult = await shell(`test -e ${shellQuote(destination)} && echo EXISTS`, {
           device: serial, timeout: 3000, ignoreExitCode: true,
         });
         const verified = verifyResult.stdout.includes("EXISTS");
@@ -792,15 +800,42 @@ export function registerFileTools(ctx: ToolContext): void {
 
         // Pre-flight: source size and destination available space
         const preResult = await shell(
-          `stat -c '%s' '${shellEscape(source)}' 2>/dev/null && echo '---DF---' && df '${shellEscape(destination)}' 2>/dev/null | tail -1`,
+          `stat -c '%s' ${shellQuote(source)} 2>/dev/null && echo '---DF---' && df -k ${shellQuote(destination)} 2>/dev/null | tail -1`,
           { device: serial, timeout: 5000, ignoreExitCode: true },
         );
         const preParts = preResult.stdout.split("---DF---");
         const sourceBytes = parseInt(preParts[0]?.trim() ?? "", 10) || 0;
 
+        // B1: parse df output (-k = 1K blocks). Standard fields:
+        //   Filesystem  1K-blocks  Used  Available  Use%  Mounted on
+        // Tail -1 has already stripped the header. Available is field [3].
+        // If the destination filesystem has less free space than sourceBytes,
+        // surface an actionable error BEFORE attempting the copy — cp would
+        // otherwise fail mid-write with "No space left on device" and could
+        // leave a partial destination file behind.
+        const dfLine = preParts[1]?.trim() ?? "";
+        if (dfLine && sourceBytes > 0) {
+          const dfFields = dfLine.split(/\s+/);
+          const availKb = parseInt(dfFields[3] ?? "", 10);
+          if (Number.isFinite(availKb) && availKb >= 0) {
+            const availBytes = availKb * 1024;
+            // 5% slack — filesystems often refuse the last few percent (reserved blocks).
+            const needed = Math.ceil(sourceBytes * 1.05);
+            if (needed > availBytes) {
+              return {
+                content: [{
+                  type: "text",
+                  text: `Insufficient space on destination filesystem. Need \`${formatBytes(needed)}\` (source \`${formatBytes(sourceBytes)}\` + 5% slack), available \`${formatBytes(availBytes)}\`.`,
+                }],
+                isError: true,
+              };
+            }
+          }
+        }
+
         // Execute copy
         const rFlag = recursive ? "-r " : "";
-        const result = await shell(`cp ${rFlag}'${shellEscape(source)}' '${shellEscape(destination)}' 2>&1`, {
+        const result = await shell(`cp ${rFlag}${shellQuote(source)} ${shellQuote(destination)} 2>&1`, {
           device: serial, timeout: 300000, ignoreExitCode: true,
         });
 
@@ -809,7 +844,7 @@ export function registerFileTools(ctx: ToolContext): void {
         }
 
         // Post-verify: compare sizes
-        const destSizeResult = await shell(`stat -c '%s' '${shellEscape(destination)}' 2>/dev/null`, {
+        const destSizeResult = await shell(`stat -c '%s' ${shellQuote(destination)} 2>/dev/null`, {
           device: serial, timeout: 3000, ignoreExitCode: true,
         });
         const destBytes = parseInt(destSizeResult.stdout.trim(), 10) || 0;
@@ -874,7 +909,7 @@ export function registerFileTools(ctx: ToolContext): void {
         if (fs.readOnly) return { content: [{ type: "text", text: fs.warning! }], isError: true };
 
         const rFlag = recursive ? "-R " : "";
-        const result = await shell(`chmod ${rFlag}${mode} '${shellEscape(filePath)}' 2>&1`, {
+        const result = await shell(`chmod ${rFlag}${mode} ${shellQuote(filePath)} 2>&1`, {
           device: serial, timeout: recursive ? 60000 : 10000, ignoreExitCode: true,
         });
 
@@ -883,7 +918,7 @@ export function registerFileTools(ctx: ToolContext): void {
         }
 
         // Verify resulting permissions
-        const verifyResult = await shell(`stat -c '%a %A' '${shellEscape(filePath)}' 2>/dev/null`, {
+        const verifyResult = await shell(`stat -c '%a %A' ${shellQuote(filePath)} 2>/dev/null`, {
           device: serial, timeout: 3000, ignoreExitCode: true,
         });
         const resulting = verifyResult.stdout.trim();
@@ -933,7 +968,7 @@ export function registerFileTools(ctx: ToolContext): void {
         if (fs.readOnly) return { content: [{ type: "text", text: fs.warning! }], isError: true };
 
         // Check if file exists before touch (to report create vs update)
-        const existResult = await shell(`test -e '${shellEscape(filePath)}' && echo EXISTS`, {
+        const existResult = await shell(`test -e ${shellQuote(filePath)} && echo EXISTS`, {
           device: serial, timeout: 3000, ignoreExitCode: true,
         });
         const existed = existResult.stdout.includes("EXISTS");
@@ -947,9 +982,9 @@ export function registerFileTools(ctx: ToolContext): void {
             return { content: [{ type: "text", text: `Invalid timestamp format: "${timestamp}". Expected: YYYY-MM-DD HH:MM:SS` }], isError: true };
           }
           const touchTs = `${tsMatch[1]}${tsMatch[2]}${tsMatch[3]}${tsMatch[4]}${tsMatch[5]}.${tsMatch[6]}`;
-          cmd = `touch -t ${touchTs} '${shellEscape(filePath)}' 2>&1`;
+          cmd = `touch -t ${touchTs} ${shellQuote(filePath)} 2>&1`;
         } else {
-          cmd = `touch '${shellEscape(filePath)}' 2>&1`;
+          cmd = `touch ${shellQuote(filePath)} 2>&1`;
         }
 
         const result = await shell(cmd, {
@@ -962,7 +997,7 @@ export function registerFileTools(ctx: ToolContext): void {
 
         // Verify resulting timestamps
         const statResult = await shell(
-          `stat -c 'Access: %x\nModify: %y\nChange: %z' '${shellEscape(filePath)}' 2>/dev/null`,
+          `stat -c 'Access: %x\nModify: %y\nChange: %z' ${shellQuote(filePath)} 2>/dev/null`,
           { device: serial, timeout: 3000, ignoreExitCode: true },
         );
         const timestamps = statResult.stdout.trim();
@@ -1003,22 +1038,22 @@ export function registerFileTools(ctx: ToolContext): void {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
         const shell = execShell(ctx, root);
-        const escaped = shellEscape(filePath);
+        const escaped = shellQuote(filePath);
 
         // Parallel reads: stat -f, df, full mount table, SELinux context.
         // The mount table is read whole (small) and filtered in TypeScript
         // so we don't interpolate df output into a device-side grep pattern.
         const [statfR, dfR, mountAllR, seR] = await Promise.allSettled([
-          shell(`stat -f -c 'Type: %T\nBlock size: %S\nTotal blocks: %b\nFree blocks: %f\nAvailable blocks: %a\nTotal inodes: %c\nFree inodes: %d' '${escaped}' 2>/dev/null`, {
+          shell(`stat -f -c 'Type: %T\nBlock size: %S\nTotal blocks: %b\nFree blocks: %f\nAvailable blocks: %a\nTotal inodes: %c\nFree inodes: %d' ${escaped} 2>/dev/null`, {
             device: serial, timeout: 5000, ignoreExitCode: true,
           }),
-          shell(`df -h '${escaped}' 2>/dev/null | tail -1`, {
+          shell(`df -h ${escaped} 2>/dev/null | tail -1`, {
             device: serial, timeout: 5000, ignoreExitCode: true,
           }),
           shell(`mount 2>/dev/null`, {
             device: serial, timeout: 5000, ignoreExitCode: true,
           }),
-          shell(`ls -Zd '${escaped}' 2>/dev/null`, {
+          shell(`ls -Zd ${escaped} 2>/dev/null`, {
             device: serial, timeout: 3000, ignoreExitCode: true,
           }),
         ]);
@@ -1157,7 +1192,7 @@ export function registerFileTools(ctx: ToolContext): void {
         if (fs.readOnly) return { content: [{ type: "text", text: fs.warning! }], isError: true };
 
         const rFlag = recursive ? "-R " : "";
-        const result = await shell(`chown ${rFlag}${owner} '${shellEscape(filePath)}' 2>&1`, {
+        const result = await shell(`chown ${rFlag}${owner} ${shellQuote(filePath)} 2>&1`, {
           device: serial, timeout: recursive ? 60000 : 10000, ignoreExitCode: true,
         });
 
@@ -1166,7 +1201,7 @@ export function registerFileTools(ctx: ToolContext): void {
         }
 
         // Verify resulting ownership
-        const verifyResult = await shell(`stat -c '%U:%G (uid=%u gid=%g)' '${shellEscape(filePath)}' 2>/dev/null`, {
+        const verifyResult = await shell(`stat -c '%U:%G (uid=%u gid=%g)' ${shellQuote(filePath)} 2>/dev/null`, {
           device: serial, timeout: 3000, ignoreExitCode: true,
         });
         const resulting = verifyResult.stdout.trim();
@@ -1206,24 +1241,29 @@ export function registerFileTools(ctx: ToolContext): void {
       filesWithMatches: z.boolean().optional().default(false).describe("Show only filenames that contain matches, not the matching lines"),
       root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
       device: z.string().optional().describe("Device serial"),
+      ...resultHandleSchemaFields,
     },
-    async ({ pattern, path: searchPath, recursive, fixedString, ignoreCase, maxResults, maxDepth, filesWithMatches, root, device }) => {
+    async ({ pattern, path: searchPath, recursive, fixedString, ignoreCase, maxResults, maxDepth, filesWithMatches, root, device, result_handle, result_handle_ttl }) => {
       const start = Date.now();
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
         const shell = execShell(ctx, root);
-        const escaped = shellEscape(searchPath);
-        const patternEscaped = shellEscape(pattern);
+        const escaped = shellQuote(searchPath);
+        const patternEscaped = shellQuote(pattern);
 
         let cmd: string;
         if (recursive) {
           // Use find + grep for recursive with depth control
           const grepFlags = [fixedString ? "-F" : "", ignoreCase ? "-i" : "", "-n", filesWithMatches ? "-l" : ""].filter(f => f).join(" ");
-          cmd = `find '${escaped}' -maxdepth ${maxDepth} -type f 2>/dev/null | xargs grep ${grepFlags} '${patternEscaped}' 2>/dev/null | head -n ${maxResults + 1}`;
+          // B2: use -exec grep {} + instead of xargs so filenames containing
+        // whitespace, quotes, or newlines do not split incorrectly and miss
+        // matches. The terminating + (not \;) batches files into one grep
+        // invocation, matching the xargs throughput characteristic.
+        cmd = `find ${escaped} -maxdepth ${maxDepth} -type f -exec grep ${grepFlags} ${patternEscaped} {} + 2>/dev/null | head -n ${maxResults + 1}`;
         } else {
           const grepFlags = [fixedString ? "-F" : "", ignoreCase ? "-i" : "", "-n", filesWithMatches ? "-l" : ""].filter(f => f).join(" ");
-          cmd = `grep ${grepFlags} '${patternEscaped}' '${escaped}' 2>/dev/null | head -n ${maxResults + 1}`;
+          cmd = `grep ${grepFlags} ${patternEscaped} ${escaped} 2>/dev/null | head -n ${maxResults + 1}`;
         }
 
         const result = await shell(cmd, {
@@ -1243,7 +1283,11 @@ export function registerFileTools(ctx: ToolContext): void {
         if (truncated) output += ` (truncated at ${maxResults} — more results exist)`;
         output += `\nExecution time: ${Date.now() - start}ms`;
 
-        return { content: [{ type: "text", text: output }] };
+        return withResultHandle(
+          { content: [{ type: "text" as const, text: output }] },
+          "grep",
+          { result_handle, result_handle_ttl },
+        );
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
       }
@@ -1269,7 +1313,7 @@ export function registerFileTools(ctx: ToolContext): void {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
         const shell = execShell(ctx, root);
-        const escaped = shellEscape(filePath);
+        const escaped = shellQuote(filePath);
 
         const realPath = await resolveRealPath(ctx, serial, filePath, root);
         const blocked = isHardBlocked(realPath);
@@ -1281,8 +1325,15 @@ export function registerFileTools(ctx: ToolContext): void {
         // Count matches before replacement
         const sedFind = sedEscapePattern(find);
         const countCmd = lineNumber
-          ? `sed -n '${lineNumber}p' '${escaped}' | grep -cF '${shellEscape(find)}' 2>/dev/null`
-          : `grep -cF '${shellEscape(find)}' '${escaped}' 2>/dev/null`;
+          // AD9 note: `lineNumber` is interpolated UNWRAPPED into the sed
+        // expression here and at the sed -i site below. Safe by construction:
+        // `lineNumber` is Zod-constrained to a positive integer (`z.number().min(1)`).
+        // Integer-typed inputs are not vulnerable to the shell-metacharacter
+        // / quote-escape attacks that string-typed inputs need protection
+        // from. `shellQuote` would technically work but adds noise without
+        // adding safety — the type system is the validation.
+        ? `sed -n '${lineNumber}p' ${escaped} | grep -cF ${shellQuote(find)} 2>/dev/null`
+          : `grep -cF ${shellQuote(find)} ${escaped} 2>/dev/null`;
         const countResult = await shell(countCmd, {
           device: serial, timeout: 10000, ignoreExitCode: true,
         });
@@ -1294,7 +1345,7 @@ export function registerFileTools(ctx: ToolContext): void {
 
         // Create backup if requested
         if (backup) {
-          await shell(`cp '${escaped}' '${escaped}.bak' 2>&1`, {
+          await shell(`cp ${escaped} '${escaped}.bak' 2>&1`, {
             device: serial, timeout: 10000, ignoreExitCode: true,
           });
         }
@@ -1304,9 +1355,9 @@ export function registerFileTools(ctx: ToolContext): void {
         const gFlag = globalReplace ? "g" : "";
         let sedCmd: string;
         if (lineNumber) {
-          sedCmd = `sed -i '${lineNumber}s/${sedFind}/${sedReplace}/${gFlag}' '${escaped}' 2>&1`;
+          sedCmd = `sed -i '${lineNumber}s/${sedFind}/${sedReplace}/${gFlag}' ${escaped} 2>&1`;
         } else {
-          sedCmd = `sed -i 's/${sedFind}/${sedReplace}/${gFlag}' '${escaped}' 2>&1`;
+          sedCmd = `sed -i 's/${sedFind}/${sedReplace}/${gFlag}' ${escaped} 2>&1`;
         }
 
         const result = await shell(sedCmd, {

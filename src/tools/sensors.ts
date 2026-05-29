@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Hardware Sensor Access — Read values from device hardware sensors.
  *
@@ -17,6 +19,7 @@
 import { z } from "zod";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
+import { AdbExecOptions } from "../bridge/adb-bridge.js";
 
 // ── HAL Sensor Types & Constants ──────────────────────────────────────────────
 
@@ -165,7 +168,7 @@ function parseRecentEvents(dump: string): Map<string, SensorEvent> {
     const lastLine = eventLines[eventLines.length - 1];
     if (!lastLine) continue;
 
-    const wallMatch = lastLine.match(/wall=([^\)]+)/);
+    const wallMatch = lastLine.match(/wall=([^)]+)/);
     const valsMatch = lastLine.match(/\)\s+(.+)/);
     if (!valsMatch) continue;
 
@@ -295,7 +298,7 @@ function parseKeyValueOutput(text: string): Map<string, number> {
  *  self-describing key=value output. Immune to `cat` alignment issues when
  *  multiple files are read together. Returns attr name → numeric value. */
 async function readIioAttrs(
-  bridge: { shell: (cmd: string, opts: any) => Promise<{ stdout: string }> },
+  bridge: { shell: (cmd: string, opts: AdbExecOptions) => Promise<{ stdout: string }> },
   serial: string,
   base: string,
   attrs: string[],
@@ -422,6 +425,15 @@ export function registerSensorTools(ctx: ToolContext): void {
 
   const IIO_BASE = "/sys/bus/iio/devices";
 
+  /**
+   * BA8 fix: extract `iioPath(dir)` helper for the `${IIO_BASE}/${dir}`
+   * pattern that appears at 4 sites (enumerate, readname, readOdpm, readGeneric).
+   * Single source of truth; if IIO_BASE ever needs adjustment (kernel layout
+   * change), only one location to update. The helper is intentionally trivial —
+   * it exists to give the join site a name, not to add behavior.
+   */
+  const iioPath = (dir: string): string => `${IIO_BASE}/${dir}`;
+
   ctx.server.tool(
     "adb_iio_read",
     "Read raw hardware data from the Linux IIO (Industrial I/O) subsystem. Discovers all IIO devices and reads their current values. On Tensor/Exynos devices, this exposes per-rail power monitors (ODPM) showing real-time power consumption per SoC subsystem (CPU clusters, GPU, display, memory, TPU, GPS, etc.) — data not available through the Android sensor HAL. On other devices, may expose raw accelerometer, gyroscope, magnetometer, or ADC channels. Root required.",
@@ -445,6 +457,18 @@ export function registerSensorTools(ctx: ToolContext): void {
         }
 
         // Enumerate IIO devices
+        // BA7 note: 'su -c "..."' uses OUTER DOUBLE QUOTES throughout this
+        // module (this site and the 5 below). Safe today because every
+        // interpolated value is either:
+        //   - IIO_BASE: module-scope const "/sys/bus/iio/devices"
+        //   - dev.path: regex-validated by /^iio:device\d+$/ at enum time
+        //   - base: derived from the two above via iioPath()
+        // None contain dollar-sign, backtick, or double-quote, so the
+        // double-quote outer is safe even though shell would expand
+        // those metacharacters. The single-quote outer in 'readIioAttrs'
+        // is more defense-in-depth. Future contributor changing IIO_BASE
+        // to something containing a metacharacter would break this —
+        // switch to single-quote outer then.
         const lsResult = await bridge.shell(`su -c "ls ${IIO_BASE}/ 2>/dev/null"`, {
           device: serial, timeout: 5000, ignoreExitCode: true,
         });
@@ -460,7 +484,7 @@ export function registerSensorTools(ctx: ToolContext): void {
         // Read device names and classify
         const devices: IioDevice[] = [];
         for (const dir of deviceDirs) {
-          const nameResult = await bridge.shell(`su -c "cat ${IIO_BASE}/${dir}/name 2>/dev/null"`, {
+          const nameResult = await bridge.shell(`su -c "cat ${iioPath(dir)}/name 2>/dev/null"`, {
             device: serial, timeout: 3000, ignoreExitCode: true,
           });
           const name = nameResult.stdout.trim() || "unknown";
@@ -495,7 +519,7 @@ export function registerSensorTools(ctx: ToolContext): void {
 
   /** Read an ODPM power monitor device and return formatted output. */
   async function readOdpmDevice(bridge: typeof ctx.bridge, serial: string, dev: IioDevice): Promise<string> {
-    const base = `${IIO_BASE}/${dev.path}`;
+    const base = iioPath(dev.path);
     const lines: string[] = [`=== ${dev.name} (${dev.path}) — Power Monitor ===\n`];
 
     // Parallel reads: enabled_rails, lpf_power, sampling_rate
@@ -549,7 +573,7 @@ export function registerSensorTools(ctx: ToolContext): void {
 
   /** Read a generic (non-ODPM) IIO device and return formatted output. */
   async function readGenericIioDevice(bridge: typeof ctx.bridge, serial: string, dev: IioDevice): Promise<string> {
-    const base = `${IIO_BASE}/${dev.path}`;
+    const base = iioPath(dev.path);
     const lines: string[] = [`=== ${dev.name} (${dev.path}) — ${dev.type === "unknown" ? "IIO Device" : dev.type} ===\n`];
 
     // List all attributes to discover what's available

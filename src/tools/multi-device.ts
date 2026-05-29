@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Multi-Device Orchestration Tools — Run commands across multiple devices simultaneously.
  * 
@@ -338,6 +340,14 @@ export function registerMultiDeviceTools(ctx: ToolContext): void {
             matches++;
             const value = succeeded[0].output || "(empty)";
             // Truncate long identical values
+            // AL7 note: MATCH lines truncate at 120 chars vs the DIFFERS
+            // truncation at 200 below. The asymmetry is intentional:
+            // operators reading MATCH lines just need to verify the value
+            // looks right (a glance suffices), while DIFFERS lines are
+            // diagnostic — operators need more context to understand
+            // WHY the values differ across devices. 120 / 200 chosen
+            // empirically as the sweet spot between line-noise and
+            // diagnostic utility; bump both proportionally if needed.
             const display = value.length > 120 ? value.substring(0, 120) + "..." : value;
             sections.push(`\n✓ ${check.label}: MATCH — ${display}`);
           } else if (succeeded.length === 1) {

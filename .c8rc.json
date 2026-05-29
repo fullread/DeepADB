@@ -1,0 +1,12 @@
+{
+  "include": ["build/**/*.js"],
+  "exclude": [
+    "build/index.js",
+    "build/**/*.d.ts",
+    "build/**/*.js.map",
+    "tests/**"
+  ],
+  "reporter": ["text-summary", "lcov"],
+  "reports-dir": "coverage",
+  "clean": true
+}

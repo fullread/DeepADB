@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Device Tools — Device discovery, status, and properties.
  */
@@ -5,7 +7,7 @@
 import { z } from "zod";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { validateShellArg } from "../middleware/sanitize.js";
+import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 
 export function registerDeviceTools(ctx: ToolContext): void {
 
@@ -72,7 +74,7 @@ export function registerDeviceTools(ctx: ToolContext): void {
         if (key) {
           const keyErr = validateShellArg(key, "key");
           if (keyErr) return { content: [{ type: "text", text: keyErr }], isError: true };
-          const result = await ctx.bridge.shell(`getprop ${key}`, { device: resolved.serial });
+          const result = await ctx.bridge.shell(`getprop ${shellQuote(key)}`, { device: resolved.serial });
           const value = result.stdout.trim();
           return { content: [{ type: "text", text: value || `(empty — property '${key}' may not exist)` }] };
         }

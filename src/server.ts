@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * DeepADB MCP Server
  * 
@@ -6,7 +8,8 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { mkdirSync, existsSync } from "fs";
+import { existsSync } from "fs";
+import { ensurePrivateDir } from "./middleware/fs-utils.js";
 import { AdbBridge } from "./bridge/adb-bridge.js";
 import { LocalBridge } from "./bridge/local-bridge.js";
 import { DeviceManager } from "./bridge/device-manager.js";
@@ -60,6 +63,8 @@ import { registerNetworkDiscoveryTools } from "./tools/network-discovery.js";
 import { registerSensorTools } from "./tools/sensors.js";
 import { registerWirelessFirmwareTools } from "./tools/wireless-firmware.js";
 import { registerInputGestureTools } from "./tools/input-gestures.js";
+import { registerResultHandleTools } from "./tools/result-handles.js";
+import { startupSweep as resultHandleStartupSweep } from "./middleware/result-handle.js";
 
 // Resource and prompt registrations
 import { registerResources } from "./tools/resources.js";
@@ -73,9 +78,26 @@ export interface CreateServerResult {
 }
 
 export async function createServer(): Promise<CreateServerResult> {
-  const logger = new Logger(
-    (process.env.DA_LOG_LEVEL as "debug" | "info" | "warn" | "error") ?? "info"
-  );
+  // BM1 fix (M2+Q1): validate DA_LOG_LEVEL against the enum at runtime instead
+  // of using an unchecked `as` cast. The bare cast silently accepts any string
+  // (e.g., DA_LOG_LEVEL=verbose) and was passed to Logger which then disabled
+  // all logging because the value didn't match any threshold. Fail-open to
+  // "info" with a stderr warning when the env var is set but invalid.
+  const VALID_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
+  type LogLevel = (typeof VALID_LOG_LEVELS)[number];
+  const rawLevel = process.env.DA_LOG_LEVEL;
+  let logLevel: LogLevel = "info";
+  if (rawLevel !== undefined) {
+    if ((VALID_LOG_LEVELS as readonly string[]).includes(rawLevel)) {
+      logLevel = rawLevel as LogLevel;
+    } else {
+      console.error(
+        `[DeepADB] Invalid DA_LOG_LEVEL=${JSON.stringify(rawLevel)}. ` +
+        `Valid values: ${VALID_LOG_LEVELS.join(", ")}. Falling back to "info".`
+      );
+    }
+  }
+  const logger = new Logger(logLevel);
 
   // Validate configuration at startup
   const warnings = validateConfig();
@@ -85,7 +107,7 @@ export async function createServer(): Promise<CreateServerResult> {
 
   // Ensure temp directory exists once, before any tool module registration
   if (!existsSync(config.tempDir)) {
-    mkdirSync(config.tempDir, { recursive: true });
+    ensurePrivateDir(config.tempDir);
   }
 
   const bridge = isOnDevice() ? new LocalBridge(logger) : new AdbBridge(logger);
@@ -103,7 +125,7 @@ export async function createServer(): Promise<CreateServerResult> {
   // Build unified tool context
   const ctx: ToolContext = { server, bridge, deviceManager, logger, security, config };
 
-  // Register all tool modules (44 modules)
+  // Register all tool modules (45 modules)
   registerDeviceTools(ctx);
   registerShellTools(ctx);
   registerPackageTools(ctx);
@@ -148,6 +170,7 @@ export async function createServer(): Promise<CreateServerResult> {
   registerSensorTools(ctx);
   registerWirelessFirmwareTools(ctx);
   registerInputGestureTools(ctx);
+  registerResultHandleTools(ctx);
 
   // Register MCP resources and prompts
   registerResources(ctx);
@@ -156,7 +179,14 @@ export async function createServer(): Promise<CreateServerResult> {
   // Load external plugins (async — scans plugin directory)
   await loadPlugins(ctx);
 
-  logger.info("DeepADB MCP server initialized — 44 tool modules, 4 resources, 4 prompts. Ready.");
+  // Sweep any handles left over from prior sessions: enforce TTL + size caps
+  // against the on-disk store. Reports only if there was something to clean.
+  const sweepResult = resultHandleStartupSweep();
+  if (sweepResult.evicted > 0 || sweepResult.kept > 0) {
+    logger.info(`Result-handle store: ${sweepResult.kept} active, ${sweepResult.evicted} evicted at startup.`);
+  }
+
+  logger.info("DeepADB MCP server initialized — 45 tool modules, 5 resources, 4 prompts. Ready.");
 
   return { server, logger, bridge, deviceManager };
 }

@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Device Farm Integration Tools — Cloud-based test execution via Firebase Test Lab.
  *
@@ -7,6 +9,7 @@
  */
 
 import { z } from "zod";
+import { existsSync } from "fs";
 import { execFile } from "child_process";
 import { ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
@@ -48,11 +51,22 @@ export function registerDeviceFarmTools(ctx: ToolContext): void {
       devices: z.array(z.string()).optional()
         .describe("Device specs as 'model=DEVICE,version=API' (e.g., 'model=bluejay,version=33'). Omit for default device."),
       testTargets: z.string().optional().describe("Specific test class or method (e.g., 'class com.example.MyTest')"),
-      timeout: z.string().optional().default("300s").describe("Test timeout (e.g., '300s', '10m')"),
+      timeout: z.string().optional().default("300s").describe("Test timeout passed to gcloud --timeout (e.g., '300s', '10m'). This is the LAB-side timeout."),
       resultsBucket: z.string().optional().describe("GCS bucket for results (omit for default)"),
+      execTimeoutMs: z.number().int().min(60000).max(3600000).optional().default(600000)
+        .describe("Local execFile timeout for the gcloud invocation in ms (1min-60min, default 10min). Y4 fix: bigger device matrices or larger APKs can plausibly exceed the previous hardcoded 10min."),
     },
-    async ({ appApk, testApk, devices, testTargets, timeout, resultsBucket }) => {
+    async ({ appApk, testApk, devices, testTargets, timeout, resultsBucket, execTimeoutMs }) => {
       try {
+        // Y5 fix: preflight existsSync on both APK paths. gcloud's own error
+        // for a missing file is verbose and slow (network roundtrip first);
+        // local existsSync gives an immediate, clear error.
+        if (!existsSync(appApk)) {
+          return { content: [{ type: "text", text: `App APK does not exist: ${appApk}` }], isError: true };
+        }
+        if (!existsSync(testApk)) {
+          return { content: [{ type: "text", text: `Test APK does not exist: ${testApk}` }], isError: true };
+        }
         const gcloudError = await checkGcloud();
         if (gcloudError) {
           return { content: [{ type: "text", text: gcloudError }], isError: true };
@@ -78,9 +92,19 @@ export function registerDeviceFarmTools(ctx: ToolContext): void {
           args.push("--results-bucket", resultsBucket);
         }
 
+        // Y3 note: this log line contains the COMPLETE gcloud command line,
+        // including APK paths (possibly disclosing project structure),
+        // test targets (test class names), and results bucket names (GCS
+        // bucket identifiers). Not credentials per se, but if log
+        // aggregation ships to an external SIEM these identifiers propagate
+        // to log storage. M1 (logger.ts) notes that the Logger does NOT
+        // redact — that applies here. Operators in privacy-sensitive
+        // environments should either filter this log line at the
+        // aggregator layer, or set DA_LOG_LEVEL=warn to suppress info-level
+        // logging from device-farm runs.
         ctx.logger.info(`Firebase Test Lab: gcloud ${args.join(" ")}`);
 
-        const result = await execAsync("gcloud", args, 600000); // 10 min max
+        const result = await execAsync("gcloud", args, execTimeoutMs);
         let output = result.stdout;
         if (result.stderr) output += `\n--- STDERR ---\n${result.stderr}`;
         if (result.exitCode !== 0) output += `\n--- Exit code: ${result.exitCode} ---`;

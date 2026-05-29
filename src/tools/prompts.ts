@@ -1,3 +1,5 @@
+// Copyright 2026 Jason <fullread@github>
+// SPDX-License-Identifier: Apache-2.0
 /**
  * MCP Prompts — Pre-built workflow templates for common Android debugging tasks.
  * 

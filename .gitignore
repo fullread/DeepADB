@@ -2,6 +2,9 @@
 node_modules/
 build/
 
+# Test runner output (npm test redirect target)
+test-output.log
+
 # TypeScript compilation artifacts
 *.js
 *.d.ts
@@ -39,6 +42,12 @@ run_*.txt
 run_on_device.sh
 extract_on_device.sh
 run_*_capture.sh
+release-notes-*.md
+deepadb-v*-prebuilt.zip
 
 # Private working docs (roadmap, audit logs, internal notes)
 private-docs/
+
+# Coverage output (c8)
+coverage/
+.nyc_output/
