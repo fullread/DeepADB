@@ -2,7 +2,35 @@
 
 All notable changes to DeepADB are documented in this file.
 
-## Unreleased
+## v1.1.3 — Transitive Dependency Security & CI Hardening
+
+Patched the transitive `hono` dependency against four advisories and shipped the
+previously-unreleased CI supply-chain hardening and device-free test fixes.
+Dependency lockfile, CI configuration, and test files only — no tool, API, or
+behavior changes.
+
+### Security — transitive hono dependency (4 advisories)
+
+Bumped the transitive `hono` dependency from 4.12.18 to 4.12.23 (the four fixes
+landed in 4.12.21; 4.12.22–4.12.23 followed). hono is pulled in only by
+`@modelcontextprotocol/sdk@1.29.0`, whose `^4.11.4` range already permitted the
+patched version — a lockfile refresh, not an SDK or API change, and hono is not
+imported anywhere in DeepADB's own source. The four advisories, all fixed at
+4.12.21:
+
+- **HTTP request smuggling via `app.mount`** — percent-encoded multi-byte
+  characters in the request path could route to unintended sub-application
+  routes.
+- **`ipRestriction` IPv6 deny-rule bypass** — non-canonical IPv6 forms
+  (compressed or explicit-zero representations) skipped configured deny rules.
+- **`jwt` middleware authorization bypass** — a valid JWT presented under any
+  Authorization scheme, not just `Bearer`, was accepted.
+- **Cookie HTTP response-splitting via `serialize`** — crafted `sameSite` or
+  `priority` values could inject attributes into the `Set-Cookie` header.
+
+DeepADB's published transport is stdio (see `server.json`), so the HTTP routing
+and middleware paths these advisories concern are outside the default
+configuration; the dependency is patched regardless.
 
 ### Security — CI supply-chain hardening
 
