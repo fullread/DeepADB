@@ -1,5 +1,10 @@
 # DeepADB
 
+[![Build](https://github.com/fullread/DeepADB/actions/workflows/test.yml/badge.svg)](https://github.com/fullread/DeepADB/actions/workflows/test.yml)
+[![npm](https://img.shields.io/npm/v/deepadb.svg)](https://www.npmjs.com/package/deepadb)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Official MCP Registry](https://img.shields.io/badge/Official%20MCP%20Registry-listed-6E56CF.svg)](https://registry.modelcontextprotocol.io/?q=io.github.fullread%2Fdeepadb)
+
 MCP (Model Context Protocol) server for AI agents that need to inspect, control, test, and diagnose Android devices through ADB—or directly on-device through Termux.
 
 **204 tools, 5 resources, and 4 prompts across 45 modules**—from UI automation and application management to logs, network capture, baseband, firmware, security, and hardware diagnostics.
