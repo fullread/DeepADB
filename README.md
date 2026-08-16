@@ -1,8 +1,30 @@
 # DeepADB
 
-MCP (Model Context Protocol) server providing full Android Debug Bridge (ADB) integration for AI agents. Enables MCP clients to directly interact with connected Android devices — inspecting state, running commands, managing apps, capturing logs, controlling device settings, analyzing UI hierarchies, recording screens, managing emulators, running structured test sessions, orchestrating multi-device operations, capturing network traffic, running CI pipelines, auditing accessibility, detecting performance regressions, executing cloud device farm tests, debugging over WiFi, building projects, and managing community plugins.
+MCP (Model Context Protocol) server for AI agents that need to inspect, control, test, and diagnose Android devices through ADB—or directly on-device through Termux.
 
-**204 tools, 5 resources, and 4 prompts across 45 modules** — the most comprehensive ADB MCP server available, with triple transport (stdio + HTTP/SSE + WebSocket), optional GraphQL API, defense-in-depth security, modem firmware analysis, workflow marketplace, AT command interface with multi-chipset support, RIL message interception, device profiling, baseband/modem integration, automated test generation, OTA update monitoring, SELinux auditing, thermal/power profiling, network device discovery, visual regression detection, workflow orchestration, accessibility auditing, and contextual truncation.
+**204 tools, 5 resources, and 4 prompts across 45 modules**—from UI automation and application management to logs, network capture, baseband, firmware, security, and hardware diagnostics.
+
+## Get started
+
+DeepADB runs as a local MCP server. It uses ADB by default and automatically switches to direct execution when it detects Termux on an Android device.
+
+```bash
+git clone https://github.com/fullread/DeepADB.git
+cd DeepADB
+npm ci
+npm run build
+npm start
+```
+
+Add `build/index.js` to your MCP client configuration, then begin with these workflows:
+
+| Goal | Start with |
+| --- | --- |
+| Confirm the toolchain and connected device | `adb_health_check`, then `adb_devices` |
+| Inspect the current Android UI | `adb_screen_state`, then `adb_ui_dump` |
+| Diagnose a device or app | `adb_device_info`, `adb_logcat`, and `adb_dumpsys` |
+
+For a guided local connection, see [Claude Code Configuration](#claude-code-configuration). Read [SECURITY.md](SECURITY.md) before exposing HTTP, WebSocket, or GraphQL transports beyond loopback.
 
 ## Architecture
 
@@ -109,24 +131,6 @@ git clone <deepadb-repo> && cd deepadb
 npm install && npm run build
 npm start                              # stdio — for local AI agents (Claude Code, OpenCode)
 DA_HTTP_PORT=3000 npm start            # HTTP/SSE — for remote AI access over WiFi
-```
-
-## Quick Start
-
-```bash
-npm install
-npm run build
-npm run inspector   # Test with MCP Inspector
-npm start           # Run directly (stdio mode)
-
-# HTTP/SSE mode for browser-based clients
-DA_HTTP_PORT=3000 npm start
-
-# WebSocket mode (requires: npm install ws)
-DA_WS_PORT=3001 npm start
-
-# GraphQL API (requires: npm install graphql) — runs alongside any transport
-DA_GRAPHQL_PORT=4000 npm start
 ```
 
 ## Claude Code Configuration
@@ -724,7 +728,7 @@ DeepADB/
 
 - **Runtime**: Node.js ≥22 (ES2024, ESM; Node 22.12+ for coverage)
 - **Language**: TypeScript 6.0 (strict mode, NodeNext module resolution)
-- **MCP SDK**: `@modelcontextprotocol/sdk` ^1.24.0 (currently resolves to 1.29.0)
+- **MCP SDK**: `@modelcontextprotocol/sdk` ^1.24.0 (currently resolves to 1.30.0)
 - **Validation**: Zod ^4.4.3
 - **Transport**: stdio (JSON-RPC), HTTP/SSE, WebSocket (optional `ws`), GraphQL API (optional `graphql`)
 
