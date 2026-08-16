@@ -153,6 +153,18 @@ DA_HTTP_PORT=3000 npm start            # HTTP/SSE — for remote AI access over 
 
 ## Available Tools (204)
 
+Start with the capability area that matches your task; the complete reference remains below.
+
+| Area | Includes |
+| --- | --- |
+| [Inspect & diagnose](#health-1-tool) | [Device](#device-3-tools), [packages](#packages-12-tools), [files](#files-18-tools), [logs](#logs--snapshots-3-tools), and [diagnostics](#diagnostics-9-tools) |
+| [Control & automate](#ui-10-tools) | [UI](#ui-10-tools), [device control](#device-control-9-tools), [input automation](#input-gestures--ui-automation-15-tools), and [test sessions](#test-sessions-3-tools) |
+| [Connect & scale](#wireless-debugging-4-tools) | [Wireless debugging](#wireless-debugging-4-tools), [port forwarding](#port-forwarding-8-tools), [multi-device orchestration](#multi-device-orchestration-4-tools), and [CI/CD](#cicd-integration-3-tools) |
+| [Analyze Android internals](#basebandmodem-6-tools) | [Network capture](#network-capture-3-tools), [baseband](#basebandmodem-6-tools), [firmware](#modem-firmware-analysis-3-tools), [SELinux](#selinux--permission-auditing-3-tools), and [sensors](#hardware-sensor-access-2-tools) |
+| [Extend workflows](#workflow-orchestration-3-tools) | [Plugins](#plugins-2-tools), [workflow orchestration](#workflow-orchestration-3-tools), [device profiles](#device-profiles-3-tools), and [result handles](#result-handles-3-tools) |
+
+### Complete tool reference
+
 ### Health (1 tool)
 - `adb_health_check` — Comprehensive toolchain validation: ADB binary, server, device connection, authorization, root access, and storage writability
 
