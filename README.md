@@ -722,7 +722,7 @@ DeepADB/
 
 ## Tech Stack
 
-- **Runtime**: Node.js ≥22 (ES2024, ESM)
+- **Runtime**: Node.js ≥22 (ES2024, ESM; Node 22.12+ for coverage)
 - **Language**: TypeScript 6.0 (strict mode, NodeNext module resolution)
 - **MCP SDK**: `@modelcontextprotocol/sdk` ^1.24.0 (currently resolves to 1.29.0)
 - **Validation**: Zod ^4.4.3
