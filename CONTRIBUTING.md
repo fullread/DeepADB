@@ -6,7 +6,8 @@ first.
 
 ## Prerequisites
 
-- Node.js >= 22 (the project uses ESM and modern language features).
+- Node.js >= 22 (the project uses ESM and modern language features). Running
+  coverage with c8 12 requires Node 22.12 or newer.
 - `npm`.
 - For device-dependent tests: the Android SDK platform-tools (`adb`) on PATH,
   and a connected device or running emulator. The device-free suites need

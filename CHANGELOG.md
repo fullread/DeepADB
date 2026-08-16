@@ -2,6 +2,20 @@
 
 All notable changes to DeepADB are documented in this file.
 
+## Unreleased
+
+### Dependency maintenance
+
+- Updated the MCP SDK lockfile resolution, c8 to 12.0.0, GraphQL to 17.0.2,
+  and compatible transitive development dependencies. No tool or API behavior
+  changed.
+- Coverage with c8 12 requires Node 20.19, 22.12, or newer; the published
+  runtime requirement remains Node 22.
+- Verified with a clean build and lint, device-free coverage and transport
+  suites, plus security and hardware-core validation on a Pixel 6a. The
+  TypeScript 7 upgrade remains deferred because the current typescript-eslint
+  release supports TypeScript below 6.1.
+
 ## v1.1.3 — Transitive Dependency Security & CI Hardening
 
 Patched the transitive `hono` dependency against four advisories and shipped the
