@@ -2,19 +2,49 @@
 
 All notable changes to DeepADB are documented in this file.
 
-## Unreleased
+## v1.1.4 — Focused Android Runtime Diagnostics
+
+### Added — focused Android runtime diagnostics
+
+- Added `adb_app_route_context`, a read-only package-to-UID route audit that
+  correlates UID rules, referenced route tables, network policy, VPN, and
+  default-network state.
+- Added `adb_sqlite_inspect`, a package-scoped Room/SQLite inspector supporting
+  database listing, schema inspection, and validated read-only SQL. It enforces
+  a single-statement allowlist, row/output/database-size caps, `query_only`,
+  `-readonly` when device sqlite3 is present, rejects symbolic-link database
+  and WAL files, and uses a private, bounded host snapshot fallback when needed.
+- Added `adb_shannon_session`, which combines Shannon chipset detection, root
+  and device-node checks, and a benign `AT`/`OK` handshake. The only optional
+  follow-up is the read-only `ATI` identity query.
+- Added `adb_runtime_audit`, a unified read-only readiness matrix for the ADB
+  transport, Android runtime, UI/network/SQLite capabilities, root, SELinux,
+  modem nodes, and Wear prerequisites.
+- Added `adb_wear_datalayer_preflight`, a read-only phone/watch prerequisite
+  check that omits Bluetooth and companion-device identifiers from its output.
+- Added device-free parser, SQL safety, and MCP boundary coverage plus optional
+  live-device smoke coverage for all five tools.
+- Hardened the shared AT transport after Pixel 6a validation: Google Tensor's
+  `/dev/umts_router` is now detected, only character devices are eligible,
+  Shannon exchanges use CRLF termination, CPIF empty reads are re-armed, and
+  no-create writes prevent a missing `/dev` candidate from becoming a regular
+  file. A live `AT`/`OK` and read-only `ATI` exchange now completes on GS101.
 
 ### Dependency maintenance
 
-- Updated the MCP SDK lockfile resolution, c8 to 12.0.0, GraphQL to 17.0.2,
-  and compatible transitive development dependencies. No tool or API behavior
-  changed.
+- Refreshed all compatible dependencies, including Zod 4.5.4, Node type
+  definitions 26.4.0, ESLint 10.9.1, and typescript-eslint 8.68.0. The MCP SDK
+  remains resolved at 1.30.0; c8 12.0.0 and GraphQL 17.0.2 remain current.
 - Coverage with c8 12 requires Node 20.19, 22.12, or newer; the published
   runtime requirement remains Node 22.
-- Verified with a clean build and lint, device-free coverage and transport
-  suites, plus security and hardware-core validation on a Pixel 6a. The
-  TypeScript 7 upgrade remains deferred because the current typescript-eslint
-  release supports TypeScript below 6.1.
+- The TypeScript 7 upgrade remains deferred because typescript-eslint 8.68.0
+  explicitly supports TypeScript below 6.1.
+- Verified with a clean `npm ci --ignore-scripts`, zero-vulnerability audit,
+  build, lint, c8 execution, 187 passing device-isolated CI checks, five
+  passing read-only smoke checks on a Pixel 6a, and a full host hardware run
+  with 604 passed, 0 failed, and 17 expected environment-specific skips. The
+  host SQLite snapshot fallback also completed live schema and capped-query
+  inspection with cleanup.
 
 ## v1.1.3 — Transitive Dependency Security & CI Hardening
 

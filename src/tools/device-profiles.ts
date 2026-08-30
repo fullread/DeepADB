@@ -66,11 +66,11 @@ const BUILTIN_PROFILES: Partial<DeviceProfile>[] = [
     hardware: "bluejay",
     chipname: "s5e8535",
     chipsetFamily: "shannon",
-    modemDeviceNodes: ["/dev/umts_router0", "/dev/umts_router1", "/dev/umts_atc0"],
-    supports5G: false,
+    modemDeviceNodes: ["/dev/umts_router"],
+    supports5G: true,
     quirks: [
       "Shannon/Exynos Modem 5123 baseband",
-      "AT commands via /dev/umts_router0 (root required)",
+      "AT commands via /dev/umts_router (root required)",
       "Radio logcat uses RILJ/RILC tags",
     ],
   },
@@ -80,7 +80,7 @@ const BUILTIN_PROFILES: Partial<DeviceProfile>[] = [
     device: "panther",
     chipname: "s5e9925",
     chipsetFamily: "shannon",
-    modemDeviceNodes: ["/dev/umts_router0", "/dev/umts_router1"],
+    modemDeviceNodes: ["/dev/umts_router"],
     supports5G: true,
     quirks: [
       "Shannon/Exynos Modem 5300 baseband",
@@ -93,7 +93,7 @@ const BUILTIN_PROFILES: Partial<DeviceProfile>[] = [
     device: "shiba",
     chipname: "s5e9945",
     chipsetFamily: "shannon",
-    modemDeviceNodes: ["/dev/umts_router0", "/dev/umts_router1"],
+    modemDeviceNodes: ["/dev/umts_router"],
     supports5G: true,
     quirks: [
       "Shannon/Exynos Modem 5400 baseband",
@@ -110,7 +110,7 @@ const BUILTIN_PROFILES: Partial<DeviceProfile>[] = [
     quirks: [
       "Snapdragon 8 Gen 3 (US/KR) or Exynos 2400 (global)",
       "Modem paths vary by SoC variant",
-      "Qualcomm variant: /dev/smd11, Exynos variant: /dev/umts_router0",
+      "Qualcomm variant: /dev/smd11; Exynos paths vary and may include /dev/umts_router",
     ],
   },
   {
@@ -172,7 +172,7 @@ export function registerDeviceProfileTools(ctx: ToolContext): void {
         const respondingPort: string | null = null;
 
         if (rootAvailable) {
-          const existCmd = paths.map((p) => `test -e ${p} && echo "EXISTS:${p}"`).join("; ");
+          const existCmd = paths.map((p) => `test -c ${p} && echo "EXISTS:${p}"`).join("; ");
           const existResult = await ctx.bridge.rootShell(existCmd, {
             device: serial, timeout: 10000, ignoreExitCode: true,
           });

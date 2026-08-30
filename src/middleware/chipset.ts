@@ -16,6 +16,7 @@
 export const MODEM_PATHS: Record<string, string[]> = {
   // Samsung Shannon/Exynos (Pixel 6, 6a, 7, 7a, 8, Samsung Galaxy S series)
   shannon: [
+    "/dev/umts_router",
     "/dev/umts_router0",
     "/dev/umts_router1",
     "/dev/umts_atc0",
