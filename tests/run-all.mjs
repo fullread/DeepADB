@@ -17,6 +17,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // sanitize-fuzz). Pass --ci to restrict the run to this set.
 const CI_SAFE = new Set([
   "test-boundaries.mjs",
+  "test-next-version.mjs",
   "test-result-handles.mjs",
   "test-sanitize-fuzz.mjs",
   "test-supply-chain.mjs",

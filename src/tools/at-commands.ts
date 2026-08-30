@@ -97,8 +97,42 @@ function validateAtCommand(cmd: string): string | null {
 }
 
 /**
- * Send an AT command to a device node and capture the response.
- * Uses `echo` + `cat` with timeout via root shell.
+ * Build the guarded device-side AT exchange.
+ *
+ * CPIF/SIPC nodes return an empty read after roughly 100ms when their RX queue
+ * is empty. A one-shot `cat` therefore exits before a slightly delayed modem
+ * response. Re-arm bounded reads until a terminal result arrives, and start the
+ * writer after the first read is waiting. `dd conv=nocreat` is deliberate: a
+ * shell redirection would create a regular file under /dev when a candidate
+ * node is absent and the caller has root.
+ */
+export function buildAtShellCommand(
+  deviceNode: string,
+  command: string,
+  timeoutMs: number,
+): string {
+  const portErr = validateDeviceNode(deviceNode);
+  if (portErr) throw new Error(portErr);
+  const cmdErr = validateAtCommand(command);
+  if (cmdErr) throw new Error(cmdErr);
+
+  const cmd = command.trimEnd();
+  const node = shellQuote(deviceNode);
+  const payload = shellQuote(cmd);
+  const maxReads = Math.max(1, Math.ceil(timeoutMs / 100));
+  const terminator = (MODEM_PATHS.shannon ?? []).includes(deviceNode) ? "%s\\r\\n" : "%s\\r";
+
+  return [
+    `test -c ${node} || { printf '%s\\n' 'DeepADB: target is not a character device' >&2; exit 1; }`,
+    `(sleep 0.1; printf '${terminator}' ${payload} | dd of=${node} conv=nocreat,notrunc status=none) & writer_pid=$!`,
+    "i=0",
+    `while [ "$i" -lt ${maxReads} ]; do chunk=$(dd if=${node} bs=4096 count=1 status=none 2>/dev/null); if [ -n "$chunk" ]; then printf '%s\\n' "$chunk"; if printf '%s\\n' "$chunk" | tr -d '\\r' | grep -Eq '^(OK|ERROR|\\+CME ERROR:|\\+CMS ERROR:)'; then break; fi; fi; i=$((i + 1)); done`,
+    'wait "$writer_pid"',
+  ].join("; ");
+}
+
+/**
+ * Send an AT command to a character-device modem node and capture its response.
  * Both the command and device node are validated before interpolation.
  */
 async function sendAtCommand(
@@ -116,15 +150,7 @@ async function sendAtCommand(
   const cmdErr = validateAtCommand(command);
   if (cmdErr) return { response: "", error: cmdErr };
 
-  const cmd = command.trimEnd();
-
-  // Send the command and read response with a timeout.
-  // Both cmd and deviceNode are validated above — no shell metacharacters.
-  // Use printf with '%s\r' format to separate format string from data —
-  // AT commands may contain % (e.g., AT%RESTART) which printf would
-  // misinterpret as format specifiers if cmd were in the format position.
-  const timeoutSec = Math.max(1, Math.ceil(timeoutMs / 1000));
-  const shellCmd = `printf '%s\\r' '${cmd}' > '${deviceNode}' && timeout ${timeoutSec} cat '${deviceNode}' 2>&1 || true`;
+  const shellCmd = buildAtShellCommand(deviceNode, command, timeoutMs);
 
   try {
     const result = await ctx.bridge.rootShell(shellCmd, {
@@ -145,7 +171,8 @@ async function sendAtCommand(
 
 /**
  * Auto-detect the first existing modem device node for the given chipset family.
- * Probes MODEM_PATHS entries via `test -e` through root shell.
+ * Probes MODEM_PATHS entries via `test -c` through root shell so regular files,
+ * block devices, and stale filesystem artifacts can never be selected.
  * Returns the first existing node path, or null if none found.
  */
 async function autoDetectAtPort(
@@ -163,7 +190,7 @@ async function autoDetectAtPort(
   // or metacharacters), so this is safe by construction today. Wrapping
   // ensures a future contributor adding a path with whitespace doesn't
   // accidentally word-split here.
-  const existCmd = paths.map((p) => `test -e ${shellQuote(p)} && echo "EXISTS:${p}"`).join("; ");
+  const existCmd = paths.map((p) => `test -c ${shellQuote(p)} && echo "EXISTS:${p}"`).join("; ");
   const existResult = await ctx.bridge.rootShell(existCmd, {
     device: serial, timeout: 5000, ignoreExitCode: true,
   });
@@ -174,6 +201,111 @@ async function autoDetectAtPort(
 }
 
 export function registerAtCommandTools(ctx: ToolContext): void {
+
+  ctx.server.tool(
+    "adb_shannon_session",
+    "Preflight a Samsung Shannon/Exynos modem session by checking the chipset, root access, known AT ports, and a benign AT handshake together. Optionally sends ATI for identification after a successful handshake. Makes no modem configuration changes.",
+    {
+      port: z.string().optional().describe("Optional Shannon device node override (for example /dev/umts_router)"),
+      timeout: z.number().int().min(1000).max(10000).optional().default(3000)
+        .describe("Handshake timeout per port in milliseconds (1000-10000, default 3000)"),
+      includeIdentity: z.boolean().optional().default(false)
+        .describe("After a successful AT handshake, also send the read-only ATI identity query"),
+      device: z.string().optional().describe("Device serial"),
+    },
+    async ({ port, timeout, includeIdentity, device }) => {
+      try {
+        if (port) {
+          const portError = validateDeviceNode(port);
+          if (portError) {
+            return { content: [{ type: "text", text: portError }], isError: true };
+          }
+          if (!(MODEM_PATHS.shannon ?? []).includes(port)) {
+            return {
+              content: [{ type: "text", text: `Shannon session port must be one of the known Shannon AT nodes: ${(MODEM_PATHS.shannon ?? []).join(", ")}` }],
+              isError: true,
+            };
+          }
+        }
+
+        const resolved = await ctx.deviceManager.resolveDevice(device);
+        const serial = resolved.serial;
+        const props = await ctx.deviceManager.getDeviceProps(serial);
+        const family = detectChipsetFamily(props);
+        const sections = [
+          "=== Shannon Session Preflight ===",
+          `Device: ${props["ro.product.model"] ?? "unknown"}`,
+          `Chipset family: ${family}`,
+        ];
+
+        if (family !== "shannon") {
+          sections.push("Result: this device does not identify as Shannon/Exynos. Use adb_at_detect for generic modem discovery.");
+          return { content: [{ type: "text", text: sections.join("\n") }], isError: true };
+        }
+
+        const rootProbe = await ctx.bridge.shell("su -c id", {
+          device: serial, timeout: 5000, ignoreExitCode: true,
+        });
+        if (!/uid=0\b/.test(rootProbe.stdout)) {
+          sections.push("Root: unavailable", "Result: Shannon device nodes require root access.");
+          return { content: [{ type: "text", text: sections.join("\n") }], isError: true };
+        }
+        sections.push("Root: available");
+
+        const candidates = port ? [port] : (MODEM_PATHS.shannon ?? []);
+        const existenceProbe = candidates
+          .map((candidate) => `test -c ${shellQuote(candidate)} && echo ${shellQuote(`EXISTS:${candidate}`)}`)
+          .join("; ");
+        const existence = await ctx.bridge.rootShell(existenceProbe, {
+          device: serial, timeout: 10000, ignoreExitCode: true,
+        });
+        const existing = existence.stdout.split(/\r?\n/)
+          .filter((line) => line.startsWith("EXISTS:"))
+          .map((line) => line.slice("EXISTS:".length).trim())
+          .filter((candidate) => candidates.includes(candidate));
+
+        sections.push(`Ports checked: ${candidates.length}`, `Ports present: ${existing.length ? existing.join(", ") : "none"}`);
+        if (existing.length === 0) {
+          sections.push("Result: no Shannon AT device node is currently visible.");
+          return { content: [{ type: "text", text: sections.join("\n") }] };
+        }
+
+        let selected: string | null = null;
+        let identity = "";
+        sections.push("", "── Handshakes ──");
+        for (const candidate of existing) {
+          const handshake = await sendAtCommand(ctx, serial, candidate, "AT", timeout);
+          const ok = /(^|\r?\n)\s*OK\s*($|\r?\n)/i.test(handshake.response) || handshake.response.trim() === "OK";
+          if (handshake.error) {
+            sections.push(`○ ${candidate}: ${handshake.error}`);
+          } else if (ok) {
+            sections.push(`✓ ${candidate}: AT / OK handshake complete`);
+            selected = candidate;
+            if (includeIdentity) {
+              const identityResult = await sendAtCommand(ctx, serial, candidate, "ATI", timeout);
+              identity = identityResult.error
+                ? `Identity query error: ${identityResult.error}`
+                : (identityResult.response.trim() || "Identity query returned no text");
+            }
+            break;
+          } else {
+            sections.push(`○ ${candidate}: ${handshake.response.trim() ? "response received without OK" : "no response before timeout"}`);
+          }
+        }
+
+        if (selected) {
+          sections.push("", "=== SHANNON SESSION READY ===", `Selected port: ${selected}`);
+          if (includeIdentity) sections.push("", "── ATI identity ──", identity);
+        } else {
+          sections.push("", "=== SHANNON SESSION NOT READY ===", "Device nodes are present, but no AT / OK handshake completed.");
+        }
+        sections.push("Only AT and, when requested, ATI were sent; no modem configuration was changed.");
+        return { content: [{ type: "text", text: OutputProcessor.process(sections.join("\n"), 20000) }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
+      }
+    },
+  );
 
   ctx.server.tool(
     "adb_at_detect",
@@ -207,7 +339,7 @@ export function registerAtCommandTools(ctx: ToolContext): void {
 
         // Check which device nodes exist
         // T5 fix (same rationale as autoDetectAtPort)
-        const existCmd = allPaths.map((p) => `test -e ${shellQuote(p)} && echo "EXISTS:${p}"`).join("; ");
+        const existCmd = allPaths.map((p) => `test -c ${shellQuote(p)} && echo "EXISTS:${p}"`).join("; ");
         const existResult = await ctx.bridge.rootShell(existCmd, {
           device: serial, timeout: 10000, ignoreExitCode: true,
         });
@@ -266,7 +398,7 @@ export function registerAtCommandTools(ctx: ToolContext): void {
     "Send a single AT command to the modem and capture the response. Requires root. Use adb_at_detect to find the correct port, or specify it manually.",
     {
       command: z.string().describe("AT command to send (e.g., 'AT+CSQ', 'ATI', 'AT+COPS?')"),
-      port: z.string().optional().describe("Modem device node (e.g., '/dev/umts_router0'). If omitted, auto-detects."),
+      port: z.string().optional().describe("Modem device node (e.g., '/dev/umts_router'). If omitted, auto-detects."),
       timeout: z.number().min(1000).max(30000).optional().default(5000).describe("Response timeout in ms (1000-30000, default 5000)"),
       force: z.boolean().optional().default(false).describe("Bypass dangerous command safety check"),
       device: z.string().optional().describe("Device serial"),
@@ -524,7 +656,7 @@ export function registerAtCommandTools(ctx: ToolContext): void {
           sections.push("\n── AT Command Responses ──");
           sections.push("No modem device node found — AT port auto-detection requires root and direct modem node access.");
           sections.push("This is expected in ADB mode. Use on-device mode (Termux) for full AT cross-validation.");
-          sections.push("Alternatively, specify 'port' manually (e.g., '/dev/umts_router0' for Shannon).");
+          sections.push("Alternatively, specify 'port' manually (e.g., '/dev/umts_router' for Google Tensor/Shannon).");
           sections.push("\nFalling back to property-only analysis...");
         }
 

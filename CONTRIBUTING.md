@@ -28,10 +28,13 @@ npm run test:ci   # device-free suites only (what CI runs)
 npm run coverage  # full suite under c8; writes coverage/ (lcov + summary)
 ```
 
-The device-free suites (`test-boundaries`, `test-result-handles`,
-`test-supply-chain`, `test-transports`, `test-sanitize-fuzz`) run without any
-hardware and are the fastest way to validate a change. A single suite can be
-run directly, e.g. `node tests/test-boundaries.mjs`.
+The device-free suites (`test-boundaries`, `test-next-version`,
+`test-result-handles`, `test-supply-chain`, `test-transports`,
+`test-sanitize-fuzz`) run without any hardware and are the fastest way to
+validate a change. A single suite can be run directly, e.g.
+`node tests/test-next-version.mjs`. Device-facing changes should also run the
+relevant hardware suite; the focused diagnostics use
+`node tests/test-next-version-device.mjs`.
 
 ## Build discipline
 

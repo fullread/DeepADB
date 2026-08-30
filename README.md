@@ -7,7 +7,7 @@
 
 MCP (Model Context Protocol) server for AI agents that need to inspect, control, test, and diagnose Android devices through ADB—or directly on-device through Termux.
 
-**204 tools, 5 resources, and 4 prompts across 45 modules**—from UI automation and application management to logs, network capture, baseband, firmware, security, and hardware diagnostics.
+**209 tools, 5 resources, and 4 prompts across 49 modules**—from UI automation and application management to logs, network capture, baseband, firmware, security, and hardware diagnostics.
 
 ## Get started
 
@@ -43,7 +43,7 @@ For a guided local connection, see [Claude Code Configuration](#claude-code-conf
 │               DeepADB Server                     │
 │                                                  │
 │  ┌─────────────────────────────────────────────┐ │
-│  │           Tool Modules (45)                 │ │
+│  │           Tool Modules (49)                 │ │
 │  │  device │ shell │ packages │ files │ logs   │ │
 │  │  diagnostics │ ui │ build │ health          │ │
 │  │  wireless │ control │ logcat-watch          │ │
@@ -59,6 +59,8 @@ For a guided local connection, see [Claude Code Configuration](#claude-code-conf
 │  │  workflow-market │ selinux-audit            │ │
 │  │  thermal-power │ network-discovery          │ │
 │  │  input-gestures │ wireless-firmware         │ │
+│  │  app-network │ database-inspector           │ │
+│  │  runtime-audit │ wear                       │ │
 │  ├─────────────────────────────────────────────┤ │
 │  │  Resources (5) │ Prompts (4)                │ │
 │  └───────────────────┬─────────────────────────┘ │
@@ -106,15 +108,17 @@ DeepADB operates in two modes, auto-detected at startup:
 ```
 AI Agent (PC) ←→ MCP ←→ DeepADB (PC) ←→ ADB (USB) ←→ Android Device
 ```
-Standard mode: DeepADB runs on a PC/Mac/Linux host and communicates with the device over USB via ADB. All 204 tools work through the ADB bridge with automatic retry on transient failures.
+Standard mode: DeepADB runs on a PC/Mac/Linux host and communicates with the device over USB via ADB. The complete 209-tool surface is registered through the ADB bridge with automatic retry on transient failures; environment-specific tools report their capability requirements when a host cannot run them.
 
 ### On-Device Mode — direct local execution
 ```
 AI Agent (Termux) ←→ MCP (stdio/HTTP) ←→ DeepADB (Termux) ←→ sh/su (local)
 ```
-When DeepADB runs directly on the Android device (e.g., inside Termux), it auto-detects the environment and switches to `LocalBridge`. Commands execute directly via `sh`/`su` — no ADB server, no USB, no serialization overhead. All 204 tools work identically, with significantly lower latency.
+When DeepADB runs directly on the Android device (e.g., inside Termux), it auto-detects the environment and switches to `LocalBridge`. Commands execute directly via `sh`/`su` — no ADB server, no USB, no serialization overhead. The same 209-tool MCP surface is registered, with capability-aware guidance when an optional on-device binary such as `sqlite3` is unavailable.
 
-**Validated on hardware** (Pixel 6a, Android 16, Termux + Magisk + QEMU 10.2.1) across a four-cell test matrix — host (ADB) and on-device (LocalBridge), each with and without a device PIN — with **0 failures in every cell**. The full suite is 577 tests in the host/ADB configuration and 613 on-device; the difference is the QEMU virtualization and Alpine VM-boot suites, which run only on-device:
+**v1.1.4 host hardware validation:** the full Pixel 6a / Android 16 regression completed with **604 passed, 0 failed, and 17 expected environment-specific skips (621 total)**. This includes live AT/OK validation on `/dev/umts_router`, a guarded read-only SQLite schema snapshot with cleanup, the unified runtime audit, per-app route context, and the single-device Wear preflight. The skips are the five on-device-only QEMU checks plus twelve Windows-host or unavailable-`tcpdump` security checks.
+
+**v1.1.3 hardware baseline:** validated on a Pixel 6a (Android 16, Termux + Magisk + QEMU 10.2.1) across a four-cell test matrix — host (ADB) and on-device (LocalBridge), each with and without a device PIN — with **0 failures in every cell**. The v1.1.3 suite contained 577 tests in the host/ADB configuration and 613 on-device; the difference is the QEMU virtualization and Alpine VM-boot suites, which run only on-device:
 
 - **ADB mode, no PIN:** 556 passed / 0 failed / 21 skipped (577 total). Skips: 5 QEMU (on-device only), 7 gracefulKill unit tests (require POSIX signals, skipped on the Windows host), 3 tcpdump sanitization (tcpdump is root-only and unreachable over a non-root ADB shell), 2 host-shell round-trips (require a POSIX /bin/sh), 4 screen-state (require DA_TEST_PIN).
 - **ADB mode, with PIN:** 560 passed / 0 failed / 17 skipped (577 total). The 4 screen-state tests unlock and run.
@@ -151,15 +155,15 @@ DA_HTTP_PORT=3000 npm start            # HTTP/SSE — for remote AI access over 
 }
 ```
 
-## Available Tools (204)
+## Available Tools (209)
 
 Start with the capability area that matches your task; the complete reference remains below.
 
 | Area | Includes |
 | --- | --- |
-| [Inspect & diagnose](#health-1-tool) | [Device](#device-3-tools), [packages](#packages-12-tools), [files](#files-18-tools), [logs](#logs--snapshots-3-tools), and [diagnostics](#diagnostics-9-tools) |
+| [Inspect & diagnose](#health-1-tool) | [Device](#device-3-tools), [packages](#packages-12-tools), [files](#files-18-tools), [logs](#logs--snapshots-3-tools), [diagnostics](#diagnostics-9-tools), [runtime audit](#runtime-audit-1-tool), and [SQLite](#room--sqlite-inspection-1-tool) |
 | [Control & automate](#ui-10-tools) | [UI](#ui-10-tools), [device control](#device-control-9-tools), [input automation](#input-gestures--ui-automation-15-tools), and [test sessions](#test-sessions-3-tools) |
-| [Connect & scale](#wireless-debugging-4-tools) | [Wireless debugging](#wireless-debugging-4-tools), [port forwarding](#port-forwarding-8-tools), [multi-device orchestration](#multi-device-orchestration-4-tools), and [CI/CD](#cicd-integration-3-tools) |
+| [Connect & scale](#wireless-debugging-4-tools) | [Wireless debugging](#wireless-debugging-4-tools), [port forwarding](#port-forwarding-8-tools), [per-app routing](#per-app-route-context-1-tool), [Wear preflight](#wear-data-layer-1-tool), [multi-device orchestration](#multi-device-orchestration-4-tools), and [CI/CD](#cicd-integration-3-tools) |
 | [Analyze Android internals](#basebandmodem-6-tools) | [Network capture](#network-capture-3-tools), [baseband](#basebandmodem-6-tools), [firmware](#modem-firmware-analysis-3-tools), [SELinux](#selinux--permission-auditing-3-tools), and [sensors](#hardware-sensor-access-2-tools) |
 | [Extend workflows](#workflow-orchestration-3-tools) | [Plugins](#plugins-2-tools), [workflow orchestration](#workflow-orchestration-3-tools), [device profiles](#device-profiles-3-tools), and [result handles](#result-handles-3-tools) |
 
@@ -167,6 +171,9 @@ Start with the capability area that matches your task; the complete reference re
 
 ### Health (1 tool)
 - `adb_health_check` — Comprehensive toolchain validation: ADB binary, server, device connection, authorization, root access, and storage writability
+
+### Runtime Audit (1 tool)
+- `adb_runtime_audit` — Unified read-only readiness audit for transport, Android userspace, root, SELinux, storage, command capabilities, UI/network diagnostics, SQLite, modem nodes, and Wear prerequisites
 
 ### Device (3 tools)
 - `adb_devices` — List all connected devices with state, model, and product info
@@ -190,6 +197,9 @@ Start with the capability area that matches your task; the complete reference re
 - `adb_start_app` — Launch an app by package name (resolves launcher activity)
 - `adb_restart_app` — Force-stop then re-launch in one call (configurable delay)
 - `adb_resolve_intents` — Discover registered activities, services, and receivers with intent filters
+
+### Room & SQLite Inspection (1 tool)
+- `adb_sqlite_inspect` — Package-scoped database listing, schema inspection, and validated read-only SQL with hard row/output caps. Prefers `run-as`, falls back to root, rejects symbolic-link database/WAL files, uses device `sqlite3` when present, and otherwise deletes a private, bounded host-side snapshot after inspection
 
 ### Files (18 tools)
 - `adb_push` — Push local file to device (hard-blocked kernel paths, fs-type awareness, storage reporting)
@@ -232,6 +242,9 @@ Start with the capability area that matches your task; the complete reference re
 - `adb_bugreport` — Full bug report zip capture (device state, logs, system info)
 - `adb_crash_logs` — ANR traces and tombstone crash dumps from /data/anr/ and /data/tombstones/
 - `adb_heap_dump` — Capture heap dump (.hprof) from a running process for memory analysis
+
+### Per-App Route Context (1 tool)
+- `adb_app_route_context` — Resolve an installed package to its UID and correlate its effective `ip rule` ranges, route tables, network policy, VPN, and default-network state without changing routes or policy
 
 ### UI (10 tools)
 - `adb_screencap` — Take screenshot with filename sanitization, saves locally
@@ -297,6 +310,9 @@ Start with the capability area that matches your task; the complete reference re
 - `adb_multi_install` — Install an APK across multiple devices simultaneously
 - `adb_multi_compare` — Run a command on all devices and highlight output differences
 - `adb_multi_test` — Comparative test workflow: run predefined diagnostic profiles (firmware/security/network/identity/full) or custom command lists across all devices including QEMU guests, compare per-check, report matches and differences
+
+### Wear Data Layer (1 tool)
+- `adb_wear_datalayer_preflight` — Read-only phone/watch role, Google Play services, Bluetooth, optional package, companion-association, and Data Layer service preflight; pairing identifiers are intentionally omitted
 
 ### Input Gestures & UI Automation (15 tools)
 - `adb_input_drag` — Drag from point A to point B (uses `draganddrop` with swipe fallback for older Android)
@@ -371,7 +387,8 @@ Start with the capability area that matches your task; the complete reference re
 - `adb_gradle` — Run any Gradle task in a project directory
 - `adb_build_and_install` — Build debug APK and install via ANDROID_SERIAL targeting
 
-### AT Commands (5 tools)
+### AT Commands (6 tools)
+- `adb_shannon_session` — Check Shannon/Exynos chipset detection, root, character-device modem ports, and a benign `AT`/`OK` handshake together; supports Google Tensor's `/dev/umts_router`, re-arms bounded CPIF reads until a terminal result, optionally sends read-only `ATI`, and never sends a modem configuration command
 - `adb_at_detect` — Auto-detect modem AT command device node by chipset family (Shannon, Qualcomm, MediaTek, Unisoc, generic). Probes known paths and returns the first responding node
 - `adb_at_send` — Send a single AT command to the modem with response capture. Auto-detects port or accepts manual override. Dangerous command blocklist with force override
 - `adb_at_batch` — Send multiple AT commands sequentially with per-command results. Configurable inter-command delay
@@ -499,7 +516,7 @@ Full view tree capture via `uiautomator dump` with parsed XML extraction. Return
 Multi-layered security activated via `DA_SECURITY=true`. Provides command blocklist/allowlist filtering, rate limiting (commands per minute), and audit logging with automatic credential redaction. Security checks are integrated into `adb_shell`, `adb_root_shell`, `adb_multi_shell`, `adb_multi_compare`, `adb_input`, `adb_batch_actions`, and `adb_start_activity`. Configurable via environment variables for different deployment scenarios.
 
 ### Input Sanitization
-All tools that interpolate user-supplied parameters into shell command strings validate inputs against shell metacharacters before execution. Package names, property keys, service names, setting keys, test identifiers, network interface names, and tcpdump filters are all validated through a centralized `validateShellArg()` function that rejects `;`, `|`, `&`, `$`, backticks, parentheses, and other injection vectors. File paths use single-quoted shell escaping to prevent `$()` command substitution. The `adb_input` tool applies type-specific validation: `tap`/`swipe` accept only numeric coordinates, `keyevent` accepts only alphanumeric keycodes, and `text` is shell-escaped for literal delivery. The `adb_batch_actions` tool enforces the same per-action-type validation (digits-only for coordinates, alphanumeric for keycodes, shell-escape for text) and routes every assembled command through the security middleware. Deserialized JSON from snapshot files is validated before shell interpolation. Every `z.number()` parameter across all 204 tools has explicit `.min()/.max()` Zod bounds to prevent resource exhaustion from extreme values. The LocalBridge has explicit handlers for every ADB subcommand used by tool modules, preventing unquoted fallthrough to the default shell handler. In on-device mode, privilege escalation uses a frozen 16-command allowlist and restricted-path regex — the elevation set is `ReadonlySet` + `Object.freeze`, not configurable at runtime. The HTTP/SSE transport denies cross-origin requests by default (configurable via `DA_HTTP_CORS_ORIGIN`), the plugin registry verifies SHA-256 integrity hashes and prevents path traversal via directory containment checks, and the workflow engine enforces step count (200), sleep duration (5 min), and repeat iteration (100) limits. Fetch helpers enforce a 5 MB response body limit. Getprop output parsing handles Windows `\r\n` line endings via `.trim()` before regex matching, and dual SIM slot counts are capped at 4 to prevent resource exhaustion from corrupted device properties.
+All tools that interpolate user-supplied parameters into shell command strings validate inputs against shell metacharacters before execution. Package names, property keys, service names, setting keys, test identifiers, network interface names, and tcpdump filters are all validated through a centralized `validateShellArg()` function that rejects `;`, `|`, `&`, `$`, backticks, parentheses, and other injection vectors. File paths use single-quoted shell escaping to prevent `$()` command substitution. The `adb_input` tool applies type-specific validation: `tap`/`swipe` accept only numeric coordinates, `keyevent` accepts only alphanumeric keycodes, and `text` is shell-escaped for literal delivery. The `adb_batch_actions` tool enforces the same per-action-type validation (digits-only for coordinates, alphanumeric for keycodes, shell-escape for text) and routes every assembled command through the security middleware. Deserialized JSON from snapshot files is validated before shell interpolation. Every `z.number()` parameter across all 209 tools has explicit `.min()/.max()` Zod bounds to prevent resource exhaustion from extreme values. The LocalBridge has explicit handlers for every ADB subcommand used by tool modules, preventing unquoted fallthrough to the default shell handler. In on-device mode, privilege escalation uses a frozen 16-command allowlist and restricted-path regex — the elevation set is `ReadonlySet` + `Object.freeze`, not configurable at runtime. The HTTP/SSE transport denies cross-origin requests by default (configurable via `DA_HTTP_CORS_ORIGIN`), the plugin registry verifies SHA-256 integrity hashes and prevents path traversal via directory containment checks, and the workflow engine enforces step count (200), sleep duration (5 min), and repeat iteration (100) limits. Fetch helpers enforce a 5 MB response body limit. Getprop output parsing handles Windows `\r\n` line endings via `.trim()` before regex matching, and dual SIM slot counts are capped at 4 to prevent resource exhaustion from corrupted device properties.
 
 ### Multi-Device Orchestration
 Run commands, install APKs, and compare outputs across multiple connected devices in parallel. Essential for comparative testing across Android versions and device models.
@@ -589,7 +606,7 @@ Scans the local network for ADB-enabled devices via ARP table queries and option
 On-device virtual machine management using QEMU with KVM hardware acceleration. Enables running guest Android VMs directly on the physical device — a capability unique to DeepADB. Dynamic resource allocation auto-detects host CPU cores and physical RAM, reserving 1 core and 35% of memory for the host OS to prevent starvation. Multi-VM support tracks resource consumption across concurrent VMs, refusing new VMs when the pool is exhausted rather than degrading host performance. Disk image management with qcow2 (sparse, snapshot-capable) and raw formats. ADB port forwarding to guest VMs enables DeepADB's full tool suite to target both host and guest devices simultaneously. Process lifecycle tracked via the centralized cleanup registry with SIGTERM/SIGKILL shutdown. Path containment verification on all image operations prevents directory traversal.
 
 ### ToolContext Architecture
-All 45 tool modules receive a unified `ToolContext` dependency bundle containing server, bridge, deviceManager, logger, security, and config. Adding new cross-cutting dependencies requires no module signature changes.
+All 49 tool modules receive a unified `ToolContext` dependency bundle containing server, bridge, deviceManager, logger, security, and config. Adding new cross-cutting dependencies requires no module signature changes.
 
 ## Environment Variables
 
@@ -649,9 +666,11 @@ DeepADB/
 │   │   └── device-manager.ts   # Device discovery, TTL cache, serial routing
 │   ├── tools/
 │   │   ├── health.ts           # Toolchain health check (1 tool)
+│   │   ├── runtime-audit.ts    # Unified read-only runtime readiness audit (1 tool)
 │   │   ├── device.ts           # Device info and properties (3 tools)
 │   │   ├── shell.ts            # Shell and root command execution (2 tools)
 │   │   ├── packages.ts         # App lifecycle, install, permissions, intents (12 tools)
+│   │   ├── database-inspector.ts # Package-scoped read-only Room/SQLite inspection (1 tool)
 │   │   ├── files.ts            # File operations — push, pull, write, find, grep, replace, stat, checksum, chmod, chown, touch, fsinfo (18 tools)
 │   │   ├── logs.ts             # Logcat snapshots — filtered (3 tools)
 │   │   ├── logcat-watch.ts     # Persistent logcat with ring buffer and poll (4 tools)
@@ -675,7 +694,7 @@ DeepADB/
 │   │   ├── regression.ts       # Performance baseline and regression detection (3 tools)
 │   │   ├── device-farm.ts      # Firebase Test Lab integration via gcloud (3 tools)
 │   │   ├── registry.ts         # Community plugin registry search/install (3 tools)
-│   │   ├── at-commands.ts      # AT command modem interface, multi-chipset, cross-validation (5 tools)
+│   │   ├── at-commands.ts      # AT command modem interface, Shannon session, cross-validation (6 tools)
 │   │   ├── screenshot-diff.ts  # Visual regression — screenshot baseline/diff (3 tools)
 │   │   ├── workflow.ts         # Declarative workflow orchestration engine (3 tools)
 │   │   ├── split-apk.ts        # App bundles, split APKs, APEX modules (4 tools)
@@ -689,6 +708,8 @@ DeepADB/
 │   │   ├── selinux-audit.ts    # SELinux status, AVC denials, permission auditing (3 tools)
 │   │   ├── thermal-power.ts    # Thermal zones, CPU frequency, battery drain (3 tools)
 │   │   ├── network-discovery.ts # ADB-over-network scanning and auto-connect (3 tools)
+│   │   ├── app-network.ts      # Per-app UID routing and network-policy context (1 tool)
+│   │   ├── wear.ts             # Wear OS Data Layer phone/watch preflight (1 tool)
 │   │   ├── sensors.ts          # Hardware sensor enumeration, IIO power monitor reading (2 tools)
 │   │   ├── result-handles.ts   # Tempdir-backed result handle store — list, drop, drop-all (3 tools) + the result://{tool}/{name} resource
 │   │   ├── wireless-firmware.ts # WiFi, Bluetooth, NFC, GPS firmware identification (4 tools)

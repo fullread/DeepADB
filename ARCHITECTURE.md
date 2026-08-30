@@ -6,8 +6,8 @@ guarantees see SECURITY.md.
 
 ## Overview
 
-DeepADB is a Model Context Protocol (MCP) server that exposes 204 tools across
-45 tool modules, plus 5 resources and 4 prompts, for driving Android devices
+DeepADB is a Model Context Protocol (MCP) server that exposes 209 tools across
+49 tool modules, plus 5 resources and 4 prompts, for driving Android devices
 through ADB (or directly, on-device). It is plain TypeScript compiled to
 `build/` and run on Node (>= 22). There is no application framework: the
 structure is a small set of explicit layers wired together at startup in
@@ -114,18 +114,26 @@ the suites exercise the actual server, not mocks.
 Suites fall into two groups:
 
 - Device-free: validate behavior with no hardware attached. These run in CI.
-  `test-boundaries` (Zod bounds and enum rejection), `test-result-handles`,
-  `test-supply-chain`, `test-transports` (boots each transport on an ephemeral
+  `test-boundaries` (Zod bounds and enum rejection), `test-next-version`,
+  `test-result-handles`, `test-supply-chain`, `test-transports` (boots each transport on an ephemeral
   port and does a real MCP round-trip), and `test-sanitize-fuzz`. Device-
   dependent assertions inside an otherwise device-free suite skip-guard
   themselves when no device is present, so the run stays green either way.
 - Device-dependent: require a connected device or emulator and are run locally.
+  `test-next-version-device` exercises the runtime audit, app-route context,
+  guarded SQLite open, Wear preflight, and Shannon handshake. On validated
+  Shannon hardware it requires a real terminal `AT`/`OK` result rather than
+  accepting successful tool registration alone.
 
 Useful commands:
 
 - `npm test` runs the full suite (needs a device for the device-dependent parts).
 - `npm run test:ci` runs only the device-free suites (`run-all.mjs --ci`).
 - `npm run coverage` runs the suite under c8 and writes `coverage/` (lcov + summary).
+
+The v1.1.4 release baseline is 187 passing device-isolated CI checks. Its full
+Pixel 6a host-hardware run completed 604 tests with zero failures and 17
+expected environment-specific skips.
 
 Build discipline: the project compiles clean under a strict `tsconfig`
 (`strict`, plus `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`,
@@ -157,7 +165,7 @@ src/
   graphql-api.ts      standalone GraphQL API (optional graphql package)
   config/             version and configuration
   middleware/         bridge, sanitize, security, output, logger, auth, etc.
-  tools/              45 tool modules + resources.ts + prompts.ts
+  tools/              49 tool modules + resources.ts + prompts.ts
 build/                compiled output (tsc); what actually runs
 tests/                .mjs suites + run-all.mjs + lib/harness.mjs
 ```

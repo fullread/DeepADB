@@ -22,7 +22,8 @@ Every tool that interpolates user-supplied parameters into shell commands valida
 - **`shellEscape()`** wraps file paths in single quotes with proper escaping — `'\''` closing/reopening is used to neutralize embedded single quotes without breaking single-quote context.
 - **`escapeQemuShellArg()`** (exported from `qemu.ts`) applies the same unconditional single-quote-with-escape to every QEMU argv element on the KVM path, where arguments are composed into a `su -c "..."` command string. The non-KVM path uses `spawn(cmd, args)` with an argv array and requires no escaping.
 - **`adb_input`** applies type-specific validation: `tap`/`swipe` accept only numeric coordinates, `keyevent` accepts only alphanumeric keycodes, `text` is shell-escaped.
-- **AT commands** are validated against a separate character set that rejects shell operators while allowing legitimate AT syntax (`+`, `=`, `?`, etc.). AT command strings are fed to `printf` via `%s` format, never the format position itself, preventing format string injection from commands containing `%` characters (e.g., `AT%RESTART`).
+- **AT commands** are validated against a separate character set that rejects shell operators while allowing legitimate AT syntax (`+`, `=`, `?`, etc.). AT command strings are fed to `printf` via `%s` format, never the format position itself, preventing format string injection from commands containing `%` characters (e.g., `AT%RESTART`). Device-node discovery and exchange require character devices, and no-create writes prevent missing `/dev` candidates from becoming regular files.
+- **SQLite inspection** accepts one validated read-only statement, applies `query_only` and read-only database opens, bounds rows and snapshot size, and rejects symbolic-link database and WAL files before package-scoped reads.
 - **`sed` escaping in `adb_file_replace`** (`files.ts`) applies `'\''` closing/reopening to both the pattern and the replacement value, handling single quotes that would otherwise close the outer shell single-quote. Zod also rejects newlines in `find`/`replace` since sed treats embedded newlines as script-command separators.
 - **Device node paths** must start with `/dev/` and cannot contain path traversal (`..`).
 
@@ -30,7 +31,7 @@ Every tool that interpolates user-supplied parameters into shell commands valida
 
 ### Zod Parameter Bounds (always active)
 
-Every `z.number()` parameter across all 204 tools has explicit `.min()/.max()` constraints. This prevents resource exhaustion from extreme values — for example, requesting a 999999-second sleep or a buffer size of 2^31.
+Every `z.number()` parameter across all 209 tools has explicit `.min()/.max()` constraints. This prevents resource exhaustion from extreme values — for example, requesting a 999999-second sleep or a buffer size of 2^31.
 
 ### Security Middleware (opt-in enforcement)
 
@@ -152,7 +153,7 @@ When installing DeepADB via npm, always pin the version:
 
 ```bash
 # Pinned (recommended)
-npm install -g deepadb@1.1.3
+npm install -g deepadb@1.1.4
 
 # Unpinned (not recommended — vulnerable to supply chain attacks)
 npx -y deepadb

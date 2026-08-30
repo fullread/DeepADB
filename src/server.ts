@@ -28,6 +28,7 @@ import { registerDiagnosticTools } from "./tools/diagnostics.js";
 import { registerUiTools } from "./tools/ui.js";
 import { registerBuildTools } from "./tools/build.js";
 import { registerHealthTools } from "./tools/health.js";
+import { registerRuntimeAuditTools } from "./tools/runtime-audit.js";
 import { registerWirelessTools } from "./tools/wireless.js";
 import { registerControlTools } from "./tools/control.js";
 import { registerLogcatWatchTools } from "./tools/logcat-watch.js";
@@ -60,6 +61,9 @@ import { registerWorkflowMarketTools } from "./tools/workflow-market.js";
 import { registerSelinuxAuditTools } from "./tools/selinux-audit.js";
 import { registerThermalPowerTools } from "./tools/thermal-power.js";
 import { registerNetworkDiscoveryTools } from "./tools/network-discovery.js";
+import { registerAppNetworkTools } from "./tools/app-network.js";
+import { registerDatabaseInspectorTools } from "./tools/database-inspector.js";
+import { registerWearTools } from "./tools/wear.js";
 import { registerSensorTools } from "./tools/sensors.js";
 import { registerWirelessFirmwareTools } from "./tools/wireless-firmware.js";
 import { registerInputGestureTools } from "./tools/input-gestures.js";
@@ -125,7 +129,7 @@ export async function createServer(): Promise<CreateServerResult> {
   // Build unified tool context
   const ctx: ToolContext = { server, bridge, deviceManager, logger, security, config };
 
-  // Register all tool modules (45 modules)
+  // Register all tool modules (49 modules)
   registerDeviceTools(ctx);
   registerShellTools(ctx);
   registerPackageTools(ctx);
@@ -135,6 +139,7 @@ export async function createServer(): Promise<CreateServerResult> {
   registerUiTools(ctx);
   registerBuildTools(ctx);
   registerHealthTools(ctx);
+  registerRuntimeAuditTools(ctx);
   registerWirelessTools(ctx);
   registerControlTools(ctx);
   registerLogcatWatchTools(ctx);
@@ -167,6 +172,9 @@ export async function createServer(): Promise<CreateServerResult> {
   registerSelinuxAuditTools(ctx);
   registerThermalPowerTools(ctx);
   registerNetworkDiscoveryTools(ctx);
+  registerAppNetworkTools(ctx);
+  registerDatabaseInspectorTools(ctx);
+  registerWearTools(ctx);
   registerSensorTools(ctx);
   registerWirelessFirmwareTools(ctx);
   registerInputGestureTools(ctx);
@@ -186,7 +194,7 @@ export async function createServer(): Promise<CreateServerResult> {
     logger.info(`Result-handle store: ${sweepResult.kept} active, ${sweepResult.evicted} evicted at startup.`);
   }
 
-  logger.info("DeepADB MCP server initialized — 45 tool modules, 5 resources, 4 prompts. Ready.");
+  logger.info("DeepADB MCP server initialized — 49 tool modules, 5 resources, 4 prompts. Ready.");
 
   return { server, logger, bridge, deviceManager };
 }
