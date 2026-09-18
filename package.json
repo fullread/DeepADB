@@ -44,7 +44,7 @@
     "eslint": "^10.9.1",
     "fast-check": "^4.8.0",
     "graphql": "^17.0.2",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "typescript-eslint": "^8.68.0",
     "ws": "^8.21.0"
   }
