@@ -11,6 +11,14 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+    # Revisit once typescript-eslint supports TypeScript 7. Other major
+    # updates remain visible as separate PRs, and TypeScript 6 fixes stay enabled.
+    ignore:
+      - dependency-name: "typescript"
+        versions: [ ">=7.0.0 <8.0.0" ]
     cooldown:
       default-days: 7
       semver-major-days: 30
