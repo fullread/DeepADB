@@ -764,10 +764,11 @@ DeepADB/
 
 ## Tech Stack
 
-- **Runtime**: Node.js ≥22 (ES2024, ESM; Node 22.12+ for coverage)
+- **Runtime**: Node.js ≥22 (ES2024, ESM)
+- **Development**: Node.js 22.13+ on the Node 22 line, or Node 24+, for the full toolchain including ESLint. c8 coverage alone requires Node 22.12+ on the Node 22 line.
 - **Language**: TypeScript 6.0 (strict mode, NodeNext module resolution)
-- **MCP SDK**: `@modelcontextprotocol/sdk` ^1.24.0 (currently resolves to 1.30.0)
-- **Validation**: Zod ^4.4.3
+- **MCP SDK**: `@modelcontextprotocol/sdk` ^1.32.1 (currently resolves to 1.32.1)
+- **Validation**: Zod ^4.6.5
 - **Transport**: stdio (JSON-RPC), HTTP/SSE, WebSocket (optional `ws`), GraphQL API (optional `graphql`)
 
 ## License

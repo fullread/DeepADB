@@ -2,6 +2,45 @@
 
 All notable changes to DeepADB are documented in this file.
 
+## Unreleased
+
+### Dependency maintenance
+
+- Updated compatible direct dependencies to MCP SDK 1.32.1, Zod 4.6.5,
+  Node type definitions 26.6.5, ESLint 10.12.0, fast-check 4.10.2,
+  typescript-eslint 8.71.1, and ws 8.22.0.
+- Refreshed transitive security dependencies, including proxy-addr 2.0.8,
+  fast-uri 3.1.8, brace-expansion 5.0.12, hono 4.13.13, and ip-address 10.7.3.
+- Clarified that development with ESLint requires Node 22.13+ on the Node 22
+  line or Node 24+. The published runtime remains Node >= 22, and c8 coverage
+  alone requires Node 22.12+ on the Node 22 line.
+- Kept TypeScript 6.0.3 because typescript-eslint 8.71.1 supports TypeScript
+  below 6.1. TypeScript 7 remains deferred, and MCP SDK v2 remains a separate
+  migration because it changes package names, registration APIs, and transports.
+- Verified build and lint, a zero-vulnerability npm audit, and all six isolated
+  CI suites: 171 passed, 0 failed, and 16 expected hardware-dependent skips
+  (187 total checks).
+
+### GitHub automation and repository safeguards
+
+- Limit grouped development dependency updates to compatible patch/minor
+  releases, and defer TypeScript 7 while the lint peer range excludes it.
+- Add dependency-advisory auditing and CodeQL analysis for application code
+  and GitHub Actions, while retaining pinned actions and minimal permissions.
+- Preserve emulator test failures in the informational lane and publish
+  explicit execution status and pass/fail/skip summaries instead of hiding
+  the test exit status behind a logging pipeline.
+- Enable GitHub Dependabot alerts and automatic security updates. Protect
+  `main` with up-to-date pull requests, existing test/coverage requirements,
+  resolved conversations, and force-push/deletion restrictions, without
+  requiring a second reviewer.
+- Clarify the existing prebuilt release's extraction-directory instructions;
+  its archive and checksum are unchanged.
+- Add 13 isolated emulator-reporting regression tests covering exit failures,
+  signals, failed-suite markers, missing results, and boot-failure reporting.
+  Local build, lint, dependency audit, server regressions, and reporting tests
+  pass; the new GitHub workflows still require their first hosted validation.
+
 ## v1.1.4 — Focused Android Runtime Diagnostics
 
 ### Added — focused Android runtime diagnostics

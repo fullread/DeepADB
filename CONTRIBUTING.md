@@ -6,8 +6,9 @@ first.
 
 ## Prerequisites
 
-- Node.js >= 22 (the project uses ESM and modern language features). Running
-  coverage with c8 12 requires Node 22.12 or newer.
+- Node.js 22.13 or newer on the Node 22 line, or Node 24+, for development
+  including ESLint. The published runtime requirement remains Node >= 22;
+  c8 12 coverage alone requires Node 22.12 or newer on the Node 22 line.
 - `npm`.
 - For device-dependent tests: the Android SDK platform-tools (`adb`) on PATH,
   and a connected device or running emulator. The device-free suites need
@@ -26,6 +27,7 @@ npm run build   # compile src/ to build/ with tsc
 npm test          # full suite (device-dependent parts need a device)
 npm run test:ci   # device-free suites only (what CI runs)
 npm run coverage  # full suite under c8; writes coverage/ (lcov + summary)
+node --test tests/ci/emulator-reporting.test.mjs # CI reporting, no device access
 ```
 
 The device-free suites (`test-boundaries`, `test-next-version`,
@@ -35,6 +37,35 @@ validate a change. A single suite can be run directly, e.g.
 `node tests/test-next-version.mjs`. Device-facing changes should also run the
 relevant hardware suite; the focused diagnostics use
 `node tests/test-next-version-device.mjs`.
+
+Some device-free suites also run optional hardware assertions when an
+authorized device is visible. Disconnect USB and wireless devices, or use an
+isolated ADB configuration, when you need a strictly device-free local run.
+
+## CI and repository safeguards
+
+- The Test workflow builds, lints, and runs device-free regressions on Node 22
+  and 24, with a separate coverage job. Mocked emulator-reporting checks run
+  separately from the server regression suites.
+- Dependency auditing checks both production and development dependencies;
+  high and critical advisories fail the audit job. Lower-severity findings
+  remain visible in its output.
+- CodeQL analyzes JavaScript/TypeScript and GitHub Actions on pull requests,
+  main-branch pushes, and a weekly schedule.
+- The weekly emulator lane is informational, not a merge gate. Its job
+  summary reports the actual pass/fail/skip counts and execution status;
+  unsupported physical-device capabilities can still fail assertions.
+  A successful informational job is not proof that every test passed.
+- Dependabot groups compatible development patch/minor updates. Major
+  updates are reviewed separately, and TypeScript 7 is deferred until the
+  lint stack supports it.
+
+The protected `main` branch requires an up-to-date pull request, passing
+Node 22/24 test jobs and coverage, and resolved review conversations. These
+rules also apply to administrators; force pushes and branch deletion are
+disabled. No additional approving reviewer is required for the solo-maintainer
+workflow. New audit and analysis jobs must be validated on GitHub before they
+are considered for required-check enforcement.
 
 ## Build discipline
 

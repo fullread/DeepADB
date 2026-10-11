@@ -131,9 +131,18 @@ Useful commands:
 - `npm run test:ci` runs only the device-free suites (`run-all.mjs --ci`).
 - `npm run coverage` runs the suite under c8 and writes `coverage/` (lcov + summary).
 
-The v1.1.4 release baseline is 187 passing device-isolated CI checks. Its full
-Pixel 6a host-hardware run completed 604 tests with zero failures and 17
-expected environment-specific skips.
+The six server CI suites contain 187 checks. A strictly device-free run passes
+171 and skips 16 hardware-dependent assertions, with zero failures. The
+v1.1.4 full Pixel 6a host-hardware baseline completed 604 tests with zero
+failures and 17 expected environment-specific skips.
+
+GitHub also runs dependency-advisory auditing and CodeQL analysis. The weekly
+emulator lane is informational: it preserves execution failures and publishes
+pass/fail/skip counts, but unavailable physical-device capabilities can still
+cause test failures. Its green workflow status must not be interpreted as an
+all-tests-pass result. See CONTRIBUTING.md for CI and merge requirements.
+The reporting helper has separate mocked process tests under `tests/ci/`;
+these validate CI infrastructure and do not replace the real-server suites.
 
 Build discipline: the project compiles clean under a strict `tsconfig`
 (`strict`, plus `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`,

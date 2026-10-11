@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -34,9 +34,12 @@ jobs:
       - name: Lint
         run: npx eslint src
 
-      # Device-free suites only — boundaries, result-handles, supply-chain,
-      # transports, and sanitizer fuzzing. No connected device or emulator is
-      # required; device-dependent assertions skip-guard automatically.
+      - name: Test emulator CI runner
+        run: node --test tests/ci/*.test.mjs
+
+      # Device-free suites only — boundaries, focused diagnostics, result-handles,
+      # supply-chain, transports, and sanitizer fuzzing. No connected device or
+      # emulator is required; device-dependent assertions skip-guard automatically.
       - name: Run device-free test suites
         run: node tests/run-all.mjs --ci
 
@@ -47,7 +50,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Use Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22.x
           cache: npm
@@ -62,8 +65,28 @@ jobs:
         run: npx c8 node tests/run-all.mjs --ci
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-lcov
           path: coverage/lcov.info
           if-no-files-found: warn
+
+  dependency-audit:
+    name: Dependency security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Use Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --include=dev
+
+      # Report every severity, but fail the job for high or critical advisories.
+      # Development dependencies are included because build/CI tooling is in scope.
+      - name: Audit runtime and development dependencies
+        run: npm audit --include=dev --audit-level=high

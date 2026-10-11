@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Use Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22.x
           cache: npm
@@ -50,7 +50,8 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       # Best-effort: failures from hardware-only tools are expected and do not
-      # fail the job. The full output is uploaded for inspection.
+      # fail the job. Preserve the test command's exit status and publish the
+      # actual pass/fail/skip counts; a green job is not an all-tests-pass claim.
       - name: Run full suite on emulator (informational)
         continue-on-error: true
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
@@ -59,12 +60,18 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: npm test 2>&1 | tee emulator-api${{ matrix.api-level }}.log
+          script: node .github/scripts/run-emulator-tests.mjs ${{ matrix.api-level }}
+
+      - name: Summarize emulator results (including boot failures)
+        if: always()
+        run: node .github/scripts/run-emulator-tests.mjs --report ${{ matrix.api-level }}
 
       - name: Upload emulator test log
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: emulator-log-api${{ matrix.api-level }}
-          path: emulator-api${{ matrix.api-level }}.log
+          path: |
+            emulator-api${{ matrix.api-level }}.log
+            emulator-api${{ matrix.api-level }}-summary.md
           if-no-files-found: warn
