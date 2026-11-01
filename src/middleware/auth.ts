@@ -16,8 +16,8 @@
  *   // In HTTP request handler:
  *   if (!checkAuth(req, res)) return;  // Returns false and sends 401 if unauthorized
  *
- *   // In WebSocket connection handler:
- *   if (!hasValidToken(req)) { ws.close(4401, "Unauthorized"); return; }
+ *   // Before accepting a WebSocket upgrade:
+ *   // Reject with HTTP 401 and close the socket if hasValidToken(req) is false.
  */
 
 import { IncomingMessage, ServerResponse } from "http";

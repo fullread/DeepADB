@@ -16,7 +16,7 @@ import { z } from "zod";
 import { join } from "path";
 import { existsSync} from "fs";
 import { ensurePrivateDir, sanitizeFilenameComponent, writeAtomicSync} from "../middleware/fs-utils.js";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 import { captureUiDump, getAttr } from "../middleware/ui-dump.js";
@@ -68,14 +68,16 @@ function getWorkflowDir(tempDir: string): string {
 
 export function registerTestGenTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_test_gen_from_ui",
-    "Analyze the current screen and generate a test workflow that taps each interactive element, takes screenshots, and verifies the app doesn't crash. Produces a workflow JSON compatible with adb_workflow_run.",
     {
-      packageName: z.string().describe("Package name to monitor during test (used for logcat filtering and crash detection)"),
-      device: z.string().optional().describe("Device serial"),
-      screenshotAfterEach: z.boolean().optional().default(true).describe("Take a screenshot after each tap"),
-      returnToStart: z.boolean().optional().default(true).describe("Press Back after each tap to return to the starting screen"),
+      description: "Analyze the current screen and generate a test workflow that taps each interactive element, takes screenshots, and verifies the app doesn't crash. Produces a workflow JSON compatible with adb_workflow_run.",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name to monitor during test (used for logcat filtering and crash detection)"),
+        device: z.string().optional().describe("Device serial"),
+        screenshotAfterEach: z.boolean().optional().default(true).describe("Take a screenshot after each tap"),
+        returnToStart: z.boolean().optional().default(true).describe("Press Back after each tap to return to the starting screen"),
+      }),
     },
     async ({ packageName, device, screenshotAfterEach, returnToStart }) => {
       try {
@@ -185,12 +187,14 @@ export function registerTestGenTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_test_gen_from_intents",
-    "Analyze a package's registered activities and intent filters to generate a test workflow that launches each exported activity and verifies it renders. Produces workflow JSON compatible with adb_workflow_run.",
     {
-      packageName: z.string().describe("Package name to analyze"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Analyze a package's registered activities and intent filters to generate a test workflow that launches each exported activity and verifies it renders. Produces workflow JSON compatible with adb_workflow_run.",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name to analyze"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ packageName, device }) => {
       try {
@@ -294,12 +298,14 @@ export function registerTestGenTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_test_gen_save",
-    "Save a generated workflow JSON to the workflows directory for later execution with adb_workflow_run.",
     {
-      name: z.string().describe("Workflow name (used as filename)"),
-      workflow: z.string().describe("Workflow JSON string to save"),
+      description: "Save a generated workflow JSON to the workflows directory for later execution with adb_workflow_run.",
+      inputSchema: z.object({
+        name: z.string().describe("Workflow name (used as filename)"),
+        workflow: z.string().describe("Workflow JSON string to save"),
+      }),
     },
     async ({ name, workflow }) => {
       try {

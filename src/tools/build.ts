@@ -9,7 +9,7 @@ import { execFile } from "child_process";
 import { existsSync } from "fs";
 import { join } from "path";
 import { platform } from "os";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 
 function getGradleWrapper(projectPath: string): string {
@@ -21,15 +21,17 @@ function getGradleWrapper(projectPath: string): string {
 
 export function registerBuildTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_gradle",
-    "Run a Gradle task in an Android project directory",
     {
-      projectPath: z.string().describe("Path to the Android project root (containing gradlew)"),
-      task: z.string().describe("Gradle task (e.g., 'assembleDebug', 'installDebug', 'clean')"),
-      args: z.array(z.string()).optional().describe("Additional Gradle arguments as an array of strings (e.g., ['-Pversion=1.0', '--info']). Use an array — not a space-separated string — so arguments containing quoted values are preserved as single tokens."),
-      timeout: z.number().int().min(30000).max(1800000).optional().default(300000)
-        .describe("Build timeout in milliseconds (30s-30min, default 5min). V5 fix: large multi-module Android projects (60+ modules) routinely exceed the default; raise this for clean builds of bigger projects."),
+      description: "Run a Gradle task in an Android project directory",
+      inputSchema: z.object({
+        projectPath: z.string().describe("Path to the Android project root (containing gradlew)"),
+        task: z.string().describe("Gradle task (e.g., 'assembleDebug', 'installDebug', 'clean')"),
+        args: z.array(z.string()).optional().describe("Additional Gradle arguments as an array of strings (e.g., ['-Pversion=1.0', '--info']). Use an array — not a space-separated string — so arguments containing quoted values are preserved as single tokens."),
+        timeout: z.number().int().min(30000).max(1800000).optional().default(300000)
+          .describe("Build timeout in milliseconds (30s-30min, default 5min). V5 fix: large multi-module Android projects (60+ modules) routinely exceed the default; raise this for clean builds of bigger projects."),
+      }),
     },
     async ({ projectPath, task, args, timeout }) => {
       try {
@@ -62,14 +64,16 @@ export function registerBuildTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_build_and_install",
-    "Build a debug APK and install it on the connected device (convenience wrapper)",
     {
-      projectPath: z.string().describe("Path to the Android project root"),
-      device: z.string().optional().describe("Device serial"),
-      timeout: z.number().int().min(30000).max(1800000).optional().default(300000)
-        .describe("Build+install timeout in milliseconds (30s-30min, default 5min). V5 fix."),
+      description: "Build a debug APK and install it on the connected device (convenience wrapper)",
+      inputSchema: z.object({
+        projectPath: z.string().describe("Path to the Android project root"),
+        device: z.string().optional().describe("Device serial"),
+        timeout: z.number().int().min(30000).max(1800000).optional().default(300000)
+          .describe("Build+install timeout in milliseconds (30s-30min, default 5min). V5 fix."),
+      }),
     },
     async ({ projectPath, device, timeout }) => {
       try {

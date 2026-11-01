@@ -6,14 +6,14 @@
  *
  * Entry point. Supports three transport modes (mutually exclusive):
  *   - stdio (default) — JSON-RPC over stdin/stdout for MCP clients (Claude Code, etc.)
- *   - HTTP/SSE — Set DA_HTTP_PORT to enable browser-based MCP clients
+ *   - HTTP — Set DA_HTTP_PORT for Streamable HTTP and legacy SSE clients
  *   - WebSocket — Set DA_WS_PORT to enable bidirectional streaming (requires `ws` package)
  *
  * Additionally supports an independent GraphQL API endpoint:
  *   - GraphQL — Set DA_GRAPHQL_PORT for composed device queries (requires `graphql` package)
  */
 
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { createServer } from "./server.js";
 import { startHttpTransport } from "./http-transport.js";
 import { startWsTransport } from "./ws-transport.js";
@@ -110,7 +110,7 @@ async function main(): Promise<void> {
   }
 
   if (httpPort) {
-    // HTTP/SSE mode — start HTTP server
+    // HTTP mode — /mcp and the existing /sse + /message endpoints
     await startHttpTransport(server, { port: httpPort, host: httpHost, version: VERSION }, logger);
     console.error(`[DeepADB] HTTP/SSE transport running on http://${httpHost}:${httpPort}`);
   } else if (wsPort) {

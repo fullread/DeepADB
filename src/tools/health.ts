@@ -8,15 +8,17 @@
 import { z } from "zod";
 import { existsSync } from "fs";
 import { shellQuote } from "../middleware/sanitize.js";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { isOnDevice } from "../config/config.js";
 
 export function registerHealthTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_health_check",
-    "Run a comprehensive health check of the ADB toolchain. Validates: ADB binary, server, device connection, authorization, and root access.",
-    { device: z.string().optional().describe("Device serial to check (optional)") },
+    {
+      description: "Run a comprehensive health check of the ADB toolchain. Validates: ADB binary, server, device connection, authorization, and root access.",
+      inputSchema: z.object({ device: z.string().optional().describe("Device serial to check (optional)") }),
+    },
     async ({ device }) => {
       const checks: string[] = [];
       let allPassed = true;

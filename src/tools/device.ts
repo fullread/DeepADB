@@ -5,16 +5,18 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 
 export function registerDeviceTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_devices",
-    "List all connected Android devices with their state, model, and product info",
-    {},
+    {
+      description: "List all connected Android devices with their state, model, and product info",
+      inputSchema: z.object({}),
+    },
     async () => {
       try {
         const devices = await ctx.deviceManager.listDevices();
@@ -36,10 +38,12 @@ export function registerDeviceTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_device_info",
-    "Get detailed properties for a connected device (model, OS version, build, etc.)",
-    { device: z.string().optional().describe("Device serial (auto-selects if only one connected)") },
+    {
+      description: "Get detailed properties for a connected device (model, OS version, build, etc.)",
+      inputSchema: z.object({ device: z.string().optional().describe("Device serial (auto-selects if only one connected)") }),
+    },
     async ({ device }) => {
       try {
         const props = await ctx.deviceManager.getDeviceProps(device);
@@ -61,12 +65,14 @@ export function registerDeviceTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_getprop",
-    "Get a specific Android system property, or all properties if no key given",
     {
-      key: z.string().optional().describe("Property key (e.g., 'ro.build.version.sdk'). Omit for all."),
-      device: z.string().optional().describe("Device serial"),
+      description: "Get a specific Android system property, or all properties if no key given",
+      inputSchema: z.object({
+        key: z.string().optional().describe("Property key (e.g., 'ro.build.version.sdk'). Omit for all."),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ key, device }) => {
       try {

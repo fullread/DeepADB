@@ -24,7 +24,7 @@
 
 import { z } from "zod";
 import { ChildProcess } from "child_process";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { registerCleanup, gracefulKill } from "../middleware/cleanup.js";
 
@@ -109,13 +109,15 @@ export function registerRilInterceptTools(ctx: ToolContext): void {
 
   ensureCleanupRegistered();
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_ril_start",
-    "Start capturing RIL (Radio Interface Layer) messages from the radio logcat buffer. Captures network registration, cell info, signal strength, authentication, handover, and NAS events. Useful for radio diagnostics and cellular network research.",
     {
-      bufferSize: z.number().min(100).max(50000).optional().default(5000).describe("Max messages to keep in ring buffer (100-50000, default 5000)"),
-      includeKernel: z.boolean().optional().default(false).describe("Also capture from main and kernel logcat buffers for modem framework and kernel-level radio messages"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Start capturing RIL (Radio Interface Layer) messages from the radio logcat buffer. Captures network registration, cell info, signal strength, authentication, handover, and NAS events. Useful for radio diagnostics and cellular network research.",
+      inputSchema: z.object({
+        bufferSize: z.number().min(100).max(50000).optional().default(5000).describe("Max messages to keep in ring buffer (100-50000, default 5000)"),
+        includeKernel: z.boolean().optional().default(false).describe("Also capture from main and kernel logcat buffers for modem framework and kernel-level radio messages"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ bufferSize, includeKernel, device }) => {
       try {
@@ -204,14 +206,16 @@ export function registerRilInterceptTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_ril_poll",
-    "Retrieve captured RIL messages since the last poll. Optionally filter by category (registration, cell_info, signal, network, security, handover, data, radio_state, nas).",
     {
-      session: z.string().describe("Session ID from adb_ril_start (e.g., 'ril_1')"),
-      category: z.string().optional().describe("Filter by category: registration, cell_info, signal, network, security, handover, data, radio_state, sms, nas, other"),
-      maxMessages: z.number().min(1).max(10000).optional().default(100).describe("Max messages to return per poll (1-10000)"),
-      raw: z.boolean().optional().default(false).describe("Return raw logcat lines instead of parsed messages"),
+      description: "Retrieve captured RIL messages since the last poll. Optionally filter by category (registration, cell_info, signal, network, security, handover, data, radio_state, nas).",
+      inputSchema: z.object({
+        session: z.string().describe("Session ID from adb_ril_start (e.g., 'ril_1')"),
+        category: z.string().optional().describe("Filter by category: registration, cell_info, signal, network, security, handover, data, radio_state, sms, nas, other"),
+        maxMessages: z.number().min(1).max(10000).optional().default(100).describe("Max messages to return per poll (1-10000)"),
+        raw: z.boolean().optional().default(false).describe("Return raw logcat lines instead of parsed messages"),
+      }),
     },
     async ({ session: sessionId, category, maxMessages, raw }) => {
       try {
@@ -291,11 +295,13 @@ export function registerRilInterceptTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_ril_stop",
-    "Stop a RIL capture session. Shows a summary of captured message categories.",
     {
-      session: z.string().describe("Session ID to stop (e.g., 'ril_1'), or 'all' to stop all"),
+      description: "Stop a RIL capture session. Shows a summary of captured message categories.",
+      inputSchema: z.object({
+        session: z.string().describe("Session ID to stop (e.g., 'ril_1'), or 'all' to stop all"),
+      }),
     },
     async ({ session: sessionId }) => {
       try {

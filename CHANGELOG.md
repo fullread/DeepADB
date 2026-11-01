@@ -2,24 +2,253 @@
 
 All notable changes to DeepADB are documented in this file.
 
-## Unreleased
+## v1.1.5 — SDK v2 and Local LLM Support
+
+### Release preparation
+
+- Align package and MCP Registry metadata at 1.1.5.
+- Refresh the compatible WebSocket dependency to 8.22.1. TypeScript 7 remains
+  deferred because the lint stack requires TypeScript below 6.1.
+- Add real Chromium browser CORS, authentication, profile enforcement and reload
+  checks to GitHub CI, alongside Node 22/24/26 suites and CodeQL.
+- Document supported Node LTS, the on-device SQLite executable, optional
+  production transport dependencies, staged installation and rollback checks.
+- Production-only package initialization exposes all 209 tools, five resources/
+  templates and four prompts. Staged Pixel validation on Node 24.22.1 and SQLite
+  3.54.1 passed eight strict runtime/SQLite/Shannon checks, eight real-browser
+  checks and six authenticated WebSocket/GraphQL checks. The 1.1.4 rollback
+  copy also starts successfully under the updated runtime.
+- Node 22.23.4 and 26.12.1 each passed the ten CI-selected suites with a Pixel
+  connected: 311 passed, zero failed, one Windows symlink-capability skip.
+  All 13 emulator-reporting checks pass. Hosted Node 22/24/26 jobs, browser
+  compatibility, coverage, dependency auditing and both CodeQL analyses passed.
+- Final 1.1.5 host/ADB regression: 728 passed, zero failed, 18 expected skips
+  across all 22 suites. Device-free Node 24.22.2 coverage: 295 passed, zero failed,
+  17 expected skips. Build, lint, workflow lint, registry metadata validation and
+  full/production dependency audits pass.
+- Promoted the verified package to the Pixel's normal installation path and
+  repeated all eight strict device checks with automatic LocalBridge detection.
+  Retain the validated 1.1.4 rollback copy for recovery.
+
+### Final reliability and security audit fixes
+
+- Quoted and normalized split-APK paths in both the registered handler and
+  LocalBridge; dash-leading filenames can no longer become raw shell flags.
+- Replaced leaf-only SQLite checks with canonical package-directory and opened-
+  descriptor validation, rejecting parent links, file/WAL links and hard links.
+  Both execution backends now query private snapshots; failed WAL copies fail
+  the request. Live app files and their SHM are never opened by SQLite itself.
+- Isolated host SQLite execution in a killable subprocess with cancellation, a
+  10-second query deadline, native/V8 memory budgets, bounded values/rows/output
+  and two-inspection concurrency. Host inspection now requires Node 22.16+;
+  on-device sqlite3 remains supported against the private snapshot. The core
+  Node engine range and tool input schemas are unchanged. The SQLite tool
+  description is an intentional, explicitly pinned catalog change.
+- Applied exact Origin rejection and bearer checks to optional GraphQL, before
+  resolvers. Added expanded-fragment/alias/field budgets, property/device-list
+  caps, request/work concurrency limits and disconnect/deadline admission.
+- Fixed IPv6 URL construction for MCP HTTP and GraphQL GET, including emitted
+  URLs. Existing IPv4, stdio, SSE, Streamable HTTP and WebSocket remain supported.
+- Made the aggregate test runner fail on abnormal child exits, missing or
+  conflicting summaries, inconsistent totals and empty selections.
+- Added `test-audit-hardening` to device-free CI. Regressions use synthetic
+  data and intercepted commands, including SQLite cancellation/large values,
+  real GraphQL and IPv6 MCP connections, and subprocess runner failures.
+
+
+- Verification: Node 22.23.4 device-free coverage passed 295 checks, zero
+  failures and 17 expected skips (312 total). The new hardening suite passed
+  41 checks on Node 24.22.2, with one Windows file-symlink capability skip.
+  Eight separate browser checks, eight disposable Pixel path/link/race probes,
+  and five focused hardware checks passed; the latest snapshot implementation
+  also completed a real Pixel schema read. Build/lint and package dry-run pass;
+  the dependency audit reports zero vulnerabilities. No on-device deployment
+  is included in these focused/device-free results. The full run follows below.
+- Corrected a legacy WebSocket compatibility-test race: SDK v1 close() starts
+  the handshake but does not await it. Reconnect tests now wait for the close
+  event, preserving the server's rejection of truly concurrent clients.
+
+- Final full hardware regression: all 22 host/ADB suites passed on Pixel 6a /
+  Android 16 under Node 24.22.2: 728 passed, zero failed and 18 expected skips
+  (746 total). Includes the 41 audit-hardening checks, 33 local-LLM checks,
+  36 SDK/client/plugin checks, 93 security checks, live SQLite/Shannon probes,
+  and all 46 UI checks with PIN recovery. Skips: five on-device-only QEMU,
+  twelve Windows/POSIX/tcpdump, and one Windows file-symlink capability case.
+  The run exited zero, left no ADB forwards and changed no repository files.
+  This host run preceded the separate on-device release validation above.
+
+### Streamable HTTP and tool profiles
+
+- Added authenticated Streamable HTTP at `/mcp` alongside legacy `/sse` and
+  `/message`, using the official Node adapter 2.1.2 with SDK server 2.4.0.
+  Existing stdio, WebSocket, SSE and full-profile plugin APIs remain supported.
+- Expose/allow `Mcp-Session-Id` for browsers and authenticate every GET, POST
+  and DELETE. Enforce one active HTTP client across both protocols, returning
+  409 for competitors while preserving authorized SSE-to-SSE replacement.
+- Limit POST bodies to 1 MiB with a 15-second upload deadline. Sessions use
+  random IDs, support DELETE, and expire after 30 idle minutes by default
+  (`DA_HTTP_SESSION_TTL_MS`, 1000–3600000 ms). Bad initialization cannot reserve
+  the slot. Device managers and plugins initialize once per process, with tool
+  state preserved across reconnects. No event replay or tenant isolation added.
+- Fixed idle expiry during active MCP requests: the countdown restarts only
+  after the last request finishes or is cancelled. An open notification stream
+  alone does not prevent expiry. DELETE still closes an active session, and
+  late replies from it cannot change a replacement session's timer.
+- Fixed browser reloads losing the HTTP session ID: a validated initialize
+  from the same allowed Origin can atomically replace a peer-disconnected,
+  quiescent session. Active MCP calls, uploads and response streams block
+  replacement. Retained IDs can still resume; originless/native and POST-only
+  clients retain the DELETE/expiry lifecycle. Normal server stream closure
+  does not enable takeover. Bounded uploads also suspend idle expiry without
+  leaving cancelled response streams able to pin a session forever.
+- Hardened `/mcp` request admission: reserve IDs before SDK dispatch and reject
+  duplicate in-flight IDs or within-batch duplicates atomically with HTTP 400 /
+  JSON-RPC `-32600`. SDK-rejected uploads release only their own undispatched
+  reservations. Validate cancellation before releasing bookkeeping and retain
+  request ownership through asynchronous sends, preventing premature expiry or
+  browser reclamation while another call is still active.
+- Corrected shared/network security recipes to enforce `DA_TOOL_PROFILE=inspect`
+  with bearer authentication, exact Origins and loopback/TLS proxy guidance.
+  Clarified that command filtering, rate limiting and middleware audit logging
+  cover only checked paths; dedicated full-profile tools such as reboot/WiFi
+  are not restricted by a generic-shell allowlist. Added recipe validation and
+  direct-call rejection checks for those mutating tools.
+- Legacy SSE messages now require exactly one current `sessionId` query value.
+  Missing/duplicate IDs return 400 and stale IDs return 404 while a session is
+  active. A session replaced during body upload is rejected before its message
+  reaches an MCP handler. Origin and bearer checks still run first.
+- Added startup-only `DA_TOOL_PROFILE`: `full` preserves the existing catalog;
+  `inspect` exposes only `adb_devices`, `adb_device_info` and `adb_getprop`.
+  Registration/invocation guards reject excluded tools, including handle
+  renames. Inspect does not import plugins or expose workflows, resources,
+  prompts, result handles or GraphQL. Unknown profiles and inspect+GraphQL
+  configuration fail startup. Device scoping and compact results remain future work.
+- Added 33 device-isolated checks across both SDK client generations and all
+  four MCP transports, plus four real-browser checks (eight total). The nine
+  server CI suites contain 270 checks: 254 pass and 16 require hardware.
+  The same suites pass under coverage; build, lint and packaging checks pass,
+  and full/production dependency audits report zero vulnerabilities.
+- After the browser reconnect and audit fixes, all 21 host regression suites on
+  Pixel 6a / Android 16 passed 687 checks with zero failures and 17 expected skips
+  (704 total), including request-ID/cancellation and plugin callback guards,
+  PIN recovery, the live Shannon handshake and guarded SQLite inspection. The skips remain
+  five on-device-only QEMU checks and twelve Windows/POSIX/tcpdump checks;
+  phone-to-watch Wear validation remains deferred.
+- Verified model-driven calls with llama.cpp b11960 and Qwen3.5-4B Q4_K_M using
+  the three-tool `inspect` profile: native stdio, browser Streamable HTTP, and
+  browser legacy SSE returned live Pixel properties. Browser connections used
+  bearer authentication, an exact Origin, and no CORS proxy or WebSocket.
+  The installed b9878 build lacks native stdio MCP flags; testing used a
+  separate portable build. The HTTP reload conflict is now covered by repeated
+  real Chromium reloads with lost session IDs, plus regression checks for
+  authentication, Origins, competing initialization, active work, native-client
+  isolation and plugin state retention. A live b11960 browser retest read the
+  Pixel model, reloaded, then returned Android 16 through a fresh model-selected
+  tool call on the same DeepADB process, with reclamation confirmed in the log.
+  See LOCAL_LLMS.md for client details and lifecycle limits.
+
+### Local LLM connection compatibility
+
+- Added a setup guide for direct stdio and authenticated browser SSE clients,
+  including version-dependent llama-server flags. WebSocket is not required.
+- HTTP/SSE now permits `MCP-Protocol-Version` and `Last-Event-ID` in browser
+  preflights and rejects unlisted Origins before session creation/replacement.
+  Origin allowlists are exact HTTP(S) origins, support comma-separated entries,
+  and fail startup on invalid values. Native clients without Origin remain
+  supported; actual requests still require the configured bearer token.
+- WebSocket now checks Origin and authentication before upgrade (HTTP 403/401).
+  This replaces the old unauthorized 4401 close after upgrade. Concurrent
+  clients receive HTTP 409 while the existing connection remains usable.
+- Added 14 device-free browser-access checks and four separate real Chromium
+  CORS checks. That pass's eight server CI suites passed 216 checks with 16 expected
+  hardware skips. The tool catalog and device operations are unchanged.
+- This initial connection-hardening pass preceded Streamable HTTP and profiles,
+  described above. The final audit pass subsequently moved GraphQL onto the
+  shared Origin-rejection policy in full mode.
+
+### MCP SDK v2 with client and plugin compatibility
+
+- Migrated the server core to `@modelcontextprotocol/server` 2.4.0 and all
+  209 tool, 5 resource, and 4 prompt registrations to the v2 API. Names,
+  descriptions, input fields, defaults, and validation bounds are preserved.
+  Tool schemas now advertise JSON Schema 2020-12; the old experimental task
+  marker is no longer emitted.
+- Retained stdio, legacy SSE (`/sse` and `/message`), and WebSocket (`/ws`)
+  configurations and existing 2024/2025 protocol negotiation. SSE uses the
+  official `server-legacy` bridge. The custom WebSocket transport now implements
+  the SDK Transport contract directly, without an `any` cast.
+- Added a plugin compatibility adapter for legacy and current registration
+  methods, Zod 3/4 validation, callback notifications/requests/cancellation,
+  resource templates, registration-handle updates, and the existing exported
+  `ToolContext` type. Async plugin registration is awaited once at startup.
+  Kept SDK v1 as a compatibility dependency for existing plugin imports and
+  schema conversion; the server core itself uses v2. Direct low-level SDK
+  request handlers require migration to v2; SDK-private internals and
+  experimental task APIs are outside the adapter contract.
+- Fixed two compatibility gaps found during final review: the original
+  `ToolContext` now prefers v1 overloads so existing `register*` callbacks and
+  handle updates keep their types, while `NativePluginToolContext` provides an
+  explicit v2 view. Prompt argument completions now survive Zod 3/4 schema
+  conversion and handle updates, including optional arguments, without
+  weakening validation.
+- Restored public legacy registration-handle fields: tools expose their original
+  input/output Zod schemas and handler, prompts expose their Zod argument schema
+  and callback, and resources expose their read callback and original template.
+  Updates preserve this view while converting the SDK-facing schema and callback;
+  plugins can inspect schemas and wrap callbacks without receiving v2 internals.
+  Three additional regressions cover Zod 3/4 handles and resource templates.
+- Restored v1 cancellation/disconnection guards for saved plugin callback
+  contexts: legacy notifications become no-ops and requests reject with the
+  original error contract. Adapted v2 notification/logging, request, sampling
+  and elicitation helpers are guarded too. Two regressions verify no stale
+  context reaches the original or replacement client, while fresh requests
+  still work; the compatibility suite now contains 36 checks.
+- The initial 31 device-free compatibility checks included a frozen pre-migration
+  catalog comparison, typed plugins, authentication, and reconnect behavior.
+  The migration's seven server CI suites passed 202 checks with 16 expected
+  hardware skips before the browser-access suite was added above; the 13
+  separate emulator-reporting tests remain unchanged.
+- The migration preserved the existing protocol lifecycle. The subsequent
+  transport/profile changes are described above; the 2026-07-28 request
+  lifecycle remains deferred. Device state and plugins are not
+  reinitialized per request.
 
 ### Dependency maintenance
 
-- Updated compatible direct dependencies to MCP SDK 1.32.1, Zod 4.6.5,
-  Node type definitions 26.6.5, ESLint 10.12.0, fast-check 4.10.2,
-  typescript-eslint 8.71.1, and ws 8.22.0.
+- Updated compatible direct dependencies to MCP SDK 1.32.2, Zod 4.6.7,
+  Node type definitions 26.6.6, ESLint 10.14.0, fast-check 4.10.2,
+  typescript-eslint 8.72.1, and ws 8.22.0. The compatible October 30 refresh
+  updated five direct dependencies and 28 installed packages, followed by
+  the development-tooling fixes below.
 - Refreshed transitive security dependencies, including proxy-addr 2.0.8,
-  fast-uri 3.1.8, brace-expansion 5.0.12, hono 4.13.13, and ip-address 10.7.3.
+  fast-uri 3.1.9, brace-expansion 5.0.12, hono 4.13.14, ip-address 10.7.5,
+  body-parser 2.4.0, and qs 6.17.1.
 - Clarified that development with ESLint requires Node 22.13+ on the Node 22
   line or Node 24+. The published runtime remains Node >= 22, and c8 coverage
   alone requires Node 22.12+ on the Node 22 line.
-- Kept TypeScript 6.0.3 because typescript-eslint 8.71.1 supports TypeScript
-  below 6.1. TypeScript 7 remains deferred, and MCP SDK v2 remains a separate
-  migration because it changes package names, registration APIs, and transports.
-- Verified build and lint, a zero-vulnerability npm audit, and all six isolated
-  CI suites: 171 passed, 0 failed, and 16 expected hardware-dependent skips
-  (187 total checks).
+- Kept TypeScript 6.0.3 because typescript-eslint 8.72.1 supports TypeScript
+  below 6.1. TypeScript 7 remains deferred. The subsequent MCP SDK v2
+  migration is described above.
+- Verified build and lint, zero-vulnerability full and production dependency audits,
+  all six device-isolated CI suites (171 passed, 0 failed, 16 expected
+  hardware-dependent skips), and all 13 emulator-reporting regression tests.
+  The device-isolated suites also pass under c8 coverage. Before/after
+  comparisons preserve all 74 linted files, 73 coverage-eligible files,
+  and the checked ignore decisions, including sync/async coverage globs.
+- Resolved the remaining 14 moderate development dependency findings from
+  the minimatch and glob advisories
+  ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249),
+  [GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4))
+  with parent-scoped overrides to minimatch 11.0.3 and glob 14.0.3 for
+  ESLint, its configuration library, typescript-estree, and test-exclude.
+  These are validated major-version overrides because the current parent
+  ranges exclude the fixes; review them when those parents update and
+  remove them once upstream ranges include patched versions. No audit-suggested
+  toolchain downgrades were applied, and this override pass changes only
+  development dependencies. glob 14.0.3 was selected over the advisory's
+  minimum 14.0.2 because its bundled minimatch also contains the amplification
+  limits; overriding the separately installed minimatch alone does not fix
+  an older embedded copy. Supported Node requirements remain unchanged.
 
 ### GitHub automation and repository safeguards
 
@@ -38,8 +267,9 @@ All notable changes to DeepADB are documented in this file.
   its archive and checksum are unchanged.
 - Add 13 isolated emulator-reporting regression tests covering exit failures,
   signals, failed-suite markers, missing results, and boot-failure reporting.
-  Local build, lint, dependency audit, server regressions, and reporting tests
-  pass; the new GitHub workflows still require their first hosted validation.
+  Local build, lint, server regressions, and reporting tests pass. The
+  dependency-audit workflow gates high/critical findings; see the dependency
+  maintenance notes above for current audit results and override maintenance.
 
 ## v1.1.4 — Focused Android Runtime Diagnostics
 

@@ -15,11 +15,13 @@
  *   }
  */
 
+import { z } from "zod";
 import { join, resolve as resolvePath } from "path";
 import { readdirSync, existsSync, realpathSync } from "fs";
 import { pathToFileURL } from "url";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
+import { createPluginServer } from "../plugin-compat.js";
 
 interface LoadedPlugin {
   name: string;
@@ -97,7 +99,7 @@ export async function loadPlugins(ctx: ToolContext): Promise<void> {
       const mod = await import(moduleUrl);
 
       if (typeof mod.register === "function") {
-        mod.register(ctx);
+        await mod.register({ ...ctx, server: createPluginServer(ctx.server) });
         loadedPlugins.push({
           name: file.replace(/\.js$/, ""),
           path: pluginPath,
@@ -119,10 +121,12 @@ export async function loadPlugins(ctx: ToolContext): Promise<void> {
 
 export function registerPluginTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_plugin_list",
-    "List all loaded plugins and the plugin directory path.",
-    {},
+    {
+      description: "List all loaded plugins and the plugin directory path.",
+      inputSchema: z.object({}),
+    },
     async () => {
       try {
         const pluginDir = process.env.DA_PLUGIN_DIR ?? join(ctx.config.tempDir, "plugins");
@@ -153,10 +157,12 @@ export function registerPluginTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_plugin_info",
-    "Show information about the plugin system: directory, how to create plugins, and loaded plugin count.",
-    {},
+    {
+      description: "Show information about the plugin system: directory, how to create plugins, and loaded plugin count.",
+      inputSchema: z.object({}),
+    },
     async () => {
       try {
         const pluginDir = process.env.DA_PLUGIN_DIR ?? join(ctx.config.tempDir, "plugins");

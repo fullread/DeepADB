@@ -19,7 +19,7 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { MODEM_PATHS, detectChipsetFamily } from "../middleware/chipset.js";
 import { shellQuote } from "../middleware/sanitize.js";
@@ -202,16 +202,18 @@ async function autoDetectAtPort(
 
 export function registerAtCommandTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_shannon_session",
-    "Preflight a Samsung Shannon/Exynos modem session by checking the chipset, root access, known AT ports, and a benign AT handshake together. Optionally sends ATI for identification after a successful handshake. Makes no modem configuration changes.",
     {
-      port: z.string().optional().describe("Optional Shannon device node override (for example /dev/umts_router)"),
-      timeout: z.number().int().min(1000).max(10000).optional().default(3000)
-        .describe("Handshake timeout per port in milliseconds (1000-10000, default 3000)"),
-      includeIdentity: z.boolean().optional().default(false)
-        .describe("After a successful AT handshake, also send the read-only ATI identity query"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Preflight a Samsung Shannon/Exynos modem session by checking the chipset, root access, known AT ports, and a benign AT handshake together. Optionally sends ATI for identification after a successful handshake. Makes no modem configuration changes.",
+      inputSchema: z.object({
+        port: z.string().optional().describe("Optional Shannon device node override (for example /dev/umts_router)"),
+        timeout: z.number().int().min(1000).max(10000).optional().default(3000)
+          .describe("Handshake timeout per port in milliseconds (1000-10000, default 3000)"),
+        includeIdentity: z.boolean().optional().default(false)
+          .describe("After a successful AT handshake, also send the read-only ATI identity query"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ port, timeout, includeIdentity, device }) => {
       try {
@@ -307,11 +309,13 @@ export function registerAtCommandTools(ctx: ToolContext): void {
     },
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_at_detect",
-    "Auto-detect the modem AT command device node. Identifies the chipset family (Shannon, Qualcomm, MediaTek, Unisoc) and probes known device node paths. Requires root. Returns the first responding node.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "Auto-detect the modem AT command device node. Identifies the chipset family (Shannon, Qualcomm, MediaTek, Unisoc) and probes known device node paths. Requires root. Returns the first responding node.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {
@@ -393,15 +397,17 @@ export function registerAtCommandTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_at_send",
-    "Send a single AT command to the modem and capture the response. Requires root. Use adb_at_detect to find the correct port, or specify it manually.",
     {
-      command: z.string().describe("AT command to send (e.g., 'AT+CSQ', 'ATI', 'AT+COPS?')"),
-      port: z.string().optional().describe("Modem device node (e.g., '/dev/umts_router'). If omitted, auto-detects."),
-      timeout: z.number().min(1000).max(30000).optional().default(5000).describe("Response timeout in ms (1000-30000, default 5000)"),
-      force: z.boolean().optional().default(false).describe("Bypass dangerous command safety check"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Send a single AT command to the modem and capture the response. Requires root. Use adb_at_detect to find the correct port, or specify it manually.",
+      inputSchema: z.object({
+        command: z.string().describe("AT command to send (e.g., 'AT+CSQ', 'ATI', 'AT+COPS?')"),
+        port: z.string().optional().describe("Modem device node (e.g., '/dev/umts_router'). If omitted, auto-detects."),
+        timeout: z.number().min(1000).max(30000).optional().default(5000).describe("Response timeout in ms (1000-30000, default 5000)"),
+        force: z.boolean().optional().default(false).describe("Bypass dangerous command safety check"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ command, port, timeout, force, device }) => {
       try {
@@ -455,16 +461,18 @@ export function registerAtCommandTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_at_batch",
-    "Send multiple AT commands sequentially and capture all responses. Useful for running a diagnostic sequence. Requires root.",
     {
-      commands: z.array(z.string()).min(1).max(50).describe("Array of AT commands to send in order (max 50)"),
-      port: z.string().optional().describe("Modem device node (auto-detects if omitted)"),
-      timeout: z.number().min(1000).max(30000).optional().default(5000).describe("Timeout per command in ms"),
-      delayMs: z.number().min(0).max(10000).optional().default(500).describe("Delay between commands in ms (0-10000, default 500)"),
-      force: z.boolean().optional().default(false).describe("Bypass dangerous command safety checks"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Send multiple AT commands sequentially and capture all responses. Useful for running a diagnostic sequence. Requires root.",
+      inputSchema: z.object({
+        commands: z.array(z.string()).min(1).max(50).describe("Array of AT commands to send in order (max 50)"),
+        port: z.string().optional().describe("Modem device node (auto-detects if omitted)"),
+        timeout: z.number().min(1000).max(30000).optional().default(5000).describe("Timeout per command in ms"),
+        delayMs: z.number().min(0).max(10000).optional().default(500).describe("Delay between commands in ms (0-10000, default 500)"),
+        force: z.boolean().optional().default(false).describe("Bypass dangerous command safety checks"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ commands, port, timeout, delayMs, force, device }) => {
       try {
@@ -533,12 +541,14 @@ export function registerAtCommandTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_at_probe",
-    "Run a standard AT diagnostic probe: modem identification, signal quality, network registration, SIM status, and supported bands. Requires root.",
     {
-      port: z.string().optional().describe("Modem device node (auto-detects if omitted)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Run a standard AT diagnostic probe: modem identification, signal quality, network registration, SIM status, and supported bands. Requires root.",
+      inputSchema: z.object({
+        port: z.string().optional().describe("Modem device node (auto-detects if omitted)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ port, device }) => {
       try {
@@ -593,13 +603,15 @@ export function registerAtCommandTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_at_cross_validate",
-    "Cross-validate baseband firmware by comparing AT command responses (direct modem interrogation) against Android system properties (getprop). Discrepancies may indicate firmware tampering, incomplete OTA updates, or property spoofing. Sends ATI (identification), AT+CGMR (firmware revision), and AT+CGMM (model) to the modem and compares with gsm.version.baseband, ro.hardware.chipname, and related properties. Requires root.",
     {
-      port: z.string().optional().describe("Modem device node (auto-detects if omitted)"),
-      timeout: z.number().min(1000).max(30000).optional().default(5000).describe("Response timeout per command in ms"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Cross-validate baseband firmware by comparing AT command responses (direct modem interrogation) against Android system properties (getprop). Discrepancies may indicate firmware tampering, incomplete OTA updates, or property spoofing. Sends ATI (identification), AT+CGMR (firmware revision), and AT+CGMM (model) to the modem and compares with gsm.version.baseband, ro.hardware.chipname, and related properties. Requires root.",
+      inputSchema: z.object({
+        port: z.string().optional().describe("Modem device node (auto-detects if omitted)"),
+        timeout: z.number().min(1000).max(30000).optional().default(5000).describe("Response timeout per command in ms"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ port, timeout, device }) => {
       try {

@@ -17,7 +17,7 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { AdbExecOptions } from "../bridge/adb-bridge.js";
 
@@ -344,15 +344,17 @@ export function registerSensorTools(ctx: ToolContext): void {
 
   // ── adb_sensor_read ─────────────────────────────────────────────────────
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_sensor_read",
-    "Read current hardware sensor values from the device. Enumerates all available sensors from sensorservice and returns their last-known readings with timestamps. Sensor availability is device-dependent — the tool reports what's present. No root required.",
     {
-      category: z.enum(CATEGORIES).optional().default("all")
-        .describe("Filter by sensor category: all, accelerometer, gyroscope, magnetometer, light, barometer, proximity, gravity, linear_accel, rotation, orientation, motion, step, temperature"),
-      listOnly: z.boolean().optional().default(false)
-        .describe("If true, list available sensors without reading values (faster, useful for discovery)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Read current hardware sensor values from the device. Enumerates all available sensors from sensorservice and returns their last-known readings with timestamps. Sensor availability is device-dependent — the tool reports what's present. No root required.",
+      inputSchema: z.object({
+        category: z.enum(CATEGORIES).optional().default("all")
+          .describe("Filter by sensor category: all, accelerometer, gyroscope, magnetometer, light, barometer, proximity, gravity, linear_accel, rotation, orientation, motion, step, temperature"),
+        listOnly: z.boolean().optional().default(false)
+          .describe("If true, list available sensors without reading values (faster, useful for discovery)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ category, listOnly, device }) => {
       try {
@@ -434,13 +436,15 @@ export function registerSensorTools(ctx: ToolContext): void {
    */
   const iioPath = (dir: string): string => `${IIO_BASE}/${dir}`;
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_iio_read",
-    "Read raw hardware data from the Linux IIO (Industrial I/O) subsystem. Discovers all IIO devices and reads their current values. On Tensor/Exynos devices, this exposes per-rail power monitors (ODPM) showing real-time power consumption per SoC subsystem (CPU clusters, GPU, display, memory, TPU, GPS, etc.) — data not available through the Android sensor HAL. On other devices, may expose raw accelerometer, gyroscope, magnetometer, or ADC channels. Root required.",
     {
-      listOnly: z.boolean().optional().default(false)
-        .describe("If true, list available IIO devices without reading values"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Read raw hardware data from the Linux IIO (Industrial I/O) subsystem. Discovers all IIO devices and reads their current values. On Tensor/Exynos devices, this exposes per-rail power monitors (ODPM) showing real-time power consumption per SoC subsystem (CPU clusters, GPU, display, memory, TPU, GPS, etc.) — data not available through the Android sensor HAL. On other devices, may expose raw accelerometer, gyroscope, magnetometer, or ADC channels. Root required.",
+      inputSchema: z.object({
+        listOnly: z.boolean().optional().default(false)
+          .describe("If true, list available IIO devices without reading values"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ listOnly, device }) => {
       try {

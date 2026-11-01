@@ -11,7 +11,7 @@ import { z } from "zod";
 import { join } from "path";
 import { writeFileSync } from "fs";
 import { ensurePrivateDir, sanitizeFilenameComponent } from "../middleware/fs-utils.js";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { shellQuote } from "../middleware/sanitize.js";
 
@@ -40,12 +40,14 @@ let activeSession: TestSession | null = null;
 
 export function registerTestingTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_test_session_start",
-    "Start a structured test session. Creates a named directory for organizing numbered screenshots and logcat captures.",
     {
-      name: z.string().describe("Test session name (e.g., 'login_flow', 'threat_detection')"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Start a structured test session. Creates a named directory for organizing numbered screenshots and logcat captures.",
+      inputSchema: z.object({
+        name: z.string().describe("Test session name (e.g., 'login_flow', 'threat_detection')"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ name, device }) => {
       try {
@@ -96,13 +98,15 @@ export function registerTestingTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_test_step",
-    "Capture a numbered test step: takes a screenshot and captures logcat since the last step. Saves both to the session directory.",
     {
-      description: z.string().describe("Description of what this step tests or verifies"),
-      captureScreenshot: z.boolean().optional().default(true).describe("Take a screenshot for this step"),
-      captureLogcat: z.boolean().optional().default(true).describe("Capture logcat since last step"),
+      description: "Capture a numbered test step: takes a screenshot and captures logcat since the last step. Saves both to the session directory.",
+      inputSchema: z.object({
+        description: z.string().describe("Description of what this step tests or verifies"),
+        captureScreenshot: z.boolean().optional().default(true).describe("Take a screenshot for this step"),
+        captureLogcat: z.boolean().optional().default(true).describe("Capture logcat since last step"),
+      }),
     },
     async ({ description, captureScreenshot, captureLogcat }) => {
       if (!activeSession) {
@@ -172,10 +176,12 @@ export function registerTestingTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_test_session_end",
-    "End the active test session. Writes a summary manifest and returns the session directory path.",
-    {},
+    {
+      description: "End the active test session. Writes a summary manifest and returns the session directory path.",
+      inputSchema: z.object({}),
+    },
     async () => {
       if (!activeSession) {
         return { content: [{ type: "text", text: "No active test session." }], isError: true };

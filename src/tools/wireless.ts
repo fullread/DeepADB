@@ -6,7 +6,7 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 
 /**
@@ -46,12 +46,14 @@ const hostSchemaOptional = z.string().regex(HOST_PORT_RE, HOST_PORT_MSG).optiona
 
 export function registerWirelessTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_pair",
-    "Pair with a device over WiFi using the pairing code from Developer Options → Wireless debugging → Pair device",
     {
-      host: hostSchema.describe("Device IP and pairing port (e.g., '192.168.1.100:37123')"),
-      code: z.string().describe("6-digit pairing code shown on the device"),
+      description: "Pair with a device over WiFi using the pairing code from Developer Options → Wireless debugging → Pair device",
+      inputSchema: z.object({
+        host: hostSchema.describe("Device IP and pairing port (e.g., '192.168.1.100:37123')"),
+        code: z.string().describe("6-digit pairing code shown on the device"),
+      }),
     },
     async ({ host, code }) => {
       try {
@@ -68,11 +70,13 @@ export function registerWirelessTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_connect",
-    "Connect to a device over WiFi/TCP. Device must be paired first or have TCP/IP enabled.",
     {
-      host: hostSchema.describe("Device IP and port (e.g., '192.168.1.100:5555' or '192.168.1.100:41567')"),
+      description: "Connect to a device over WiFi/TCP. Device must be paired first or have TCP/IP enabled.",
+      inputSchema: z.object({
+        host: hostSchema.describe("Device IP and port (e.g., '192.168.1.100:5555' or '192.168.1.100:41567')"),
+      }),
     },
     async ({ host }) => {
       try {
@@ -88,11 +92,13 @@ export function registerWirelessTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_disconnect",
-    "Disconnect from a wireless device, or all wireless devices if no host specified",
     {
-      host: hostSchemaOptional.describe("Device IP:port to disconnect (omit for all)"),
+      description: "Disconnect from a wireless device, or all wireless devices if no host specified",
+      inputSchema: z.object({
+        host: hostSchemaOptional.describe("Device IP:port to disconnect (omit for all)"),
+      }),
     },
     async ({ host }) => {
       try {
@@ -106,12 +112,14 @@ export function registerWirelessTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_tcpip",
-    "Switch a USB-connected device to TCP/IP mode on the specified port (default 5555). After this, you can disconnect USB and use adb_connect.",
     {
-      port: z.number().min(1).max(65535).optional().default(5555).describe("TCP port for ADB (1-65535, default 5555)"),
-      device: z.string().optional().describe("Device serial (must be USB-connected)"),
+      description: "Switch a USB-connected device to TCP/IP mode on the specified port (default 5555). After this, you can disconnect USB and use adb_connect.",
+      inputSchema: z.object({
+        port: z.number().min(1).max(65535).optional().default(5555).describe("TCP port for ADB (1-65535, default 5555)"),
+        device: z.string().optional().describe("Device serial (must be USB-connected)"),
+      }),
     },
     async ({ port, device }) => {
       try {

@@ -28,7 +28,7 @@ import { z } from "zod";
 import { join } from "path";
 import { readFileSync, existsSync, readdirSync} from "fs";
 import { ensurePrivateDir, sanitizeFilenameComponent, writeAtomicSync, isWithinDir} from "../middleware/fs-utils.js";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 interface ThermalSnapshot {
@@ -45,13 +45,15 @@ function getThermalDir(tempDir: string): string {
 
 export function registerThermalPowerTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_thermal_snapshot",
-    "Capture a thermal and power snapshot: all thermal zone temperatures, per-CPU frequencies and governors, cooling device states, and battery temperature/current draw. Optionally save as a baseline for later comparison.",
     {
-      save: z.boolean().optional().default(false).describe("Save snapshot as a baseline JSON file"),
-      label: z.string().optional().default("snapshot").describe("Label for saved baseline"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Capture a thermal and power snapshot: all thermal zone temperatures, per-CPU frequencies and governors, cooling device states, and battery temperature/current draw. Optionally save as a baseline for later comparison.",
+      inputSchema: z.object({
+        save: z.boolean().optional().default(false).describe("Save snapshot as a baseline JSON file"),
+        label: z.string().optional().default("snapshot").describe("Label for saved baseline"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ save, label, device }) => {
       try {
@@ -209,12 +211,14 @@ export function registerThermalPowerTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_thermal_compare",
-    "Compare current thermal/power state against a saved baseline. Reports temperature changes per zone, CPU frequency shifts, and battery drain rate differences.",
     {
-      baselinePath: z.string().optional().describe("Path to baseline JSON. If omitted, uses the most recent baseline for the device."),
-      device: z.string().optional().describe("Device serial"),
+      description: "Compare current thermal/power state against a saved baseline. Reports temperature changes per zone, CPU frequency shifts, and battery drain rate differences.",
+      inputSchema: z.object({
+        baselinePath: z.string().optional().describe("Path to baseline JSON. If omitted, uses the most recent baseline for the device."),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ baselinePath, device }) => {
       try {
@@ -329,7 +333,7 @@ export function registerThermalPowerTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     // BF8 note: adb_battery_drain BLOCKS the MCP server's event loop for
     // the duration parameter (3-60 seconds via setTimeout). Single-threaded
     // JS means no other tool calls can be serviced while the drain test is
@@ -339,11 +343,13 @@ export function registerThermalPowerTools(ctx: ToolContext): void {
     // any concurrent device polling stops. Operators running multi-tool
     // workflows should sequence drain LAST or in isolation.
     "adb_battery_drain",
-    "Measure battery drain rate over a specified duration. Takes initial and final readings and calculates mA draw, mW power consumption, and estimated percentage per hour. Useful for profiling power impact of specific operations.",
     {
-      durationMs: z.number().min(3000).max(60000).optional().default(10000).describe("Measurement duration in ms (3s-60s, default 10s)"),
-      packageName: z.string().optional().describe("If specified, show battery stats for this package (requires root for detailed stats)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Measure battery drain rate over a specified duration. Takes initial and final readings and calculates mA draw, mW power consumption, and estimated percentage per hour. Useful for profiling power impact of specific operations.",
+      inputSchema: z.object({
+        durationMs: z.number().min(3000).max(60000).optional().default(10000).describe("Measurement duration in ms (3s-60s, default 10s)"),
+        packageName: z.string().optional().describe("If specified, show battery stats for this package (requires root for detailed stats)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ durationMs, packageName, device }) => {
       try {

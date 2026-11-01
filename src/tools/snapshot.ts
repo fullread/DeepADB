@@ -11,7 +11,7 @@ import { z } from "zod";
 import { join } from "path";
 import { readFileSync, existsSync } from "fs";
 import { ensurePrivateDir, writeAtomicSync, sanitizeFilenameComponent, isWithinDir} from "../middleware/fs-utils.js";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { validateShellArgs, shellQuote } from "../middleware/sanitize.js";
 
@@ -28,12 +28,14 @@ interface DeviceSnapshot {
 
 export function registerSnapshotTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_snapshot_capture",
-    "Capture a comprehensive device state snapshot: installed packages, key settings, and system properties. Saves to a JSON file.",
     {
-      name: z.string().optional().describe("Snapshot name (default: auto-generated timestamp)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Capture a comprehensive device state snapshot: installed packages, key settings, and system properties. Saves to a JSON file.",
+      inputSchema: z.object({
+        name: z.string().optional().describe("Snapshot name (default: auto-generated timestamp)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ name, device }) => {
       try {
@@ -107,12 +109,14 @@ export function registerSnapshotTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_snapshot_compare",
-    "Compare current device state against a saved snapshot. Shows added/removed packages, changed settings, and property differences.",
     {
-      snapshotPath: z.string().describe("Path to the saved snapshot JSON file"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Compare current device state against a saved snapshot. Shows added/removed packages, changed settings, and property differences.",
+      inputSchema: z.object({
+        snapshotPath: z.string().describe("Path to the saved snapshot JSON file"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ snapshotPath, device }) => {
       try {
@@ -174,14 +178,16 @@ export function registerSnapshotTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_snapshot_restore_settings",
-    "Restore settings from a saved snapshot to the current device. Only restores global and secure settings — does not install/uninstall packages.",
     {
-      snapshotPath: z.string().describe("Path to the saved snapshot JSON file"),
-      namespace: z.enum(["global", "secure", "both"]).optional().default("both")
-        .describe("Which settings namespace to restore"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Restore settings from a saved snapshot to the current device. Only restores global and secure settings — does not install/uninstall packages.",
+      inputSchema: z.object({
+        snapshotPath: z.string().describe("Path to the saved snapshot JSON file"),
+        namespace: z.enum(["global", "secure", "both"]).optional().default("both")
+          .describe("Which settings namespace to restore"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ snapshotPath, namespace, device }) => {
       try {

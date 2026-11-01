@@ -1,12 +1,13 @@
 // Copyright 2026 Jason <fullread@github>
 // SPDX-License-Identifier: Apache-2.0
 /**
- * HTTP/SSE Transport — Alternative to stdio for browser-based MCP clients.
+ * HTTP Transport — Streamable HTTP and legacy SSE on the same port.
  *
  * When DA_HTTP_PORT is set, DeepADB starts an HTTP server instead of
  * the stdio transport. Clients connect via Server-Sent Events.
  *
  * Endpoints:
+ *   POST/GET/DELETE /mcp — Streamable HTTP session
  *   GET  /sse      — SSE stream (client subscribes here)
  *   POST /message  — Client sends JSON-RPC messages here
  *   GET  /health   — Simple health check
@@ -15,11 +16,14 @@
  */
 
 import { createServer as createHttpServer, IncomingMessage, ServerResponse } from "http";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { SSEServerTransport } from "@modelcontextprotocol/server-legacy/sse";
 import { Logger } from "./middleware/logger.js";
 import { checkAuth } from "./middleware/auth.js";
+import { checkOriginAndCors, readAllowedOrigins } from "./middleware/origin.js";
 import { VERSION } from "./config/config.js";
+import { StreamableHttpSession } from "./streamable-http.js";
+import { httpBaseUrl } from "./middleware/http-url.js";
 
 export interface HttpTransportOptions {
   port: number;
@@ -37,43 +41,18 @@ export async function startHttpTransport(
   logger: Logger,
 ): Promise<void> {
   const host = options.host ?? "127.0.0.1";
+  const origins = readAllowedOrigins("DA_HTTP_CORS_ORIGIN");
   let activeTransport: SSEServerTransport | null = null;
+  let replacingSse = false;
+  const streamable = new StreamableHttpSession(server, logger);
 
   const httpServer = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     try {
-      // CORS headers — restrict to configured origin (default: deny cross-origin)
-      // BO7 fix: support comma-separated list of allowed origins. Production
-      // deployments often need dev + staging + prod URLs; previously only
-      // one was supported per process. The request's Origin header is
-      // matched against the configured list; only the matched origin is
-      // reflected in the response. Empty config = deny all cross-origin.
-      const rawAllowedOrigins = process.env.DA_HTTP_CORS_ORIGIN ?? "";
-      if (rawAllowedOrigins) {
-        const allowedList = rawAllowedOrigins.split(",").map(s => s.trim()).filter(Boolean);
-        const requestOrigin = req.headers.origin;
-        if (typeof requestOrigin === "string" && allowedList.includes(requestOrigin)) {
-          res.setHeader("Access-Control-Allow-Origin", requestOrigin);
-          res.setHeader("Vary", "Origin");
-          res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-          res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-        } else if (allowedList.length === 1 && !requestOrigin) {
-          // Backwards compat: if exactly one origin is configured and no
-          // Origin header is present (e.g., server-to-server), reflect the
-          // single origin as before. Pre-BO7 behavior was unconditional.
-          res.setHeader("Access-Control-Allow-Origin", allowedList[0]);
-          res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-          res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-        }
-        // No match: omit CORS headers entirely → browser blocks the request.
-      }
-
-      if (req.method === "OPTIONS") {
-        res.writeHead(204);
-        res.end();
-        return;
-      }
-
-      const url = new URL(req.url ?? "/", `http://${host}:${options.port}`);
+      const url = new URL(req.url ?? "/", httpBaseUrl(host, options.port));
+      const isMcp = url.pathname === "/mcp";
+      if (!checkOriginAndCors(req, res, origins, isMcp ? ["GET", "POST", "DELETE", "OPTIONS"] : ["GET", "POST", "OPTIONS"],
+        ["Content-Type", "Authorization", "MCP-Protocol-Version", "Last-Event-ID", ...(isMcp ? ["Mcp-Session-Id"] : [])])) return;
+      if (isMcp) res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
 
       // Health check (unauthenticated — only returns status info)
       if (url.pathname === "/health" && req.method === "GET") {
@@ -89,37 +68,57 @@ export async function startHttpTransport(
       // Bearer token auth — all endpoints below require valid token when DA_AUTH_TOKEN is set
       if (!checkAuth(req, res)) return;
 
+      if (isMcp) {
+        await streamable.handle(req, res, activeTransport !== null || replacingSse);
+        return;
+      }
+
       // SSE endpoint — client subscribes here
       if (url.pathname === "/sse" && req.method === "GET") {
-        logger.info(`SSE client connected from ${req.socket.remoteAddress}`);
-
-        // W1: close the previous transport before replacing it (single-client
-        // model). Without the explicit close, the old transport's response
-        // stream stays open until GC reclaims it, briefly leaking a file
-        // descriptor and a half-open SSE channel that the previous client
-        // might still be writing to.
-        if (activeTransport) {
-          logger.warn("New SSE connection replacing existing one.");
-          try {
-            await activeTransport.close();
-          } catch (err) {
-            logger.warn(`Failed to close previous SSE transport: ${err instanceof Error ? err.message : err}`);
-          }
-          activeTransport = null;
+        if (streamable.active || replacingSse) {
+          res.writeHead(409, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Another MCP client is connecting or has an active /mcp session" }));
+          return;
         }
+        replacingSse = true;
+        try {
+          logger.info(`SSE client connected from ${req.socket.remoteAddress}`);
 
-        const transport = new SSEServerTransport("/message", res);
-        activeTransport = transport;
-
-        // When the SSE connection closes, clean up
-        req.on("close", () => {
-          logger.info("SSE client disconnected.");
-          if (activeTransport === transport) {
+          // W1: close the previous transport before replacing it (single-client
+          // model). Without the explicit close, the old transport's response
+          // stream stays open until GC reclaims it, briefly leaking a file
+          // descriptor and a half-open SSE channel that the previous client
+          // might still be writing to.
+          if (activeTransport) {
+            logger.warn("New SSE connection replacing existing one.");
+            try {
+              await activeTransport.close();
+            } catch (err) {
+              logger.warn(`Failed to close previous SSE transport: ${err instanceof Error ? err.message : err}`);
+            }
             activeTransport = null;
           }
-        });
 
-        await server.connect(transport);
+          const transport = new SSEServerTransport("/message", res);
+          activeTransport = transport;
+
+          // When the SSE connection closes, clean up
+          req.on("close", () => {
+            logger.info("SSE client disconnected.");
+            if (activeTransport === transport) {
+              activeTransport = null;
+            }
+          });
+
+          await server.connect(transport);
+          const sdkMessage = transport.onmessage;
+          transport.onmessage = (message, extra) => {
+            // handlePostMessage awaits the upload. The connection may have
+            // been replaced while that body was still arriving.
+            if (activeTransport !== transport || replacingSse) throw new Error("SSE session is no longer active");
+            sdkMessage?.(message, extra);
+          };
+        } finally { replacingSse = false; }
         return;
       }
 
@@ -128,6 +127,18 @@ export async function startHttpTransport(
         if (!activeTransport) {
           res.writeHead(503, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "No active SSE session. Connect to /sse first." }));
+          return;
+        }
+
+        const ids = url.searchParams.getAll("sessionId");
+        if (ids.length !== 1 || !ids[0]) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Exactly one sessionId query parameter is required" }));
+          return;
+        }
+        if (ids[0] !== activeTransport.sessionId) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "SSE session not found; reconnect to /sse" }));
           return;
         }
 
@@ -143,6 +154,7 @@ export async function startHttpTransport(
           "GET /sse": "SSE stream for MCP client",
           "POST /message": "JSON-RPC messages",
           "GET /health": "Health check",
+          "POST/GET/DELETE /mcp": "Streamable HTTP MCP session",
         },
       }));
     } catch (err) {
@@ -154,6 +166,9 @@ export async function startHttpTransport(
     }
   });
 
+  // Bound incomplete request uploads, in addition to the SDK's 1 MiB body cap.
+  httpServer.requestTimeout = 15_000;
+
   return new Promise((resolve, reject) => {
     httpServer.on("error", (err) => {
       logger.error(`HTTP transport failed to start: ${err.message}`);
@@ -161,9 +176,10 @@ export async function startHttpTransport(
     });
 
     httpServer.listen(options.port, host, () => {
-      logger.info(`HTTP/SSE transport listening on http://${host}:${options.port}`);
-      logger.info(`  SSE endpoint: http://${host}:${options.port}/sse`);
-      logger.info(`  Message endpoint: http://${host}:${options.port}/message`);
+      logger.info(`HTTP/SSE transport listening on ${httpBaseUrl(host, options.port)}`);
+      logger.info(`  SSE endpoint: ${httpBaseUrl(host, options.port)}/sse`);
+      logger.info(`  Message endpoint: ${httpBaseUrl(host, options.port)}/message`);
+      logger.info(`  Streamable HTTP endpoint: ${httpBaseUrl(host, options.port)}/mcp`);
       resolve();
     });
   });

@@ -16,6 +16,7 @@
 
 import { execFile, ExecFileOptions, spawn, spawnSync, ChildProcess } from "child_process";
 import { existsSync } from "fs";
+import { resolve } from "path";
 import { AdbBridge, AdbResult, AdbExecOptions, AdbError } from "./adb-bridge.js";
 import { config } from "../config/config.js";
 import { Logger } from "../middleware/logger.js";
@@ -355,8 +356,12 @@ export class LocalBridge extends AdbBridge {
         // Flags are hardcoded (-r, -d), paths need quoting
         {
           const imArgs = args.slice(1);
-          const flags = imArgs.filter(a => a.startsWith("-"));
-          const paths = imArgs.filter(a => !a.startsWith("-"));
+          // Only these server-supported options may become flags. Treat every
+          // other argument as a path, including a filename beginning with '-'.
+          const flags: string[] = [];
+          while (imArgs[0] === "-r" || imArgs[0] === "-d") flags.push(imArgs.shift()!);
+          const paths = imArgs.map(p => resolve(p));
+          if (!paths.length || paths.some(p => p.includes("\0"))) throw new Error("Valid APK paths are required");
           const imCmd = `pm install-multiple ${flags.join(" ")} ${paths.map(p => shellQuote(p)).join(" ")}`;
           return this.execLocal(hasRoot ? this.elevate(imCmd) : imCmd, options);
         }

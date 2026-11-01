@@ -8,14 +8,16 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 
 export function registerPrompts(ctx: ToolContext): void {
 
-  ctx.server.prompt(
+  ctx.server.registerPrompt(
     "debug-crash",
-    "Guided workflow: Capture crash information for debugging. Clears logcat, waits for reproduction, then captures crash buffer and device state.",
-    { packageName: z.string().describe("Package name to monitor for crashes") },
+    {
+      description: "Guided workflow: Capture crash information for debugging. Clears logcat, waits for reproduction, then captures crash buffer and device state.",
+      argsSchema: z.object({ packageName: z.string().describe("Package name to monitor for crashes") }),
+    },
     ({ packageName }) => ({
       messages: [{
         role: "user" as const,
@@ -37,12 +39,14 @@ export function registerPrompts(ctx: ToolContext): void {
     })
   );
 
-  ctx.server.prompt(
+  ctx.server.registerPrompt(
     "deploy-and-test",
-    "Guided workflow: Build, install, launch, and start monitoring an app in one sequence.",
     {
-      projectPath: z.string().describe("Path to the Android project root"),
-      packageName: z.string().describe("Package name of the app"),
+      description: "Guided workflow: Build, install, launch, and start monitoring an app in one sequence.",
+      argsSchema: z.object({
+        projectPath: z.string().describe("Path to the Android project root"),
+        packageName: z.string().describe("Package name of the app"),
+      }),
     },
     ({ projectPath, packageName }) => ({
       messages: [{
@@ -65,10 +69,12 @@ export function registerPrompts(ctx: ToolContext): void {
     })
   );
 
-  ctx.server.prompt(
+  ctx.server.registerPrompt(
     "telephony-snapshot",
-    "Guided workflow: Capture comprehensive telephony and cellular state for radio diagnostics.",
-    {},
+    {
+      description: "Guided workflow: Capture comprehensive telephony and cellular state for radio diagnostics.",
+      argsSchema: z.object({}),
+    },
     () => ({
       messages: [{
         role: "user" as const,
@@ -89,11 +95,13 @@ export function registerPrompts(ctx: ToolContext): void {
     })
   );
 
-  ctx.server.prompt(
+  ctx.server.registerPrompt(
     "airplane-cycle-test",
-    "Guided workflow: Test cellular re-registration by cycling airplane mode while monitoring logs.",
     {
-      packageName: z.string().optional().describe("Optional package to monitor during the test"),
+      description: "Guided workflow: Test cellular re-registration by cycling airplane mode while monitoring logs.",
+      argsSchema: z.object({
+        packageName: z.string().optional().describe("Optional package to monitor during the test"),
+      }),
     },
     ({ packageName }) => {
       const tagFilter = packageName ? ` with tag="${packageName}"` : "";

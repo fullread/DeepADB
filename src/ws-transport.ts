@@ -3,15 +3,15 @@
 /**
  * WebSocket Transport — Bidirectional streaming MCP transport.
  *
- * Alternative to stdio and HTTP/SSE for MCP clients that benefit from
- * true bidirectional communication. Lower latency than SSE polling and
- * better compatibility with modern web frameworks.
+ * Alternative to stdio and HTTP/SSE for native clients that support WebSocket.
+ * Browser clients needing bearer headers should use HTTP/SSE instead, because
+ * the native browser WebSocket API cannot set arbitrary Authorization headers.
  *
  * Requires the `ws` npm package as an optional peer dependency:
  *   npm install ws @types/ws
  *
  * Set DA_WS_PORT to enable (separate from DA_HTTP_PORT).
- * Can run alongside stdio or HTTP/SSE transport.
+ * Selected instead of stdio when DA_HTTP_PORT is unset.
  *
  * Endpoints:
  *   ws://host:port/ws  — WebSocket MCP transport
@@ -19,20 +19,12 @@
  */
 
 import { createServer as createHttpServer, IncomingMessage, ServerResponse } from "http";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, parseJSONRPCMessage, type Transport, type JSONRPCMessage } from "@modelcontextprotocol/server";
 import { Logger } from "./middleware/logger.js";
 import { hasValidToken } from "./middleware/auth.js";
+import { checkOriginAndCors, hasAllowedOrigin, readAllowedOrigins } from "./middleware/origin.js";
+import type { Duplex } from "stream";
 import { VERSION } from "./config/config.js";
-
-/** MCP Transport interface — matches the SDK's Transport contract. */
-interface McpTransport {
-  start(): Promise<void>;
-  close(): Promise<void>;
-  send(message: unknown): Promise<void>;
-  onclose?: () => void;
-  onerror?: (error: Error) => void;
-  onmessage?: (message: unknown) => void;
-}
 
 export interface WsTransportOptions {
   port: number;
@@ -44,11 +36,11 @@ export interface WsTransportOptions {
  * Minimal WebSocket transport that bridges the `ws` WebSocket library
  * to the MCP SDK's Transport interface.
  */
-class WebSocketMcpTransport implements McpTransport {
+class WebSocketMcpTransport implements Transport {
   private ws: unknown; // WebSocket instance from `ws` library
   onclose?: () => void;
   onerror?: (error: Error) => void;
-  onmessage?: (message: unknown) => void;
+  onmessage?: Transport["onmessage"];
 
   constructor(ws: unknown) {
     this.ws = ws;
@@ -57,7 +49,7 @@ class WebSocketMcpTransport implements McpTransport {
     socket.on("message", (data: unknown) => {
       try {
         const text = typeof data === "string" ? data : (data as Buffer).toString("utf-8");
-        const message = JSON.parse(text);
+        const message = parseJSONRPCMessage(JSON.parse(text));
         this.onmessage?.(message);
       } catch (err) {
         this.onerror?.(err instanceof Error ? err : new Error(String(err)));
@@ -82,7 +74,7 @@ class WebSocketMcpTransport implements McpTransport {
     socket.close();
   }
 
-  async send(message: unknown): Promise<void> {
+  async send(message: JSONRPCMessage): Promise<void> {
     // BP7 fix: named constant instead of magic number 1. Per WHATWG WebSocket
     // spec (https://websockets.spec.whatwg.org/#dom-websocket-readystate),
     // readyState values are: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED. We
@@ -107,6 +99,7 @@ export async function startWsTransport(
   logger: Logger,
 ): Promise<void> {
   const host = options.host ?? "127.0.0.1";
+  const origins = readAllowedOrigins("DA_WS_CORS_ORIGIN");
 
   // Dynamic import of ws — optional dependency.
   // Use a variable to prevent TypeScript from resolving the module at compile time.
@@ -130,19 +123,7 @@ export async function startWsTransport(
 
   // Create HTTP server for health check endpoint
   const httpServer = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
-    // CORS
-    const allowedOrigin = process.env.DA_WS_CORS_ORIGIN ?? "";
-    if (allowedOrigin) {
-      res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
-      res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    }
-
-    if (req.method === "OPTIONS") {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
+    if (!checkOriginAndCors(req, res, origins, ["GET", "OPTIONS"], ["Content-Type", "Authorization"])) return;
 
     if (req.url === "/health" && req.method === "GET") {
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -163,41 +144,36 @@ export async function startWsTransport(
   // sub-100KB) while bounding worst-case memory pressure.
   const WS_MAX_PAYLOAD_BYTES = 10 * 1024 * 1024;
 
-  // Create WebSocket server attached to the HTTP server
-  const WssConstructor = WebSocketServer as new (options: { server: unknown; path: string; maxPayload?: number }) => {
-    on: (event: string, handler: (...args: unknown[]) => void) => void;
+  // Authorize upgrades before accepting a WebSocket or touching the MCP session.
+  const WssConstructor = WebSocketServer as new (options: { noServer: boolean; maxPayload: number }) => {
+    handleUpgrade: (req: IncomingMessage, socket: Duplex, head: Buffer, callback: (ws: unknown) => void) => void;
   };
-
-  const wss = new WssConstructor({ server: httpServer, path: "/ws", maxPayload: WS_MAX_PAYLOAD_BYTES });
-
-  wss.on("connection", async (ws: unknown, req: unknown) => {
-    const incomingReq = req as IncomingMessage;
-    const remoteAddr = incomingReq.socket.remoteAddress;
-
-    // Bearer token auth — reject unauthorized WebSocket connections immediately
-    if (!hasValidToken(incomingReq)) {
-      logger.warn(`WebSocket connection rejected (unauthorized) from ${remoteAddr}`);
-      const socket = ws as { close: (code: number, reason: string) => void };
-      socket.close(4401, "Unauthorized");
-      return;
-    }
-
-    logger.info(`WebSocket client connected from ${remoteAddr}`);
-
+  const wss = new WssConstructor({ noServer: true, maxPayload: WS_MAX_PAYLOAD_BYTES });
+  const connectClient = async (ws: unknown, req: IncomingMessage): Promise<void> => {
+    logger.info(`WebSocket client connected from ${req.socket.remoteAddress}`);
     const transport = new WebSocketMcpTransport(ws);
-
     try {
-      // Cast — our McpTransport is structurally compatible with the SDK's Transport interface
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await server.connect(transport as any);
+      await server.connect(transport);
     } catch (err) {
       logger.error(`WebSocket transport connection error: ${err instanceof Error ? err.message : err}`);
+      (ws as { close: (code: number, reason: string) => void }).close(1011, "MCP connection failed");
     }
-
     const socket = ws as { on: (event: string, handler: () => void) => void };
     socket.on("close", () => {
-      logger.info(`WebSocket client disconnected: ${remoteAddr}`);
+      logger.info(`WebSocket client disconnected: ${req.socket.remoteAddress}`);
     });
+  };
+  httpServer.on("upgrade", (req, socket, head) => {
+    const reject = (status: number, reason: string): void => {
+      socket.end(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+    };
+    if (req.url?.split("?")[0] !== "/ws") { reject(404, "Not Found"); return; }
+    if (!hasAllowedOrigin(req, origins)) { reject(403, "Forbidden"); return; }
+    if (!hasValidToken(req)) { reject(401, "Unauthorized"); return; }
+    // One MCP instance has one active transport. Reject concurrent clients
+    // explicitly instead of leaving an accepted socket that can never reply.
+    if (server.isConnected()) { reject(409, "Conflict"); return; }
+    wss.handleUpgrade(req, socket, head, ws => { void connectClient(ws, req); });
   });
 
   return new Promise((resolve, reject) => {

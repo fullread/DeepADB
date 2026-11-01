@@ -11,7 +11,7 @@
 import { z } from "zod";
 import { existsSync } from "fs";
 import { execFile } from "child_process";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 
 function execAsync(
@@ -42,19 +42,21 @@ async function checkGcloud(): Promise<string | null> {
 
 export function registerDeviceFarmTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_farm_run",
-    "Run tests on Firebase Test Lab. Uploads an APK and test APK, executes instrumented tests across specified device models and API levels. Requires gcloud CLI authenticated with a Firebase project.",
     {
-      appApk: z.string().describe("Path to the app APK file"),
-      testApk: z.string().describe("Path to the test/instrumentation APK file"),
-      devices: z.array(z.string()).optional()
-        .describe("Device specs as 'model=DEVICE,version=API' (e.g., 'model=bluejay,version=33'). Omit for default device."),
-      testTargets: z.string().optional().describe("Specific test class or method (e.g., 'class com.example.MyTest')"),
-      timeout: z.string().optional().default("300s").describe("Test timeout passed to gcloud --timeout (e.g., '300s', '10m'). This is the LAB-side timeout."),
-      resultsBucket: z.string().optional().describe("GCS bucket for results (omit for default)"),
-      execTimeoutMs: z.number().int().min(60000).max(3600000).optional().default(600000)
-        .describe("Local execFile timeout for the gcloud invocation in ms (1min-60min, default 10min). Y4 fix: bigger device matrices or larger APKs can plausibly exceed the previous hardcoded 10min."),
+      description: "Run tests on Firebase Test Lab. Uploads an APK and test APK, executes instrumented tests across specified device models and API levels. Requires gcloud CLI authenticated with a Firebase project.",
+      inputSchema: z.object({
+        appApk: z.string().describe("Path to the app APK file"),
+        testApk: z.string().describe("Path to the test/instrumentation APK file"),
+        devices: z.array(z.string()).optional()
+          .describe("Device specs as 'model=DEVICE,version=API' (e.g., 'model=bluejay,version=33'). Omit for default device."),
+        testTargets: z.string().optional().describe("Specific test class or method (e.g., 'class com.example.MyTest')"),
+        timeout: z.string().optional().default("300s").describe("Test timeout passed to gcloud --timeout (e.g., '300s', '10m'). This is the LAB-side timeout."),
+        resultsBucket: z.string().optional().describe("GCS bucket for results (omit for default)"),
+        execTimeoutMs: z.number().int().min(60000).max(3600000).optional().default(600000)
+          .describe("Local execFile timeout for the gcloud invocation in ms (1min-60min, default 10min). Y4 fix: bigger device matrices or larger APKs can plausibly exceed the previous hardcoded 10min."),
+      }),
     },
     async ({ appApk, testApk, devices, testTargets, timeout, resultsBucket, execTimeoutMs }) => {
       try {
@@ -116,11 +118,13 @@ export function registerDeviceFarmTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_farm_results",
-    "Retrieve results from the most recent Firebase Test Lab run, or a specific test matrix ID. Shows pass/fail status, device results, and links to logs and artifacts.",
     {
-      matrixId: z.string().optional().describe("Test matrix ID (from adb_farm_run output). Omit to list recent matrices."),
+      description: "Retrieve results from the most recent Firebase Test Lab run, or a specific test matrix ID. Shows pass/fail status, device results, and links to logs and artifacts.",
+      inputSchema: z.object({
+        matrixId: z.string().optional().describe("Test matrix ID (from adb_farm_run output). Omit to list recent matrices."),
+      }),
     },
     async ({ matrixId }) => {
       try {
@@ -159,12 +163,14 @@ export function registerDeviceFarmTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_farm_matrix",
-    "List available device models and API levels on Firebase Test Lab. Use to plan test matrices.",
     {
-      type: z.enum(["models", "versions"]).optional().default("models")
-        .describe("List available device models or Android API versions"),
+      description: "List available device models and API levels on Firebase Test Lab. Use to plan test matrices.",
+      inputSchema: z.object({
+        type: z.enum(["models", "versions"]).optional().default("models")
+          .describe("List available device models or Android API versions"),
+      }),
     },
     async ({ type }) => {
       try {

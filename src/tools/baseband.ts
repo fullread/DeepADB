@@ -14,7 +14,7 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { resultHandleSchemaFields, withResultHandle } from "./result-handles.js";
 import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
@@ -22,13 +22,15 @@ import { detectSimConfig } from "../middleware/chipset.js";
 
 export function registerBasebandTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_baseband_info",
-    "Get comprehensive modem/baseband identification: firmware version, RIL implementation, chipset, IMEI, SIM state, and radio capabilities.",
     {
-      device: z.string().optional().describe("Device serial"),
-      includeImei: z.boolean().optional().default(false).describe("Include IMEI in output (sensitive permanent device identifier — opt-in only)"),
-      ...resultHandleSchemaFields,
+      description: "Get comprehensive modem/baseband identification: firmware version, RIL implementation, chipset, IMEI, SIM state, and radio capabilities.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+        includeImei: z.boolean().optional().default(false).describe("Include IMEI in output (sensitive permanent device identifier — opt-in only)"),
+        ...resultHandleSchemaFields,
+      }),
     },
     async ({ device, includeImei, result_handle, result_handle_ttl }) => {
       try {
@@ -206,11 +208,13 @@ export function registerBasebandTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_cell_identity",
-    "Extract detailed cell identity information: Cell ID (CID), TAC/LAC, EARFCN/ARFCN, Physical Cell ID (PCI), PLMN, and network type. Parses structured data from dumpsys for cellular network analysis.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "Extract detailed cell identity information: Cell ID (CID), TAC/LAC, EARFCN/ARFCN, Physical Cell ID (PCI), PLMN, and network type. Parses structured data from dumpsys for cellular network analysis.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {
@@ -251,11 +255,13 @@ export function registerBasebandTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_signal_detail",
-    "Get detailed signal strength measurements: RSRP, RSRQ, SINR, RSSI, timing advance, and signal bars. Provides raw radio measurements for signal analysis and anomaly detection.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "Get detailed signal strength measurements: RSRP, RSRQ, SINR, RSSI, timing advance, and signal bars. Provides raw radio measurements for signal analysis and anomaly detection.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {
@@ -282,11 +288,13 @@ export function registerBasebandTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_neighboring_cells",
-    "List all visible cells beyond the serving cell: neighboring LTE/5G/WCDMA/GSM cells with their identities and signal strengths. Useful for cellular network surveys, coverage analysis, and radio environment characterization.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "List all visible cells beyond the serving cell: neighboring LTE/5G/WCDMA/GSM cells with their identities and signal strengths. Useful for cellular network surveys, coverage analysis, and radio environment characterization.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {
@@ -313,11 +321,13 @@ export function registerBasebandTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_carrier_config",
-    "Dump carrier configuration values. Useful for verifying carrier settings, detecting configuration anomalies, and inspecting APN configurations.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "Dump carrier configuration values. Useful for verifying carrier settings, detecting configuration anomalies, and inspecting APN configurations.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {
@@ -344,13 +354,15 @@ export function registerBasebandTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_modem_logs",
-    "Capture modem/baseband-related logs from multiple sources: RIL (Radio Interface Layer) logcat, telephony framework logs, and kernel modem messages via dmesg (root required for dmesg). Useful for radio diagnostics and tracing baseband-framework communication.",
     {
-      lines: z.number().min(1).max(5000).optional().default(200).describe("Max lines per log source (1-5000, default 200)"),
-      grep: z.string().optional().describe("Additional grep filter applied to all sources"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Capture modem/baseband-related logs from multiple sources: RIL (Radio Interface Layer) logcat, telephony framework logs, and kernel modem messages via dmesg (root required for dmesg). Useful for radio diagnostics and tracing baseband-framework communication.",
+      inputSchema: z.object({
+        lines: z.number().min(1).max(5000).optional().default(200).describe("Max lines per log source (1-5000, default 200)"),
+        grep: z.string().optional().describe("Additional grep filter applied to all sources"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ lines, grep, device }) => {
       try {

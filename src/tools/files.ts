@@ -32,7 +32,7 @@
 
 import { z } from "zod";
 import { join } from "path";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { resultHandleSchemaFields, withResultHandle } from "./result-handles.js";
 import { shellQuote } from "../middleware/sanitize.js";
@@ -214,13 +214,15 @@ export function registerFileTools(ctx: ToolContext): void {
 
   // ── Existing tools (transfer & read) ────────────────────────────────────
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_push",
-    "Push a local file to the device filesystem. Pre-flight checks: hard-blocked kernel paths, filesystem type warnings, symlink resolution, and destination storage availability.",
     {
-      localPath: z.string().describe("Local file path to push"),
-      remotePath: z.string().describe("Destination path on device"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Push a local file to the device filesystem. Pre-flight checks: hard-blocked kernel paths, filesystem type warnings, symlink resolution, and destination storage availability.",
+      inputSchema: z.object({
+        localPath: z.string().describe("Local file path to push"),
+        remotePath: z.string().describe("Destination path on device"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ localPath, remotePath, device }) => {
       const start = Date.now();
@@ -255,13 +257,15 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_pull",
-    "Pull a file from the device to local filesystem",
     {
-      remotePath: z.string().describe("File path on the device"),
-      localPath: z.string().optional().describe("Local destination (defaults to temp dir)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Pull a file from the device to local filesystem",
+      inputSchema: z.object({
+        remotePath: z.string().describe("File path on the device"),
+        localPath: z.string().optional().describe("Local destination (defaults to temp dir)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ remotePath, localPath, device }) => {
       const start = Date.now();
@@ -281,13 +285,15 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_ls",
-    "List files and directories on the device",
     {
-      path: z.string().default("/sdcard").describe("Directory path on device"),
-      device: z.string().optional().describe("Device serial"),
-      details: z.boolean().optional().default(false).describe("Show detailed listing (ls -la)"),
+      description: "List files and directories on the device",
+      inputSchema: z.object({
+        path: z.string().default("/sdcard").describe("Directory path on device"),
+        device: z.string().optional().describe("Device serial"),
+        details: z.boolean().optional().default(false).describe("Show detailed listing (ls -la)"),
+      }),
     },
     async ({ path, device, details }) => {
       const start = Date.now();
@@ -302,13 +308,15 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_cat",
-    "Read a text file from the device",
     {
-      path: z.string().describe("File path on device"),
-      device: z.string().optional().describe("Device serial"),
-      maxLines: z.number().min(1).max(10000).optional().describe("Maximum lines to return (1-10000)"),
+      description: "Read a text file from the device",
+      inputSchema: z.object({
+        path: z.string().describe("File path on device"),
+        device: z.string().optional().describe("Device serial"),
+        maxLines: z.number().min(1).max(10000).optional().describe("Maximum lines to return (1-10000)"),
+      }),
     },
     async ({ path, device, maxLines }) => {
       const start = Date.now();
@@ -326,15 +334,17 @@ export function registerFileTools(ctx: ToolContext): void {
 
   // ── New tools (filesystem operations) ───────────────────────────────────
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_file_write",
-    "Create or overwrite a text file on the device. Content is delivered via shell heredoc — suitable for config files, scripts, test fixtures, and small data files. For large or binary files, use adb_push instead. Shell buffer limits content to approximately 128KB.",
     {
-      path: z.string().describe("Destination file path on device"),
-      content: z.string().describe("File content to write"),
-      append: z.boolean().optional().default(false).describe("Append to existing file instead of overwriting"),
-      root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Create or overwrite a text file on the device. Content is delivered via shell heredoc — suitable for config files, scripts, test fixtures, and small data files. For large or binary files, use adb_push instead. Shell buffer limits content to approximately 128KB.",
+      inputSchema: z.object({
+        path: z.string().describe("Destination file path on device"),
+        content: z.string().describe("File content to write"),
+        append: z.boolean().optional().default(false).describe("Append to existing file instead of overwriting"),
+        root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ path: filePath, content, append, root, device }) => {
       const start = Date.now();
@@ -410,18 +420,20 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_find",
-    "Search for files on the device by name or pattern. Uses the find command with glob matching. Results are capped at maxResults to prevent unbounded output. Reports whether results were truncated.",
     {
-      searchPath: z.string().default("/sdcard").describe("Starting directory for search"),
-      name: z.string().describe("Filename pattern (glob: *.apk, config.*, *test*)"),
-      type: z.enum(["file", "directory", "any"]).optional().default("any").describe("Filter by type: file, directory, or any"),
-      maxDepth: z.number().min(1).max(50).optional().default(10).describe("Maximum directory depth to search (1-50, default 10)"),
-      maxResults: z.number().min(1).max(10000).optional().default(500).describe("Maximum results to return (1-10000, default 500)"),
-      root: z.boolean().optional().default(false).describe("Use root shell for system paths"),
-      device: z.string().optional().describe("Device serial"),
-      ...resultHandleSchemaFields,
+      description: "Search for files on the device by name or pattern. Uses the find command with glob matching. Results are capped at maxResults to prevent unbounded output. Reports whether results were truncated.",
+      inputSchema: z.object({
+        searchPath: z.string().default("/sdcard").describe("Starting directory for search"),
+        name: z.string().describe("Filename pattern (glob: *.apk, config.*, *test*)"),
+        type: z.enum(["file", "directory", "any"]).optional().default("any").describe("Filter by type: file, directory, or any"),
+        maxDepth: z.number().min(1).max(50).optional().default(10).describe("Maximum directory depth to search (1-50, default 10)"),
+        maxResults: z.number().min(1).max(10000).optional().default(500).describe("Maximum results to return (1-10000, default 500)"),
+        root: z.boolean().optional().default(false).describe("Use root shell for system paths"),
+        device: z.string().optional().describe("Device serial"),
+        ...resultHandleSchemaFields,
+      }),
     },
     async ({ searchPath, name, type, maxDepth, maxResults, root, device, result_handle, result_handle_ttl }) => {
       const start = Date.now();
@@ -465,13 +477,15 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_file_stat",
-    "Get detailed file metadata: size, permissions, ownership, timestamps (access/modify/change), SELinux security context, and file type. Read-only operation.",
     {
-      path: z.string().describe("File or directory path on device"),
-      root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Get detailed file metadata: size, permissions, ownership, timestamps (access/modify/change), SELinux security context, and file type. Read-only operation.",
+      inputSchema: z.object({
+        path: z.string().describe("File or directory path on device"),
+        root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ path: filePath, root, device }) => {
       const start = Date.now();
@@ -507,14 +521,16 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_file_checksum",
-    "Compute SHA-256 hash of a file on the device. Critical for firmware integrity verification, tamper detection, and comparing files across devices. Read-only operation. Reports file size alongside the hash.",
     {
-      path: z.string().describe("File path on device"),
-      algorithm: z.enum(["sha256", "sha1", "md5"]).optional().default("sha256").describe("Hash algorithm (default: sha256)"),
-      root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Compute SHA-256 hash of a file on the device. Critical for firmware integrity verification, tamper detection, and comparing files across devices. Read-only operation. Reports file size alongside the hash.",
+      inputSchema: z.object({
+        path: z.string().describe("File path on device"),
+        algorithm: z.enum(["sha256", "sha1", "md5"]).optional().default("sha256").describe("Hash algorithm (default: sha256)"),
+        root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ path: filePath, algorithm, root, device }) => {
       const start = Date.now();
@@ -568,14 +584,16 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_mkdir",
-    "Create a directory on the device. Supports -p flag for creating parent directories.",
     {
-      path: z.string().describe("Directory path to create"),
-      parents: z.boolean().optional().default(true).describe("Create parent directories as needed (-p flag, default true)"),
-      root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Create a directory on the device. Supports -p flag for creating parent directories.",
+      inputSchema: z.object({
+        path: z.string().describe("Directory path to create"),
+        parents: z.boolean().optional().default(true).describe("Create parent directories as needed (-p flag, default true)"),
+        root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ path: dirPath, parents, root, device }) => {
       const start = Date.now();
@@ -617,14 +635,16 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_rm",
-    "Delete a file or directory on the device. Recursive deletion uses depth-based protection: refuses at depth ≤ 2 from root (blocks rm -rf /system or /sdcard but allows /sdcard/project/build/). Symlinks are resolved before depth checks to prevent traversal bypasses. Hard-blocks /dev, /proc, /sys. For recursive deletes, reports a pre-flight file count.",
     {
-      path: z.string().describe("File or directory path to delete"),
-      recursive: z.boolean().optional().default(false).describe("Delete directory recursively (-rf). Depth-protected."),
-      root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Delete a file or directory on the device. Recursive deletion uses depth-based protection: refuses at depth ≤ 2 from root (blocks rm -rf /system or /sdcard but allows /sdcard/project/build/). Symlinks are resolved before depth checks to prevent traversal bypasses. Hard-blocks /dev, /proc, /sys. For recursive deletes, reports a pre-flight file count.",
+      inputSchema: z.object({
+        path: z.string().describe("File or directory path to delete"),
+        recursive: z.boolean().optional().default(false).describe("Delete directory recursively (-rf). Depth-protected."),
+        root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ path: targetPath, recursive, root, device }) => {
       const start = Date.now();
@@ -696,14 +716,16 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_file_move",
-    "Move or rename a file/directory on the device. Moving FROM a system path is destructive — source depth protection refuses if source is at depth ≤ 1 from root. Symlinks resolved before checks. Cross-filesystem moves (e.g., /data → /sdcard) do a copy+delete internally and can be slow for large files.",
     {
-      source: z.string().describe("Source file or directory path"),
-      destination: z.string().describe("Destination path"),
-      root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Move or rename a file/directory on the device. Moving FROM a system path is destructive — source depth protection refuses if source is at depth ≤ 1 from root. Symlinks resolved before checks. Cross-filesystem moves (e.g., /data → /sdcard) do a copy+delete internally and can be slow for large files.",
+      inputSchema: z.object({
+        source: z.string().describe("Source file or directory path"),
+        destination: z.string().describe("Destination path"),
+        root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ source, destination, root, device }) => {
       const start = Date.now();
@@ -774,15 +796,17 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_file_copy",
-    "Copy a file or directory on the device. Pre-flight checks source size against destination available space. Post-verifies the copy by comparing file sizes. For recursive directory copies, use -r flag.",
     {
-      source: z.string().describe("Source file or directory path"),
-      destination: z.string().describe("Destination path"),
-      recursive: z.boolean().optional().default(false).describe("Copy directories recursively (-r)"),
-      root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Copy a file or directory on the device. Pre-flight checks source size against destination available space. Post-verifies the copy by comparing file sizes. For recursive directory copies, use -r flag.",
+      inputSchema: z.object({
+        source: z.string().describe("Source file or directory path"),
+        destination: z.string().describe("Destination path"),
+        recursive: z.boolean().optional().default(false).describe("Copy directories recursively (-r)"),
+        root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ source, destination, recursive, root, device }) => {
       const start = Date.now();
@@ -873,15 +897,17 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_file_chmod",
-    "Change file permissions on the device. Mode must be a valid octal string (e.g., '755', '644', '600'). Recursive mode uses depth-based protection: refuses at depth ≤ 2 from root. Note: sdcardfs/FUSE ignores Unix permissions — file access on /sdcard is controlled by Android's package ownership model.",
     {
-      path: z.string().describe("File or directory path"),
-      mode: z.string().regex(/^[0-7]{3,4}$/).describe("Octal permission mode (e.g., '755', '644', '0600')"),
-      recursive: z.boolean().optional().default(false).describe("Apply recursively to directory contents. Depth-protected."),
-      root: z.boolean().optional().default(false).describe("Use root shell (typically required for chmod)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Change file permissions on the device. Mode must be a valid octal string (e.g., '755', '644', '600'). Recursive mode uses depth-based protection: refuses at depth ≤ 2 from root. Note: sdcardfs/FUSE ignores Unix permissions — file access on /sdcard is controlled by Android's package ownership model.",
+      inputSchema: z.object({
+        path: z.string().describe("File or directory path"),
+        mode: z.string().regex(/^[0-7]{3,4}$/).describe("Octal permission mode (e.g., '755', '644', '0600')"),
+        recursive: z.boolean().optional().default(false).describe("Apply recursively to directory contents. Depth-protected."),
+        root: z.boolean().optional().default(false).describe("Use root shell (typically required for chmod)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ path: filePath, mode, recursive, root, device }) => {
       const start = Date.now();
@@ -944,14 +970,16 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_file_touch",
-    "Create an empty file or update timestamps. Three modes: create (touch non-existent path), update (set atime/mtime to now), or set explicit timestamp. On FAT32, timestamps have 2-second resolution. On tmpfs, timestamps are volatile.",
     {
-      path: z.string().describe("File path on device"),
-      timestamp: z.string().optional().describe("Explicit timestamp in 'YYYY-MM-DD HH:MM:SS' format. Omit to use current time."),
-      root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Create an empty file or update timestamps. Three modes: create (touch non-existent path), update (set atime/mtime to now), or set explicit timestamp. On FAT32, timestamps have 2-second resolution. On tmpfs, timestamps are volatile.",
+      inputSchema: z.object({
+        path: z.string().describe("File path on device"),
+        timestamp: z.string().optional().describe("Explicit timestamp in 'YYYY-MM-DD HH:MM:SS' format. Omit to use current time."),
+        root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ path: filePath, timestamp, root, device }) => {
       const start = Date.now();
@@ -1024,13 +1052,15 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_file_fsinfo",
-    "Report filesystem details for any path: filesystem type, mount point, mount options, capacity, usage, read-only status, permission support, symlink support, max file size, timestamp resolution, encryption status, and SELinux context. Essential for understanding what operations are possible before attempting them.",
     {
-      path: z.string().describe("File or directory path to inspect"),
-      root: z.boolean().optional().default(false).describe("Use root shell for system paths"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Report filesystem details for any path: filesystem type, mount point, mount options, capacity, usage, read-only status, permission support, symlink support, max file size, timestamp resolution, encryption status, and SELinux context. Essential for understanding what operations are possible before attempting them.",
+      inputSchema: z.object({
+        path: z.string().describe("File or directory path to inspect"),
+        root: z.boolean().optional().default(false).describe("Use root shell for system paths"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ path: filePath, root, device }) => {
       const start = Date.now();
@@ -1157,14 +1187,16 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_file_chown",
-    "Change file ownership on the device. Requires root. Supports both numeric UID:GID (e.g., '10150:10150') and symbolic user:group (e.g., 'system:system'). Recursive mode uses depth-based protection: refuses at depth ≤ 2 from root. Note: sdcardfs/FAT32 ignore ownership changes.",
     {
-      path: z.string().describe("File or directory path"),
-      owner: z.string().regex(/^[a-zA-Z0-9_]+:[a-zA-Z0-9_]+$/).describe("Owner in user:group format (e.g., '0:0', 'system:system', '10150:10150')"),
-      recursive: z.boolean().optional().default(false).describe("Apply recursively to directory contents. Depth-protected."),
-      device: z.string().optional().describe("Device serial"),
+      description: "Change file ownership on the device. Requires root. Supports both numeric UID:GID (e.g., '10150:10150') and symbolic user:group (e.g., 'system:system'). Recursive mode uses depth-based protection: refuses at depth ≤ 2 from root. Note: sdcardfs/FAT32 ignore ownership changes.",
+      inputSchema: z.object({
+        path: z.string().describe("File or directory path"),
+        owner: z.string().regex(/^[a-zA-Z0-9_]+:[a-zA-Z0-9_]+$/).describe("Owner in user:group format (e.g., '0:0', 'system:system', '10150:10150')"),
+        recursive: z.boolean().optional().default(false).describe("Apply recursively to directory contents. Depth-protected."),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ path: filePath, owner, recursive, device }) => {
       const start = Date.now();
@@ -1227,21 +1259,23 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_grep",
-    "Search file contents on the device by text pattern. Uses fixed-string matching by default (no regex injection risk). Supports recursive directory search with depth control and result capping. For filename searches, use adb_find instead.",
     {
-      pattern: z.string().describe("Text pattern to search for"),
-      path: z.string().describe("File or directory path to search"),
-      recursive: z.boolean().optional().default(false).describe("Search directories recursively"),
-      fixedString: z.boolean().optional().default(true).describe("Use fixed-string matching (default: true, safer). Set false for regex."),
-      ignoreCase: z.boolean().optional().default(true).describe("Case-insensitive search (default: true)"),
-      maxResults: z.number().min(1).max(10000).optional().default(500).describe("Maximum matching lines to return (1-10000, default 500)"),
-      maxDepth: z.number().min(1).max(50).optional().default(10).describe("Maximum directory depth for recursive search (1-50, default 10)"),
-      filesWithMatches: z.boolean().optional().default(false).describe("Show only filenames that contain matches, not the matching lines"),
-      root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
-      device: z.string().optional().describe("Device serial"),
-      ...resultHandleSchemaFields,
+      description: "Search file contents on the device by text pattern. Uses fixed-string matching by default (no regex injection risk). Supports recursive directory search with depth control and result capping. For filename searches, use adb_find instead.",
+      inputSchema: z.object({
+        pattern: z.string().describe("Text pattern to search for"),
+        path: z.string().describe("File or directory path to search"),
+        recursive: z.boolean().optional().default(false).describe("Search directories recursively"),
+        fixedString: z.boolean().optional().default(true).describe("Use fixed-string matching (default: true, safer). Set false for regex."),
+        ignoreCase: z.boolean().optional().default(true).describe("Case-insensitive search (default: true)"),
+        maxResults: z.number().min(1).max(10000).optional().default(500).describe("Maximum matching lines to return (1-10000, default 500)"),
+        maxDepth: z.number().min(1).max(50).optional().default(10).describe("Maximum directory depth for recursive search (1-50, default 10)"),
+        filesWithMatches: z.boolean().optional().default(false).describe("Show only filenames that contain matches, not the matching lines"),
+        root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
+        device: z.string().optional().describe("Device serial"),
+        ...resultHandleSchemaFields,
+      }),
     },
     async ({ pattern, path: searchPath, recursive, fixedString, ignoreCase, maxResults, maxDepth, filesWithMatches, root, device, result_handle, result_handle_ttl }) => {
       const start = Date.now();
@@ -1294,18 +1328,20 @@ export function registerFileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_file_replace",
-    "Find and replace text in a file on the device. Uses sed internally with proper escaping — exposes a safe interface without requiring sed syntax knowledge. Supports global replacement, line-targeted edits, and optional backup creation. Reports match count.",
     {
-      path: z.string().describe("File path on device"),
-      find: z.string().refine(s => !/[\r\n]/.test(s), "find must not contain newlines (sed treats newlines as script-command separators)").describe("Text to find (literal string, not regex)"),
-      replace: z.string().refine(s => !/[\r\n]/.test(s), "replace must not contain newlines (sed treats newlines as script-command separators)").describe("Replacement text"),
-      global: z.boolean().optional().default(true).describe("Replace all occurrences (default: true). Set false for first-only."),
-      lineNumber: z.number().min(1).optional().describe("Restrict replacement to a specific line number"),
-      backup: z.boolean().optional().default(false).describe("Create a .bak backup before modifying"),
-      root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Find and replace text in a file on the device. Uses sed internally with proper escaping — exposes a safe interface without requiring sed syntax knowledge. Supports global replacement, line-targeted edits, and optional backup creation. Reports match count.",
+      inputSchema: z.object({
+        path: z.string().describe("File path on device"),
+        find: z.string().refine(s => !/[\r\n]/.test(s), "find must not contain newlines (sed treats newlines as script-command separators)").describe("Text to find (literal string, not regex)"),
+        replace: z.string().refine(s => !/[\r\n]/.test(s), "replace must not contain newlines (sed treats newlines as script-command separators)").describe("Replacement text"),
+        global: z.boolean().optional().default(true).describe("Replace all occurrences (default: true). Set false for first-only."),
+        lineNumber: z.number().min(1).optional().describe("Restrict replacement to a specific line number"),
+        backup: z.boolean().optional().default(false).describe("Create a .bak backup before modifying"),
+        root: z.boolean().optional().default(false).describe("Use root shell for protected paths"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ path: filePath, find, replace, global: globalReplace, lineNumber, backup, root, device }) => {
       const start = Date.now();
