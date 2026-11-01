@@ -126,6 +126,9 @@ turn a crashed suite green.
 - Dependabot groups compatible development patch/minor updates. Major
   updates are reviewed separately, and TypeScript 7 is deferred until the
   lint stack supports it.
+- CodeQL action version updates are grouped so `init` and `analyze` move
+  together. Keep every `github/codeql-action` step pinned to the same release
+  commit; mixing versions causes analysis to fail.
 
 The protected `main` branch requires an up-to-date pull request, passing
 Node 22/24 test jobs and coverage, and resolved review conversations. These

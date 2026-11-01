@@ -34,6 +34,11 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+    # CodeQL init/analyze share configuration and must update together.
+    groups:
+      codeql-actions:
+        patterns:
+          - "github/codeql-action/*"
     cooldown:
       default-days: 7
       include:
