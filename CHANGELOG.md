@@ -2,7 +2,44 @@
 
 All notable changes to DeepADB are documented in this file.
 
-## Unreleased
+## v1.1.6 — Reliability and Security (unreleased)
+
+### Release preparation
+
+- Align package, lockfile and MCP Registry metadata at 1.1.6. This version is
+  deployed locally to the Pixel but has not been published.
+- Earlier November 1, 2026 host/ADB regression on Windows/Node 24.22.2 against the
+  rooted Pixel 6a / Android 16: **783 passed, zero failed, 18 expected skips
+  (801 total), across all 24 suites**. This includes the 28 runtime-audit
+  regressions, live SQLite and Shannon checks, and PIN-based UI recovery.
+  Skips cover five on-device-only QEMU checks, twelve Windows/POSIX or missing
+  `tcpdump` security checks, and one file-symlink capability check.
+- Build, lint, version consistency and official registry metadata validation
+  passed. The dry-run npm package contains 342 entries, including the security
+  guide and compiled runtime audit, with no private docs or test fixtures.
+  A fresh full dependency audit reports zero vulnerabilities. All eight real
+  Chromium CORS/authentication/profile/reload checks passed on the host build.
+  Host regression does not validate an on-device installation.
+- Stage and promote the locked production package, plus the optional `ws` and
+  `graphql` runtime libraries, on the Pixel using Termux Node 24.22.1 and SQLite
+  3.54.1. Keep the prior installation until replacement checks pass. Eight strict
+  checks passed before and after promotion: version/catalog, health, complete
+  runtime audit, actual device SQLite schema/query access, write rejection and
+  the live Shannon handshake. Against the installed server, all eight real
+  Chromium checks and six authenticated WebSocket/GraphQL checks passed.
+  No persistent network listener was left running. Real phone-to-watch Wear
+  validation remains deferred.
+- Final on-device regression: **836 passed, zero failed, three cached-VM setup
+  skips (839 total), across all 24 suites**. The VM boot/shutdown, POSIX security,
+  SDK/plugin compatibility, runtime audit, live SQLite/Shannon and PIN-based UI
+  checks passed. Validation used a complete checkout with build files verified
+  identical to the installed production artifact; test dependencies stayed out
+  of the production installation.
+- Recheck maintained documentation and version metadata, then redeploy the
+  audited 1.1.6 package. After verification, remove older 1.0.8, 1.1.2, 1.1.4
+  and 1.1.5 device installations, temporary replacement copies and obsolete
+  test launchers at the operator's request. Preserve shared DeepADB state.
+  Version 1.1.6 remains unpublished.
 
 ### Documentation and package contents
 
@@ -16,6 +53,9 @@ All notable changes to DeepADB are documented in this file.
   module descriptions, and request transport/profile/client details in bug reports.
 - Include `SECURITY.md` in future npm packages so the bundled local-LLM guide's
   relative security links resolve. Runtime behavior and tool contracts are unchanged.
+- Clarify Android auto-detection, on-device working directories, token-free
+  validated CORS preflights and oversized-upload client errors. Check all 209
+  README tool entries/category totals, local documentation links and JSON examples.
 
 ### CI maintenance
 
@@ -23,8 +63,68 @@ All notable changes to DeepADB are documented in this file.
   Separate updates produced incompatible configuration versions and failed
   both JavaScript/TypeScript and GitHub Actions analysis.
 - Group `github/codeql-action/*` version updates in Dependabot to keep the
-  action steps aligned in future pull requests. Runtime dependencies and the
-  published package version are unchanged.
+  action steps aligned in future pull requests. This CI maintenance does not
+  change runtime dependencies.
+- Test oversized `Content-Length` admission directly with headers only: require
+  an early 413, no session ID and a successful subsequent initialization. This
+  avoids Android fetch's `EPIPE` while it continues sending an already-rejected
+  body. Keep the real chunked-body overflow and upload-deadline assertions.
+  Document complete on-device validation workspaces with matching build files,
+  source/type fixtures and development dependencies.
+
+### Security hardening
+
+- Replace the bearer-token regex with bounded linear parsing before buffer
+  allocation and constant-time comparison. Preserve case-insensitive `Bearer`,
+  space/tab separators and exact UTF-8 tokens; reject controls, line separators
+  and headers longer than 16,384 characters.
+- Mask unexpected GraphQL request and resolver errors, including arbitrary
+  backend extensions. Keep validation and server-owned budget errors useful,
+  preserve execution-result data/paths/locations, and log internal diagnostics
+  only on server stderr. Unexpected request failures now use HTTP 500; GraphQL
+  execution errors keep HTTP 200. Invalid JSON/envelopes receive safe HTTP 400
+  responses rather than raw parser or JavaScript exception text.
+- Replace the supply-chain test's misleading URL-substring assertion with an
+  exact expected-message check. Record why CodeQL alert #4 follows infeasible
+  LocalBridge dispatch paths; retain and extend adversarial shell regressions.
+- Add `test-code-scanning` to device-free CI for auth compatibility/limits,
+  GraphQL error boundaries and root/non-root split-APK argument preservation.
+- Retire legacy SSE through one SDK teardown before admitting its replacement.
+  Ignore duplicate close notifications so a late event from the old response
+  cannot detach the new client. Add a deterministic v1-to-v2 reconnect regression
+  that holds and releases the old close event after replacement initialization.
+- Local verification: build and lint passed; eleven device-free suites under
+  coverage on Windows/Node 22.23.4 passed 322 checks with zero failures and 17
+  expected skips (339 total), including 26 security regressions and the delayed
+  SSE close regression. All eight real Chromium checks
+  passed. Hosted CodeQL results and remaining false-positive triage are tracked
+  in the pull request. That validation did not deploy a build or publish a
+  package.
+
+### Runtime audit reliability
+
+- Retain successful `adb_runtime_audit` results when independent probes fail.
+  Report available, unavailable and inconclusive readiness, plus an explicit
+  partial-audit status and probe-issue summary. Target-resolution errors remain
+  fatal; tool arguments and profile membership are unchanged.
+- Check command exit, timeout and output-overflow flags before interpreting
+  stdout. Use explicit binary-presence results, preserve independently valid
+  rows, and skip modem checks when root or device properties are inconclusive.
+  Empty successful modem probes are negative observations, not command failures.
+- Match SQLite readiness to the inspector's actual backend: host Node SQLite
+  for host ADB, device `sqlite3` for LocalBridge. A device binary cannot make
+  host inspection available when `node:sqlite` is missing or disabled; host
+  availability is independent of failed device probes. Keep the Node 22.16+
+  host runtime floor. Bound report sections and avoid raw probe exceptions.
+- Add 28 device-free runtime-audit regressions to the CI-selected runner,
+  including actual disabled-module/host-worker failures and both execution modes.
+  Live Pixel 6a host-side checks verified a complete audit and retained results
+  with an injected battery-probe failure. These checks did not deploy the build,
+  modify device state, perform an AT handshake or validate Wear pairing.
+  A follow-up host-side audit also confirmed the corrected SQLite backend report.
+- Build and lint passed. After the portable oversized-header regression was
+  added, Windows/Node 22.23.4 device-free coverage passed all twelve suites:
+  351 checks, zero failures and 17 expected skips (368 total).
 
 ## v1.1.5 — SDK v2 and Local LLM Support
 

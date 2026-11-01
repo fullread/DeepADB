@@ -31,6 +31,8 @@ import { checkAuth } from "./middleware/auth.js";
 import { checkOriginAndCors, readAllowedOrigins } from "./middleware/origin.js";
 import { httpBaseUrl } from "./middleware/http-url.js";
 import { checkGraphQLBudget, GraphQLRequestBudget, GraphQLWorkPool } from "./middleware/graphql-budget.js";
+import { GraphQLClientError, publicGraphQLClientError } from "./middleware/graphql-errors.js";
+import type { GraphQLError, DocumentNode } from "graphql";
 
 export interface GraphQLOptions {
   port: number;
@@ -95,7 +97,7 @@ function buildResolvers(deviceManager: DeviceManager, budget: GraphQLRequestBudg
   return {
     devices: async () => {
       const devices = await budget.run(() => deviceManager.listDevices());
-      if (devices.length > 16) throw new Error("GraphQL device list exceeds limit (16); select a device by serial");
+      if (devices.length > 16) throw new GraphQLClientError("DEVICE_LIMIT");
       // Pre-fetch props for each device so field resolvers share one getprop call
       const results = [];
       for (const d of devices) {
@@ -174,7 +176,7 @@ function buildFieldResolvers(bridge: AdbBridge, budget: GraphQLRequestBudget) {
       properties: (parent: { _serial: string; _props: Record<string, string> }, { keys }: { keys?: string[] }) => {
         const props = parent._props;
         if (keys) {
-          if (keys.length > 100) throw new Error("properties keys exceeds limit (100)");
+          if (keys.length > 100) throw new GraphQLClientError("PROPERTY_LIMIT");
           return keys.map((k) => ({ key: k, value: props[k] ?? "" }));
         }
         // Return all properties, capped at 500 to prevent response size explosion
@@ -192,6 +194,26 @@ function buildFieldResolvers(bridge: AdbBridge, budget: GraphQLRequestBudget) {
 
 /** Maximum POST body size (1 MB) to prevent memory exhaustion. */
 const MAX_BODY_BYTES = 1024 * 1024;
+
+function parseRequestJson(text: string): unknown {
+  try { return JSON.parse(text); }
+  catch { throw new GraphQLClientError("INVALID_JSON"); }
+}
+
+/** Execution errors can contain device output, paths, stacks and extensions. */
+function publicExecutionError(error: GraphQLError, logger: Logger) {
+  const known = publicGraphQLClientError(error.originalError);
+  if (known) return { ...known, locations: error.locations, path: error.path };
+  logger.error("GraphQL execution failed", error.originalError ?? error);
+  // No path means execution rejected the operation/variables before resolving a
+  // field. Preserve that useful distinction without reflecting arbitrary values.
+  return {
+    message: error.path ? "Internal GraphQL error" : "Invalid GraphQL operation or variables",
+    extensions: { code: error.path ? "INTERNAL_SERVER_ERROR" : "BAD_USER_INPUT" },
+    locations: error.locations,
+    path: error.path,
+  };
+}
 
 /**
  * Start a GraphQL API server.
@@ -265,9 +287,9 @@ export async function startGraphQLApi(
       const budget = new GraphQLRequestBudget(pool);
       res.once("close", () => { budget.cancelled = true; });
       try {
-        let query = "";
-        let variables: Record<string, unknown> = {};
-        let operationName: string | undefined;
+        let query: unknown = "";
+        let variables: unknown = {};
+        let operationName: unknown;
 
         if (req.method === "POST") {
           const body = await new Promise<string>((resolve, reject) => {
@@ -285,41 +307,59 @@ export async function startGraphQLApi(
             req.on("end", () => resolve(data));
             req.on("error", reject);
           });
-          const parsed = JSON.parse(body);
+          const decoded = parseRequestJson(body);
+          if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) throw new GraphQLClientError("INVALID_REQUEST");
+          const parsed = decoded as Record<string, unknown>;
           query = parsed.query ?? "";
           variables = parsed.variables ?? {};
-          operationName = parsed.operationName;
+          operationName = parsed.operationName ?? undefined;
         } else if (req.method === "GET") {
           const url = new URL(req.url, httpBaseUrl(host, options.port));
           query = url.searchParams.get("query") ?? "";
           operationName = url.searchParams.get("operationName") ?? undefined;
           const varsParam = url.searchParams.get("variables");
-          if (varsParam) variables = JSON.parse(varsParam);
+          if (varsParam) variables = parseRequestJson(varsParam) ?? {};
         }
 
-        if (!query) {
+        if (query === "") throw new GraphQLClientError("MISSING_QUERY");
+
+        if (typeof query !== "string" || !variables || typeof variables !== "object" || Array.isArray(variables)
+          || (operationName !== undefined && typeof operationName !== "string")) throw new GraphQLClientError("INVALID_REQUEST");
+        if (Buffer.byteLength(query) > 65536) throw new GraphQLClientError("QUERY_TOO_LARGE");
+        let document: DocumentNode;
+        try { document = graphqlModule.parse(query, { maxTokens: 4096 }); }
+        catch (error) {
+          if (!(error instanceof graphqlModule.GraphQLError)) throw error;
+          const safe = publicGraphQLClientError(new GraphQLClientError("INVALID_QUERY"));
           res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ errors: [{ message: "Missing 'query' parameter" }] }));
+          res.end(JSON.stringify({ errors: [{ ...safe, locations: error.locations }] }));
           return;
         }
-
-        if (typeof query !== "string" || Buffer.byteLength(query) > 65536 || !variables || typeof variables !== "object" || Array.isArray(variables)) throw new Error("Invalid GraphQL request or query exceeds 64 KiB");
-        const document = graphqlModule.parse(query, { maxTokens: 4096 });
-        checkGraphQLBudget(document, variables);
+        checkGraphQLBudget(document, variables as Record<string, unknown>);
         const errors = graphqlModule.validate(schema, document, undefined, { maxErrors: 20 });
-        if (errors.length) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ errors })); return; }
+        // Validation only uses the static schema and client document, before I/O.
+        if (errors.length) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ errors: errors.map(error => ({ message: error.message, locations: error.locations })) }));
+          return;
+        }
         const result = await graphqlModule.execute({
           schema, document, rootValue: buildResolvers(deviceManager, budget),
-          variableValues: variables, fieldResolver, contextValue: budget, operationName,
+          variableValues: variables as Record<string, unknown>, fieldResolver, contextValue: budget, operationName,
         });
-        const response = JSON.stringify(result);
-        if (Buffer.byteLength(response) > MAX_BODY_BYTES) throw new Error("GraphQL response exceeds 1 MiB");
+        const response = JSON.stringify({
+          ...(result.data !== undefined ? { data: result.data } : {}),
+          ...(result.errors ? { errors: result.errors.map(error => publicExecutionError(error, logger)) } : {}),
+        });
+        if (Buffer.byteLength(response) > MAX_BODY_BYTES) throw new GraphQLClientError("RESPONSE_TOO_LARGE");
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(response);
       } catch (err) {
+        const safe = publicGraphQLClientError(err);
+        if (!safe) logger.error("GraphQL request failed", err);
         if (res.headersSent || res.destroyed) return;
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ errors: [{ message: err instanceof Error ? err.message : String(err) }] }));
+        res.writeHead(safe ? 400 : 500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ errors: [safe ?? { message: "Internal GraphQL error", extensions: { code: "INTERNAL_SERVER_ERROR" } }] }));
       } finally { budget.cancelled = true; activeRequests--; }
       return;
     }

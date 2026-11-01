@@ -26,6 +26,8 @@ const CI_SAFE = new Set([
   "test-supply-chain.mjs",
   "test-transports.mjs",
   "test-audit-hardening.mjs",
+  "test-code-scanning.mjs",
+  "test-runtime-audit.mjs",
 ]);
 
 const ciMode = process.argv.includes("--ci");

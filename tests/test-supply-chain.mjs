@@ -169,8 +169,7 @@ try {
 h.assert(
   "requireHttps surfaces context in error message",
   ctxThrown !== null
-    && ctxThrown.message.includes("redirect hop 3")
-    && ctxThrown.message.includes("registry.example.com"),
+    && ctxThrown.message === "Refusing to fetch non-https URL: http://x (redirect hop 3 from https://registry.example.com/manifest.json). Only https:// URLs are permitted.",
   ctxThrown ? `got: ${ctxThrown.message}` : "no throw"
 );
 

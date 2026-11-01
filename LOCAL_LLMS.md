@@ -6,13 +6,16 @@ WebSocket is **not required**. Choose the connection supported by your client:
 | Client path | DeepADB connection | Authentication |
 | --- | --- | --- |
 | Local MCP host, including llama-server builds with `--mcp-servers-config` | stdio; launch `node build/index.js` | Local process permissions |
-| Browser UI or native client with Streamable HTTP support | `http://127.0.0.1:8787/mcp` | Bearer header on every request; exact Origin allowlist for browsers |
+| Browser UI or native client with Streamable HTTP support | `http://127.0.0.1:8787/mcp` | Bearer header on every MCP request; exact Origin allowlist for browsers |
 | Older browser UI or native client using SSE | `http://127.0.0.1:8787/sse` | Same bearer and Origin policy |
 | Native client requiring WebSocket | `ws://127.0.0.1:8788/ws` | Bearer header before upgrade; Origin allowlist if supplied |
 
 The HTTP server serves Streamable HTTP and legacy SSE on the same port.
 Existing stdio, SSE and WebSocket configurations remain supported. Model
 tool-calling quality is separate from a successful MCP connection.
+Browser-generated CORS preflights carry no bearer token; they validate the
+Origin, requested method and headers without creating a session. Actual MCP
+requests still authenticate.
 
 ## Choose a tool profile
 
@@ -129,6 +132,13 @@ session handling. Clients that omit Origin can still connect with a valid token.
 
 ## Sessions and compatibility
 
+MCP POST bodies are limited to 1 MiB. An oversized `Content-Length` is rejected
+before upload with HTTP 413 and no session allocation. A client that continues
+uploading after rejection may instead surface a connection/write error (such
+as Android fetch's `EPIPE`). Reduce the request size; do not retry the same
+oversized payload. Chunked uploads have the same size bound and a 15-second
+deadline for incomplete bodies.
+
 Only one MCP client is active per DeepADB process. `/mcp` and legacy SSE share
 that slot; competing connections receive HTTP 409. A new authorized SSE
 connection can still replace an existing SSE connection, preserving the older
@@ -224,8 +234,21 @@ Full-profile SQLite inspection uses private snapshots and bounded query
 subprocesses. Large/expensive queries may return a limit error; split them into
 smaller queries instead of weakening the limits. Host inspection requires
 Node 22.16+. GraphQL remains a separate optional full-profile API; it now
-rejects invalid Origins and limits query complexity and device work. Neither
+rejects invalid Origins and limits query complexity and device work. Unexpected
+GraphQL failures expose generic errors; inspect protected server stderr for
+backend diagnostics. Neither
 SQLite nor GraphQL is enabled by the three-tool `inspect` profile.
+
+In `full`, `adb_runtime_audit` retains successful checks when another probe
+fails. Read its `Audit status` and `Probe issues`, not just the MCP success flag:
+partial reports are normal results, and an inconclusive check is not evidence
+that a capability is absent. Modem-node and Play-services checks establish only
+prerequisites, not a successful AT handshake or a paired Wear connection. The
+three-tool `inspect` profile still excludes this audit.
+
+SQLite readiness refers to the backend selected by the inspector: host Node
+SQLite for host ADB, device `sqlite3` for on-device LocalBridge. Installing
+`sqlite3` on the phone does not repair a missing or disabled host Node backend.
 
 Use a supported LTS Node runtime on both the host and phone. A passing host/ADB
 run does not deploy the build or validate the installed on-device LocalBridge.
@@ -242,6 +265,17 @@ is enabled persistently by the installation; configure the transport, token and
 Origin allowlist for the client you intend to use.
 
 ## Validated client matrix
+
+November 1, 2026: the 1.1.6 release-candidate build passed all 34 local-LLM
+protocol/profile regressions and 37 SDK/client/plugin compatibility checks on
+Windows and the Pixel. Against the installed on-device server, eight real
+Chromium checks and six authenticated WebSocket/GraphQL checks also passed.
+These verify transport behavior and access controls; they are not a new
+model-driven llama.cpp trial. Device validation used Termux Node 24.22.1,
+SQLite 3.54.1 and an isolated validation workspace with the deployed build's
+matching files. After the final documentation audit and verified redeployment,
+only 1.1.6 remains installed on the validation Pixel; older installations and
+rollback copies were removed at the operator's request.
 
 October 31, 2026: Windows host, Chrome, rooted Pixel 6a / Android 16, portable
 llama.cpp **b11960** (`8642541b2`, 0.8.0-dev), and the cached **Qwen3.5-4B

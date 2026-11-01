@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /** V1 client/plugin compatibility and native v2 registration regressions. No ADB. */
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, fork } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -455,6 +455,54 @@ await check("authenticated legacy SSE rejects invalid tokens and permits sequent
       assert.equal((await client.listTools()).tools.length, 209);
     } finally { await client.close(); }
   } finally { await stopServer(child); }
+});
+
+await check("a delayed legacy SSE close cannot detach its initialized replacement", async () => {
+  const { env } = isolatedEnvironment();
+  const port = await freePort(), token = "sse-close-order-token-0123456789abcdef";
+  const child = fork(fileURLToPath(new URL("./fixtures/sse-close-order.mjs", import.meta.url)), [], {
+    env: { ...env, AUDIT_PORT: String(port), DA_AUTH_TOKEN: token }, silent: true, windowsHide: true,
+  });
+  let diagnostics = "", id = 0;
+  child.stderr.on("data", data => { diagnostics = (diagnostics + data).slice(-16000); });
+  const first = new V1Client({ name: "sse-old", version: "1" });
+  const second = new Client({ name: "sse-replacement", version: "1" });
+  const url = new URL(`http://127.0.0.1:${port}/sse`);
+  const headers = { Authorization: `Bearer ${token}` };
+  const options = { requestInit: { headers }, eventSourceInit: { fetch: (input, init) => fetch(input, { ...init, headers: { ...init?.headers, ...headers } }) } };
+  const control = action => new Promise((resolve, reject) => {
+    const requestId = ++id;
+    const receive = message => {
+      if (message.id !== requestId) return;
+      clearTimeout(timer); child.off("message", receive); resolve(message);
+    };
+    const timer = setTimeout(() => { child.off("message", receive); reject(new Error("SSE fixture control timeout")); }, 5000);
+    child.on("message", receive); child.send({ id: requestId, action });
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(diagnostics || "SSE fixture startup timeout")), 10000);
+      child.once("message", () => { clearTimeout(timer); resolve(); });
+      child.once("error", error => { clearTimeout(timer); reject(error); });
+      child.once("exit", code => { clearTimeout(timer); reject(new Error(`SSE fixture exited ${code}: ${diagnostics}`)); });
+    });
+    await first.connect(new V1SSE(url, options));
+    assert.equal((await first.listTools()).tools.length, 1);
+    await first.close();
+    let state;
+    for (let i = 0; i < 100; i++) {
+      state = await control("state");
+      if (state.delayed) break;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.ok(state.delayed > 0, "first response close was not delayed");
+    await second.connect(new SSEClientTransport(url, options), { timeout: 3000 });
+    assert.equal((await second.listTools({}, { timeout: 2000 })).tools.length, 1);
+    assert.equal((await control("release")).delayed, 0);
+    assert.equal((await second.listTools({}, { timeout: 2000 })).tools.length, 1);
+  } catch (error) {
+    throw new Error(`${error.message}\n${diagnostics}`, { cause: error });
+  } finally { await first.close(); await second.close(); await stopServer(child); }
 });
 
 await check("legacy WebSocket clients reconnect without recreating the server", async () => {

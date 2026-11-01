@@ -1,6 +1,7 @@
 // Copyright 2026 Jason <fullread@github>
 // SPDX-License-Identifier: Apache-2.0
 import type { DocumentNode, SelectionSetNode, ValueNode } from "graphql";
+import { GraphQLClientError } from "./graphql-errors.js";
 
 /** Bound expanded selections, including repeated fragments, before any I/O. */
 export function checkGraphQLBudget(document: DocumentNode, variables: Record<string, unknown>): void {
@@ -9,22 +10,22 @@ export function checkGraphQLBudget(document: DocumentNode, variables: Record<str
   const value = (node: ValueNode): unknown => node.kind === "Variable" ? variables[node.name.value]
     : node.kind === "ListValue" ? node.values.map(value) : undefined;
   const walk = (set: SelectionSetNode, depth: number, active: Set<string>): void => {
-    if (depth > 10) throw new Error("Query depth exceeds limit (10)");
+    if (depth > 10) throw new GraphQLClientError("DEPTH_LIMIT");
     for (const selection of set.selections) {
-      if (++nodes > 256) throw new Error("Query complexity exceeds limit (256 selections)");
+      if (++nodes > 256) throw new GraphQLClientError("COMPLEXITY_LIMIT");
       if (selection.kind === "FragmentSpread") {
         const name = selection.name.value;
-        if (active.has(name)) throw new Error("Cyclic GraphQL fragments are not allowed");
+        if (active.has(name)) throw new GraphQLClientError("FRAGMENT_CYCLE");
         const fragment = fragments.get(name);
         if (fragment) walk(fragment.selectionSet, depth, new Set([...active, name]));
       } else if (selection.kind === "InlineFragment") {
         walk(selection.selectionSet, depth, active);
       } else {
-        if (++fields > 100 || (selection.alias && ++aliases > 16)) throw new Error("Query exceeds field (100) or alias (16) limit");
+        if (++fields > 100 || (selection.alias && ++aliases > 16)) throw new GraphQLClientError("FIELD_LIMIT");
         if (selection.name.value === "properties") {
           const keys = selection.arguments?.find(a => a.name.value === "keys");
           const requested = keys && value(keys.value);
-          if (Array.isArray(requested) && requested.length > 100) throw new Error("properties keys exceeds limit (100)");
+          if (Array.isArray(requested) && requested.length > 100) throw new GraphQLClientError("PROPERTY_LIMIT");
         }
         if (selection.selectionSet) walk(selection.selectionSet, depth + 1, active);
       }
@@ -65,9 +66,9 @@ export class GraphQLRequestBudget {
   cancelled = false;
   constructor(private pool: GraphQLWorkPool) {}
   async run<T>(work: () => Promise<T>): Promise<T> {
-    if (--this.remaining < 0) throw new Error("GraphQL device-operation budget exceeded (64)");
+    if (--this.remaining < 0) throw new GraphQLClientError("OPERATION_LIMIT");
     return this.pool.run(async () => {
-      if (this.cancelled || Date.now() >= this.deadline) throw new Error("GraphQL request cancelled or deadline exceeded");
+      if (this.cancelled || Date.now() >= this.deadline) throw new GraphQLClientError("REQUEST_CANCELLED");
       return work();
     });
   }

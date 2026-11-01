@@ -35,11 +35,32 @@ node --test tests/ci/emulator-reporting.test.mjs # CI reporting, no device acces
 The device-free suites (`test-boundaries`, `test-next-version`,
 `test-result-handles`, `test-supply-chain`, `test-transports`,
 `test-sanitize-fuzz`, `test-sdk-compat`, `test-browser-access`, `test-local-llm`,
-`test-audit-hardening`) run without any hardware and are the fastest way to
-validate a change. A single suite can be run directly, e.g.
+`test-audit-hardening`, `test-code-scanning`, `test-runtime-audit`) run without
+any hardware and are the fastest way to validate a change. A single suite can be run directly, e.g.
 `node tests/test-next-version.mjs`. Device-facing changes should also run the
 relevant hardware suite; the focused diagnostics use
 `node tests/test-next-version-device.mjs`.
+
+For a full on-device run, use a complete validation checkout with `src/`,
+`tests/` (including fixtures), the compiled `build/`, and development dependencies.
+Run `node tests/run-all.mjs` under the device's Node runtime; set `DA_TEST_PIN`
+to enable lock/unlock recovery. To test a prebuilt deployment, use a separate
+validation checkout whose build files match the installed artifact, keeping
+test/development dependencies out of the production directory. Do not symlink
+`build/` into a different installation: Node can then load separate SDK copies,
+invalidating fixtures that patch the transport prototype. Type-compatibility
+fixtures also require the source files; the production package alone is insufficient.
+
+`node tests/test-runtime-audit.mjs` exercises the registered audit handler with
+synthetic bridge results and never contacts ADB. It covers independent failures,
+timeouts, nonzero exits, output overflow, incomplete capability rows, dependent
+modem checks, target-resolution errors and preservation of successful results.
+SQLite backend regressions run the handler and actual host query worker in
+child processes with `node:sqlite` disabled, and verify that a device binary
+cannot make host-mode inspection ready. All device probe results are synthetic;
+the disabled worker fails before opening a database.
+Keep failure distinct from confirmed absence, and check the complete report
+rather than treating its header or a normal MCP response as proof of readiness.
 
 Some device-free suites also run optional hardware assertions when an
 authorized device is visible. Disconnect USB and wireless devices, or use an
@@ -53,6 +74,12 @@ restricted tool calls, and rejected Origins/headers.
 Set `DA_TEST_BROWSER` to the browser executable if it is not found in a
 standard installation path. It uses no Android device and does not touch your
 normal browser profile.
+
+The oversized `Content-Length` regression sends headers without a body and
+requires an immediate 413, no session ID, and a successful subsequent session.
+Uploading the already-rejected body can surface `EPIPE` in Android's fetch
+client before it exposes the response. Keep the separate oversized chunked-body
+and unfinished-upload tests; do not treat arbitrary network errors as a pass.
 
 `test-sdk-compat` always isolates its child servers from ADB and user plugins.
 It covers existing protocol revisions, legacy plugin APIs (including Zod 3),
@@ -101,6 +128,17 @@ paths. Linux runs file-symlink/race cases; Windows reports an explicit skip if
 its account cannot create file symlinks. Use Git for Windows' Bash for local
 POSIX guard checks. These tests use synthetic files and mock device I/O.
 
+`test-code-scanning` adds bounded bearer parsing, safe GraphQL request/resolver
+errors and adversarial split-APK argument checks. It uses the real GraphQL HTTP
+handler with synthetic backend failures; no device is contacted. Keep known
+GraphQL limit messages in `middleware/graphql-errors.ts`, and never pass raw
+backend error messages or extensions into an HTTP response. Test both thrown
+request errors and errors returned inside an execution result.
+The SDK compatibility suite also holds an old SSE response's close event until
+after its replacement initializes, then verifies the new client remains usable.
+Keep this deterministic ordering test when changing transport teardown; a
+successful retry alone does not establish that a reconnect race is fixed.
+
 The aggregate runner requires one complete, internally consistent summary per
 suite. A nonzero child exit, missing/duplicate/malformed summary, failed assertion,
 or empty suite selection fails the run; printed zero-failure counts cannot
@@ -118,7 +156,8 @@ turn a crashed suite green.
   high and critical advisories fail the audit job. Lower-severity findings
   remain visible in its output.
 - CodeQL analyzes JavaScript/TypeScript and GitHub Actions on pull requests,
-  main-branch pushes, and a weekly schedule.
+  main-branch pushes, and a weekly schedule. A successful workflow means analysis
+  completed, not that no alerts remain; inspect the code-scanning alert list.
 - The weekly emulator lane is informational, not a merge gate. Its job
   summary reports the actual pass/fail/skip counts and execution status;
   unsupported physical-device capabilities can still fail assertions.
@@ -136,6 +175,16 @@ rules also apply to administrators; force pushes and branch deletion are
 disabled. No additional approving reviewer is required for the solo-maintainer
 workflow. New audit and analysis jobs must be validated on GitHub before they
 are considered for required-check enforcement.
+
+Code-scanning triage must follow the reported source-to-sink path. For alert
+[#4](https://github.com/fullread/DeepADB/security/code-scanning/4), the split-APK
+tool always selects `install-multiple`, whose path operands are resolved and
+`shellQuote`-wrapped. The reported flows instead cross into `shell`, `logcat`,
+`install` flags or the unknown-command fallback, which that call cannot reach.
+`test-code-scanning` preserves exact argv for spaces, quotes, command
+substitutions, newlines and dash-leading names in root/non-root modes using
+harmless fake `su`/`pm` functions. This supports triaging that specific alert as
+a false positive; it is not a blanket exemption for LocalBridge command sinks.
 
 ## Build discipline
 
