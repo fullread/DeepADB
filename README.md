@@ -39,7 +39,7 @@ for direct stdio, authenticated browser HTTP, and small tool profiles. WebSocket
 ```
 ┌──────────────────────────────────────────────────┐
 │                   MCP Client                     │
-│             (Claude Code / claude.ai)            │
+│             (Any MCP-capable client)             │
 └──────────────────────┬───────────────────────────┘
                        │ stdio (JSON-RPC), HTTP (/mcp or /sse), or WebSocket
 ┌──────────────────────▼───────────────────────────┐
@@ -119,7 +119,7 @@ AI Agent (Termux) ←→ MCP (stdio/HTTP) ←→ DeepADB (Termux) ←→ sh/su (
 ```
 When DeepADB runs directly on the Android device (e.g., inside Termux), it auto-detects the environment and switches to `LocalBridge`. Commands execute directly via `sh`/`su` — no ADB server, no USB, no serialization overhead. The same 209-tool MCP surface is registered, with capability-aware guidance when an optional on-device binary such as `sqlite3` is unavailable.
 
-**1.1.6 device validation (November 1, 2026; not yet published):** the full
+**1.1.6 device validation (November 1, 2026):** the released build's full
 on-device run passed **836 checks, 0 failed, 3 skipped (839 total)** across all
 24 suites on the rooted Pixel 6a / Android 16, using Termux Node 24.22.1 and
 SQLite 3.54.1. The three skips reuse the cached Alpine kernel, initrd and disk;
@@ -885,6 +885,9 @@ DeepADB/
 │   ├── middleware/
 │   │   ├── auth.ts             # Bearer token authentication for network transports (DA_AUTH_TOKEN)
 │   │   ├── origin.ts           # Exact browser Origin and preflight checks
+│   │   ├── http-url.ts         # HTTP URL authority formatting, including IPv6 hosts
+│   │   ├── graphql-budget.ts   # GraphQL complexity limits and device-operation budgets
+│   │   ├── graphql-errors.ts   # Safe public GraphQL errors and internal error masking
 │   │   ├── output-processor.ts # Contextual truncation, structured parsers, settledValue helper
 │   │   ├── security.ts         # Command filtering, rate limiting, audit logging with redaction
 │   │   ├── sanitize.ts         # Shell injection prevention — validateShellArg/validateShellArgs/shellEscape
@@ -895,6 +898,9 @@ DeepADB/
 │   │   ├── cleanup.ts          # Centralized process cleanup registry for SIGINT/SIGTERM/exit
 │   │   ├── logger.ts           # stderr-safe logging (MCP-compliant)
 │   │   ├── fs-utils.ts         # Filename sanitization, atomic write, private-dir helpers, within-dir containment check
+│   │   ├── sqlite-path.ts      # Package/database path containment and symlink guards
+│   │   ├── sqlite-query.ts     # Bounded, cancellable SQLite query subprocess management
+│   │   ├── sqlite-worker.ts    # Read-only host SQLite worker with memory and output limits
 │   │   ├── parse-utils.ts      # Shared parseIntSafe for env-var numeric parsing (single source of truth)
 │   │   └── result-handle.ts    # Tempdir-backed tool result content cache with TTL, LRU, and token-hash isolation
 │   └── config/
