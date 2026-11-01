@@ -1,12 +1,14 @@
-# Emulator integration lane (best-effort, non-gating).
+# Emulator integration lane (informational, non-gating).
 #
 # Boots an Android emulator across an API-level matrix and runs the full test
 # suite against it, adding Android-version diversity that a single physical
 # device cannot. This lane is INFORMATIONAL: a stock emulator has no real
 # baseband/modem, no real IIO sensors, no Magisk root, and cannot run nested
 # QEMU/KVM, so the baseband, sensor, on-device-virtualization, and root tools
-# are expected to fail or skip here. It exists to catch gross regressions on a
-# real Android runtime, not to gate merges (see test.yml for the gating CI).
+# may fail or skip here. Failed assertions and emulator boot failures mark the
+# job failed; this optional workflow is not a required branch-protection check.
+# It exists to catch regressions on a real Android runtime (see test.yml for
+# the required CI). No failure is automatically classified as expected.
 #
 # Triggered manually or weekly because emulator boots are slow and can be flaky.
 name: Emulator (integration)
@@ -21,7 +23,7 @@ permissions:
 
 jobs:
   emulator:
-    name: API ${{ matrix.api-level }} (best-effort)
+    name: API ${{ matrix.api-level }} (informational)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -49,11 +51,9 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      # Best-effort: failures from hardware-only tools are expected and do not
-      # fail the job. Preserve the test command's exit status and publish the
-      # actual pass/fail/skip counts; a green job is not an all-tests-pass claim.
+      # Preserve failure status at the workflow boundary as well as in the
+      # report. The always() steps below still summarize and upload failures.
       - name: Run full suite on emulator (informational)
-        continue-on-error: true
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: ${{ matrix.api-level }}

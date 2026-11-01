@@ -48,7 +48,7 @@ APIs above, not SDK-private or experimental task APIs.
 ## Layered design
 
 ```
-MCP client (Claude Code / claude.ai / any MCP client)
+MCP-capable client (local application, CLI, or browser)
         |  stdio . Streamable HTTP / legacy SSE . WebSocket
         |  (+ optional GraphQL API)
         v
@@ -108,7 +108,7 @@ bridge they run against.
 
 `index.ts` reads environment variables and selects exactly one MCP transport:
 
-- default: stdio (JSON-RPC over stdin/stdout), for Claude Code and local clients
+- default: stdio (JSON-RPC over stdin/stdout), for local MCP-capable clients
 - `DA_HTTP_PORT`: Streamable HTTP (`POST/GET/DELETE /mcp`), legacy SSE (`GET /sse`, `POST /message`), and `GET /health`
 - `DA_WS_PORT`: WebSocket (`ws://host/ws`, `GET /health`), needs the optional `ws` package
 

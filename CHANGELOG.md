@@ -2,6 +2,19 @@
 
 All notable changes to DeepADB are documented in this file.
 
+## Unreleased
+
+### Documentation and CI reporting
+
+- Make the general MCP setup, architecture and security guidance client-neutral.
+  Explain that the sample `mcpServers` JSON is one client configuration format,
+  and document the command, argument and environment needed for local stdio.
+- Keep the emulator workflow optional, while allowing failed assertions,
+  incomplete runs and boot failures to fail their jobs. Preserve always-run
+  summaries and log uploads; do not automatically relabel failures as skips.
+- Record the evidence-based dismissal of CodeQL alert #4 as a false positive,
+  with the analysis rule and split-APK quoting regressions retained.
+
 ## v1.1.6 — Reliability and Security
 
 ### Release validation and publication

@@ -7,7 +7,7 @@ DeepADB provides deep access to Android devices — shell execution, root comman
 DeepADB is a **local development and research tool**. Its threat model assumes:
 
 - **Trusted operator**: The person running DeepADB controls the host machine and the connected Android device(s).
-- **Untrusted input**: MCP clients (Claude, Cursor, etc.) may pass user-supplied parameters that could contain injection attempts.
+- **Untrusted input**: Any MCP client may pass user-supplied parameters that could contain injection attempts.
 - **Trusted transport**: stdio mode communicates over local pipes. HTTP/SSE, WebSocket, and GraphQL transports bind to `127.0.0.1` by default and deny cross-origin requests.
 
 DeepADB is **not designed** for multi-tenant, internet-facing, or shared-server deployments without additional hardening. For remote access, use bearer authentication, exact browser Origin allowlists, and a TLS reverse proxy or SSH tunnel. Prefer `DA_TOOL_PROFILE=inspect` when device discovery and property reads are sufficient. Command filtering alone does not restrict the full tool catalog; follow the [deployment recipes](#recommended-configurations) below.
