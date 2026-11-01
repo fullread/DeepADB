@@ -13,7 +13,7 @@ import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { captureUiDump, parseUiNodes } from "../middleware/ui-dump.js";
 
-/** Minimum touch target size in dp (WCAG / Material Design guideline). */
+/** Recommended Android touch target size in dp; not a WCAG conformance test. */
 const MIN_TOUCH_TARGET_DP = 48;
 
 /** Default screen density for dp conversion (mdpi baseline). */

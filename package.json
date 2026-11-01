@@ -23,7 +23,8 @@
   "files": [
     "build",
     "NOTICE",
-    "LOCAL_LLMS.md"
+    "LOCAL_LLMS.md",
+    "SECURITY.md"
   ],
   "keywords": [
     "mcp",

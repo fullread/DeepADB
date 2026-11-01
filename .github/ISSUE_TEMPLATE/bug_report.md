@@ -18,7 +18,10 @@ A clear description of the bug.
 - Node version (`node -v`):
 - OS:
 - Mode: ADB (PC) or on-device (Termux):
-- Transport: stdio / HTTP-SSE / WebSocket / GraphQL:
+- MCP transport: stdio / Streamable HTTP (`/mcp`) / legacy SSE (`/sse`) / WebSocket:
+- Tool profile (`DA_TOOL_PROFILE`): full / inspect:
+- GraphQL enabled (`DA_GRAPHQL_PORT`): yes / no:
+- MCP client and version (for local models, include llama.cpp build and model):
 - Device model and Android version (if device-related):
 
 ## Steps to reproduce

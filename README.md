@@ -41,7 +41,7 @@ for direct stdio, authenticated browser HTTP, and small tool profiles. WebSocket
 │                   MCP Client                     │
 │             (Claude Code / claude.ai)            │
 └──────────────────────┬───────────────────────────┘
-                       │ stdio (JSON-RPC) or HTTP/SSE or WebSocket
+                       │ stdio (JSON-RPC), HTTP (/mcp or /sse), or WebSocket
 ┌──────────────────────▼───────────────────────────┐
 │               DeepADB Server                     │
 │                                                  │
@@ -185,11 +185,25 @@ browser HTTP reload recovery and its limits. Phone-to-watch Wear validation is d
 **On-device setup (Termux):**
 ```bash
 pkg install nodejs-lts git sqlite
-git clone <deepadb-repo> && cd deepadb
-npm install && npm run build
-npm start                              # stdio — for local AI agents (Claude Code, OpenCode)
-DA_HTTP_PORT=3000 npm start            # HTTP/SSE — for remote AI access over WiFi
+git clone https://github.com/fullread/DeepADB.git
+cd DeepADB
+npm ci
+npm run build
 ```
+
+Choose the launch mode for your client. For stdio, configure the MCP client to
+launch `node` with the absolute path to `DeepADB/build/index.js`; the client
+starts the process itself. To run a loopback HTTP listener instead:
+
+```bash
+DA_HTTP_HOST=127.0.0.1 DA_HTTP_PORT=3000 npm start # /mcp and legacy /sse
+```
+
+This listener is accessible only on the device, not directly over Wi-Fi.
+For browser clients, configure a bearer token and an exact Origin allowlist;
+see [Local LLM clients](LOCAL_LLMS.md). For remote access, follow the token and
+TLS reverse-proxy or SSH-tunnel guidance in
+[SECURITY.md](SECURITY.md#recommended-configurations).
 
 Use a supported Node LTS release; Node 24 is validated for this release. The
 `sqlite` package supplies the `sqlite3` executable required by on-device database
@@ -417,7 +431,7 @@ Start with the capability area that matches your task; the complete reference re
 - `adb_modem_logs` — RIL radio buffer, telephony framework, RILJ/RILC, kernel dmesg (root) modem logs
 
 ### Accessibility Auditing (3 tools)
-- `adb_a11y_audit` — Automated WCAG audit: missing labels, undersized touch targets (<48dp), duplicate descriptions, unfocusable clickables
+- `adb_a11y_audit` — Targeted Android accessibility checks: missing labels, undersized touch targets (<48dp), duplicate descriptions, unfocusable clickables
 - `adb_a11y_touch_targets` — List all interactive elements with touch target dimensions in dp, flag undersized
 - `adb_a11y_tree` — Accessibility-focused UI tree showing only screen-reader-relevant elements with roles, labels, and states
 
@@ -602,13 +616,13 @@ Direct low-level SDK request handlers require migration to v2; SDK-private
 internals and experimental task APIs are outside this adapter.
 
 ### Community Plugin Registry
-Search, install, and manage plugins from a configurable registry URL. Shows install status, version comparison, and available updates. Downloads plugin files with companion metadata into the plugins directory for loading on next restart. Security features include SHA-256 integrity verification (when provided by the registry manifest), path traversal protection, and `register()` export sanity checking.
+Search, install, and manage plugins from an operator-configured registry URL. DeepADB ships no default registry; set `DA_REGISTRY_URL` to a manifest URL you trust before searching or installing. Shows install status, version comparison, and available updates. Downloads plugin files with companion metadata into the plugins directory for loading on next restart. Installation requires a matching SHA-256 hash in the manifest; missing or mismatched hashes are rejected. Other checks include path traversal protection and `register()` export sanity checking. A matching hash verifies consistency with the manifest, not the trustworthiness of its publisher or plugin code.
 
 ### Baseband/Modem Integration
 Deep cellular radio inspection tools for advanced Android development and research. Extracts modem firmware identification, cell identity parameters (CID, TAC, EARFCN, PCI), raw signal measurements (RSRP, RSRQ, SINR), neighboring cell surveys, carrier configuration, and multi-source modem logs (RIL radio buffer, telephony framework, kernel dmesg). Supports Shannon/Exynos, Qualcomm, MediaTek, and Unisoc chipset families via standard Android telephony APIs. Includes Google Tensor SoC detection (gs101/gs201/zuma/zumapro) for automatic Shannon modem path routing on Pixel 6–9 devices. Dual SIM detection reports per-slot SIM state, operator, network type, and country for DSDS, DSDA, and TSTS configurations.
 
 ### Accessibility Auditing
-Automated WCAG accessibility checks on the live UI hierarchy. Detects missing labels on interactive elements, undersized touch targets below the 48dp guideline (density-aware), images without content-descriptions, clickable elements missing focusability, and duplicate content-descriptions. Generates structured reports with severity levels. Includes a dedicated accessibility tree view for screen reader debugging.
+Targeted accessibility checks on the live Android UI hierarchy. Detects missing labels on interactive elements, undersized touch targets below the [Android 48dp recommendation](https://developer.android.com/guide/topics/ui/accessibility/apps) (density-aware), images without content-descriptions, clickable elements missing focusability, and duplicate content-descriptions. Generates structured reports with severity levels and includes an accessibility tree view for screen reader debugging. These checks do not constitute a complete WCAG conformance assessment or replace testing with assistive technology.
 
 ### Regression Detection
 Capture performance baselines (memory, CPU, frame stats, battery, network state) and compare subsequent runs against them. Configurable regression thresholds for memory (+20%), CPU (+50%), and jank rate (+25%). Maintains a history of baselines for trend analysis across releases.
@@ -623,11 +637,15 @@ available. Negotiated protocol revisions through 2025-11-25 are preserved.
 Streamable HTTP is available at `/mcp` on the same HTTP port. The 2026-07-28
 protocol lifecycle is not enabled.
 
-Alternative to stdio for browser-based MCP clients. Set `DA_HTTP_PORT` to start an HTTP server with SSE streaming. Provides `/sse` (client subscription), `/message` (JSON-RPC), and `/health` endpoints. Set `DA_HTTP_CORS_ORIGIN` to an exact HTTP(S) origin or comma-separated list. Unlisted Origins are rejected with HTTP 403 before session handling. Browser preflights permit `MCP-Protocol-Version`; actual requests still require the configured bearer token. Requests without Origin remain supported for native clients.
+Alternative to stdio for browser-based and native MCP clients. Set `DA_HTTP_PORT` to start an HTTP server providing `/mcp` (Streamable HTTP), `/sse` (legacy client subscription), `/message` (legacy JSON-RPC), and `/health` endpoints. Set `DA_HTTP_CORS_ORIGIN` to an exact HTTP(S) origin or comma-separated list. Unlisted Origins are rejected with HTTP 403 before session handling. Browser preflights permit `MCP-Protocol-Version`; actual MCP requests still require the configured bearer token. Requests without Origin remain supported for native clients.
 
 `/mcp` supports POST, GET and DELETE with an exposed `Mcp-Session-Id` header.
-One client is active across `/mcp` and legacy SSE; competing connections receive
-409. Streamable HTTP sessions expire after 30 idle minutes by default; active
+One client is active across `/mcp` and legacy SSE. A new `/mcp` session cannot
+displace an active SSE client, and a new SSE client cannot displace an active
+`/mcp` session; these attempts receive 409. A second authorized SSE client
+replaces the previous SSE connection for compatibility. Competing `/mcp`
+initializations receive 409 except for the guarded browser-reload recovery
+described below. Streamable HTTP sessions expire after 30 idle minutes by default; active
 MCP requests and bounded uploads suspend the countdown until work completes.
 An open notification stream alone does not prevent expiry, and DELETE can
 still terminate an active session. If a browser loses its ID on reload, a valid
@@ -681,16 +699,16 @@ Persistent Radio Interface Layer message capture from the Android radio logcat b
 Device-specific knowledge base containing hardware identification, chipset family, known modem device nodes, AT command compatibility, root requirements, dual SIM slot count, and quirks. Auto-detects profiles from connected devices and matches against a built-in library of known devices. Saved profiles persist across sessions and improve auto-detection accuracy for tools like `adb_at_detect`. Community-extensible through saved profile files.
 
 ### WebSocket Transport
-Alternative to stdio and HTTP/SSE for native clients that support WebSocket. Requires the `ws` npm package as an optional peer dependency. Set `DA_WS_PORT` to enable. Authentication and Origin checks run before upgrade; a second active client receives HTTP 409. Browser clients needing bearer headers should use HTTP/SSE because the native browser WebSocket API cannot set arbitrary Authorization headers.
+Alternative to stdio and HTTP for native clients that support WebSocket. Requires the optional `ws` npm package. Set `DA_WS_PORT` to enable. Authentication and Origin checks run before upgrade; a second active client receives HTTP 409. Browser clients needing bearer headers should use Streamable HTTP or legacy SSE because the native browser WebSocket API cannot set arbitrary Authorization headers.
 
 ### Modem Firmware Analysis
 Comprehensive multi-component firmware identification, diffing, and history tracking. Parses baseband version strings for 6 chipset families: Shannon/Exynos (including Google Pixel/Tensor `g5123b-*` format and classic Samsung `S5123AP_CL*` format), Qualcomm MPSS branch/version/build, MediaTek MOLY branch/release/milestone, Unisoc/Spreadtrum SoC model/version, HiSilicon/Kirin model/carrier code, and Intel XMM model/branch. Also parses bootloader versions (Pixel codename/version/build, Samsung model/carrier/revision) and RIL implementation strings (Samsung S.LSI vendor/id/API/build date, Qualcomm, MediaTek). The firmware probe reports 8 sections: baseband, bootloader, RIL, kernel, security/build, partition/boot (A/B slot, secure boot, verified boot, flash lock), VBMeta integrity, and OTA partition inventory. The diff tool compares all firmware components between saved fingerprints or live device state, with deep parsed sub-diffs for baseband and bootloader. The history tool tracks multi-component firmware progression across OTA fingerprints.
 
 ### Workflow Marketplace
-Community sharing layer for the workflow orchestration engine. Search a registry of community-contributed test workflows, diagnostic sequences, and audit procedures. Download and install workflows directly for immediate execution with `adb_workflow_run`. Export local workflows with marketplace metadata and auto-generated registry manifest entries for submission. SHA-256 integrity verification on download.
+Community sharing layer for the workflow orchestration engine. DeepADB ships no default marketplace; configure a trusted manifest with `DA_WORKFLOW_REGISTRY_URL`, or derive it from `DA_REGISTRY_URL` by replacing `registry.json` with `workflows.json`. Search for shared test workflows, diagnostic sequences, and audit procedures. Download and install workflows for execution with `adb_workflow_run`; installation requires a matching SHA-256 hash in the manifest. Export local workflows with marketplace metadata and auto-generated registry manifest entries for submission. Review the source and workflow actions before running them.
 
 ### GraphQL API
-Optional HTTP endpoint serving a GraphQL API for composed device queries. Enables clients to fetch device info, battery, network, and arbitrary properties in a single request instead of multiple MCP tool calls. POST body size limited to 1 MB. Device properties are pre-fetched once per resolution to minimize subprocess calls. Requires the `graphql` npm package as an optional peer dependency. Set `DA_GRAPHQL_PORT` to enable.
+Optional HTTP endpoint serving a GraphQL API for composed device queries. Enables clients to fetch device info, battery, network, and arbitrary properties in a single request instead of multiple MCP tool calls. POST body size limited to 1 MiB. Device properties are pre-fetched once per resolution to minimize subprocess calls. Requires the optional `graphql` npm package. Set `DA_GRAPHQL_PORT` to enable in the `full` profile; query and work budgets are documented in [SECURITY.md](SECURITY.md#network-transport-security).
 
 ### SELinux & Permission Auditing
 Inspects SELinux enforcement mode, queries AVC denials from logcat and kernel audit logs, and audits runtime permission grants per package. Groups granted permissions by dangerous category (Camera, Location, Phone, SMS, etc.) and flags high-sensitivity grants like background location and manage-external-storage. Extends the security auditing surface to the OS permission layer.
@@ -726,7 +744,7 @@ All 49 built-in tool modules receive a unified `BuiltinToolContext` dependency b
 | `DA_RESOURCE_CACHE_TTL_MS` | `0` (disabled) | MCP Resource cache TTL in ms. Set to a positive value to cache resource reads (device://info, device://battery, etc.) for that duration. |
 | `DA_RESULT_HANDLE_DIR` | `{tempDir}/result-handles` | Storage root for tempdir-backed tool result handles. Override to relocate the store off the default temp directory. |
 | `DA_RESULT_HANDLE_TTL` | `43200` (12h) | Per-handle TTL in seconds. Handles older than this are evicted on startup sweep and during periodic eviction. Bounded to [60, 7 days]. |
-| `DA_RESULT_HANDLE_MAX_BYTES` | `5242880` (5 MB) | Per-handle size cap. Tools attempting to store a content block larger than this fail with an error. |
+| `DA_RESULT_HANDLE_MAX_BYTES` | `5242880` (5 MiB) | Cap on the serialized content blocks stored in one handle. If exceeded, storage is refused; the original tool output is preserved with a not-stored warning. |
 | `DA_RESULT_HANDLE_TOTAL_BYTES` | `104857600` (100 MB) | Total result-handle store size cap across all handles. Triggers LRU eviction when exceeded. |
 | `DA_RESULT_HANDLE_MAX_COUNT` | `100` | Maximum number of active handles. Triggers LRU eviction when exceeded. |
 | `DA_SECURITY` | `false` | Enable filtering/rate limits on middleware-checked command paths; not a global tool policy |
@@ -736,7 +754,7 @@ All 49 built-in tool modules receive a unified `BuiltinToolContext` dependency b
 | `DA_CI_PING_TARGET` | `1.1.1.1` | Network reachability target used by `adb_ci_device_ready` (network reachability is one of the readiness checks alongside boot completion, ADB authorization, and package manager availability). Override to point at an internal target if `1.1.1.1` is firewalled. |
 | `DA_AUDIT_LOG` | `true` | Log middleware-checked commands with credential redaction; not a complete per-tool audit |
 | `DA_PLUGIN_DIR` | `{tempDir}/plugins` | Directory to scan for plugin .js modules at startup |
-| `DA_REGISTRY_URL` | GitHub default | URL of the community plugin registry JSON manifest |
+| `DA_REGISTRY_URL` | (not configured) | Trusted plugin registry manifest URL; no default registry is shipped. Installation requires a matching SHA-256 hash in the manifest. |
 | `DA_HTTP_PORT` | (disabled) | Enable HTTP transport: `/mcp` plus legacy `/sse` and `/message` |
 | `DA_HTTP_SESSION_TTL_MS` | `1800000` | `/mcp` idle-session timeout; integer 1000–3600000 ms |
 | `DA_TOOL_PROFILE` | `full` | `full` preserves all tools/plugins; `inspect` exposes three device/property tools and disables alternate interfaces |
@@ -746,8 +764,8 @@ All 49 built-in tool modules receive a unified `BuiltinToolContext` dependency b
 | `DA_WS_PORT` | (disabled) | Set to a port number to enable WebSocket transport mode (requires `npm install ws`) |
 | `DA_WS_CORS_ORIGIN` | (none — deny Origins) | Exact HTTP(S) origins for WebSocket upgrades and health endpoint; comma-separated |
 | `DA_GRAPHQL_PORT` | (disabled) | Set to a port number to enable the GraphQL API endpoint (requires `npm install graphql`) |
-| `DA_GRAPHQL_CORS_ORIGIN` | (none — deny) | Allowed CORS origin for GraphQL API |
-| `DA_WORKFLOW_REGISTRY_URL` | (derived from DA_REGISTRY_URL) | URL of the workflow marketplace JSON manifest |
+| `DA_GRAPHQL_CORS_ORIGIN` | (none — deny Origins) | Exact HTTP(S) origins for GraphQL; comma-separated; no paths or wildcards |
+| `DA_WORKFLOW_REGISTRY_URL` | (not configured) | Trusted workflow manifest URL. Falls back to `DA_REGISTRY_URL` with `registry.json` replaced by `workflows.json` when that variable is set. Installation requires a matching SHA-256 hash. |
 | `DA_TEST_PIN` | (none) | Numeric PIN used by `tests/test-ui-control.mjs` to exercise screen-lock/unlock tests. Without it, the 4 lock-state tests skip. Format: `DA_TEST_PIN=0000 npm test`. |
 
 ## Project Structure
@@ -761,8 +779,8 @@ DeepADB/
 │   ├── streamable-http.ts      # Bounded /mcp session and Streamable HTTP lifecycle
 │   ├── tool-profile.ts         # Startup profile validation and tool admission guards
 │   ├── plugin-compat.ts        # Legacy plugin APIs adapted to the v2 server
-│   ├── ws-transport.ts         # WebSocket transport (optional `ws` peer dependency)
-│   ├── graphql-api.ts          # GraphQL API endpoint (optional `graphql` peer dependency)
+│   ├── ws-transport.ts         # WebSocket transport (optional `ws` package)
+│   ├── graphql-api.ts          # GraphQL API endpoint (optional `graphql` package)
 │   ├── tool-context.ts         # Unified dependency bundle (ToolContext interface)
 │   ├── bridge/
 │   │   ├── adb-bridge.ts       # Core ADB subprocess wrapper, retry logic, error types
@@ -794,7 +812,7 @@ DeepADB/
 │   │   ├── ci.ts               # CI wait-boot, device-ready, run-tests (3 tools)
 │   │   ├── plugins.ts          # Plugin loader, info, and dynamic tool loading (2 tools)
 │   │   ├── baseband.ts         # Modem/baseband inspection and radio diagnostics (6 tools)
-│   │   ├── accessibility.ts    # Automated WCAG accessibility auditing (3 tools)
+│   │   ├── accessibility.ts    # Targeted Android UI accessibility checks (3 tools)
 │   │   ├── regression.ts       # Performance baseline and regression detection (3 tools)
 │   │   ├── device-farm.ts      # Firebase Test Lab integration via gcloud (3 tools)
 │   │   ├── registry.ts         # Community plugin registry search/install (3 tools)
@@ -815,7 +833,7 @@ DeepADB/
 │   │   ├── app-network.ts      # Per-app UID routing and network-policy context (1 tool)
 │   │   ├── wear.ts             # Wear OS Data Layer phone/watch preflight (1 tool)
 │   │   ├── sensors.ts          # Hardware sensor enumeration, IIO power monitor reading (2 tools)
-│   │   ├── result-handles.ts   # Tempdir-backed result handle store — list, drop, drop-all (3 tools) + the result://{tool}/{name} resource
+│   │   ├── result-handles.ts   # Tempdir-backed result handles — list, get, drop (3 tools) + the result://{tool}/{name} resource
 │   │   ├── wireless-firmware.ts # WiFi, Bluetooth, NFC, GPS firmware identification (4 tools)
 │   │   ├── build.ts            # Gradle build and install (2 tools)
 │   │   ├── resources.ts        # MCP Resources — 4 device-state surfaces: device://info|battery|telephony|list (5th, result://, lives in result-handles.ts)
@@ -863,11 +881,14 @@ DeepADB/
     ├── test-qemu-boot.mjs       # QEMU Alpine VM boot with auto-fetch of kernel/initrd, KVM acceleration, topology detection, guest ADB connectivity (17 on-device tests)
     ├── test-supply-chain.mjs    # Supply-chain hardening checks for fetch and network paths (24 tests)
     ├── test-sanitize-fuzz.mjs   # Property-based fuzzing of shell sanitizers — shellQuote/shellEscape round-trip, validateShellArg rejection (19 tests)
-    ├── test-transports.mjs      # Transport smoke — HTTP/SSE + WebSocket MCP round-trip, GraphQL health query (8 tests)
+    ├── test-transports.mjs      # Transport smoke — HTTP/SSE + WebSocket MCP round-trip, GraphQL devices query and introspection (8 tests)
     ├── test-sdk-compat.mjs      # SDK v1/v2 clients, plugin compatibility, auth and reconnects (36 tests)
     ├── test-browser-access.mjs  # Origin, CORS, auth and WebSocket upgrade checks (14 tests)
     ├── test-local-llm.mjs       # Streamable HTTP lifecycle, clients, plugins and profile restrictions (33 tests)
-    ├── browser/cors.mjs         # Optional real Chromium HTTP/SSE checks (7 tests)
+    ├── test-next-version.mjs    # Focused diagnostic validation and device-free boundaries
+    ├── test-next-version-device.mjs # Live runtime, SQLite, route, Wear and Shannon checks
+    ├── test-audit-hardening.mjs # SQLite isolation, path guards, GraphQL budgets and runner failures
+    ├── browser/cors.mjs         # Separate real Chromium HTTP/SSE checks (8 tests)
     └── lib/
         └── harness.mjs          # Shared test harness (stdio JSON-RPC transport, assertion primitives)
 ```

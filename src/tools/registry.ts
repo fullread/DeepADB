@@ -7,8 +7,9 @@
  * plugin files, and installs them into the DA_PLUGIN_DIR for loading
  * on next server restart.
  *
- * Registry URL: DA_REGISTRY_URL env var, or default GitHub-hosted manifest.
- * Manifest format: JSON array of { name, description, version, url, author }.
+ * Registry URL: operator-supplied DA_REGISTRY_URL; no default remote source.
+ * Manifest: JSON array of { name, description, version, url, author?, sha256 }.
+ * Installation requires a matching sha256; entries without it are refused.
  */
 
 import { z } from "zod";
@@ -215,7 +216,7 @@ export function registerRegistryTools(ctx: ToolContext): void {
           ctx.logger.warn(`Plugin ${name} may not export a register() function.`);
         }
 
-        // Integrity verification — if the manifest provides a SHA-256 hash, verify it
+        // Installation requires a matching SHA-256 hash from the manifest.
         if (plugin.sha256) {
           const actualHash = createHash("sha256").update(code).digest("hex");
           if (actualHash !== plugin.sha256) {

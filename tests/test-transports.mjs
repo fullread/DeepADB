@@ -5,11 +5,12 @@
  * (HTTP/SSE, WebSocket, GraphQL) that the stdio-based suites never touch. Each
  * test boots build/index.js on an ephemeral port with the matching env var,
  * verifies the /health endpoint, performs one real protocol exchange (MCP
- * tools/list over SSE and WebSocket; a { health } query over GraphQL), then
+ * tools/list over SSE and WebSocket; a { devices { serial } } GraphQL query), then
  * shuts the server down.
  *
- * Device-free: tools/list, resources/list, and the health query exercise the
- * full transport + MCP wiring without needing a connected device.
+ * Device-free: MCP catalog requests and GraphQL queries exercise the transport
+ * and execution wiring without needing a connected device. The devices query
+ * accepts either a device list or the resolver error from unavailable ADB.
  *
  * WebSocket and GraphQL require their optional packages (ws, graphql), present
  * as devDependencies. If a package is absent the relevant tests skip rather
@@ -174,7 +175,7 @@ section("GraphQL API");
   const gqInstalled = existsSync(join(NM, "graphql", "package.json"));
   if (!gqInstalled) {
     skip("GraphQL /health", "graphql package not installed");
-    skip("GraphQL { health } query", "graphql package not installed");
+    skip("GraphQL { devices } query", "graphql package not installed");
     skip("GraphQL introspection", "graphql package not installed");
   } else {
     const port = await freePort();

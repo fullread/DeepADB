@@ -2,6 +2,21 @@
 
 All notable changes to DeepADB are documented in this file.
 
+## Unreleased
+
+### Documentation and package contents
+
+- Correct the Termux clone/build example and distinguish loopback HTTP from
+  authenticated remote access through a TLS proxy or SSH tunnel.
+- Align security wording with selective command middleware and the enforced
+  `inspect` profile; clarify legacy SSE replacement and result-storage warnings.
+- Document operator-configured plugin/workflow registries and mandatory SHA-256
+  checks, including the distinction between integrity and source trust.
+- Describe accessibility checks as targeted Android UI checks, update test and
+  module descriptions, and request transport/profile/client details in bug reports.
+- Include `SECURITY.md` in future npm packages so the bundled local-LLM guide's
+  relative security links resolve. Runtime behavior and tool contracts are unchanged.
+
 ## v1.1.5 — SDK v2 and Local LLM Support
 
 ### Release preparation
