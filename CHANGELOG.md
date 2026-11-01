@@ -43,11 +43,17 @@ All notable changes to DeepADB are documented in this file.
   LocalBridge dispatch paths; retain and extend adversarial shell regressions.
 - Add `test-code-scanning` to device-free CI for auth compatibility/limits,
   GraphQL error boundaries and root/non-root split-APK argument preservation.
-- Local verification on Windows/Node 26.12.1: build and lint passed; eleven
-  device-free suites passed 321 checks with zero failures and 17 expected skips
-  (338 total), including 26 new regressions. All eight real Chromium checks
-  passed. Hosted CodeQL confirmation and any alert-state changes are pending;
-  no hardware deployment or published-version change is included.
+- Retire legacy SSE through one SDK teardown before admitting its replacement.
+  Ignore duplicate close notifications so a late event from the old response
+  cannot detach the new client. Add a deterministic v1-to-v2 reconnect regression
+  that holds and releases the old close event after replacement initialization.
+- Local verification: build and lint passed; eleven device-free suites under
+  coverage on Windows/Node 22.23.4 passed 322 checks with zero failures and 17
+  expected skips (339 total), including 26 security regressions and the delayed
+  SSE close regression. All eight real Chromium checks
+  passed. Hosted CodeQL results and remaining false-positive triage are tracked
+  in the pull request; no hardware deployment or published-version change is
+  included.
 
 ## v1.1.5 — SDK v2 and Local LLM Support
 

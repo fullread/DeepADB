@@ -91,6 +91,9 @@ connection. Missing/duplicate IDs receive 400; mismatches receive 404 while an
 SSE session is active (503 when none is active). Transport identity is checked
 again after upload, so a replaced client's pending body cannot invoke a handler.
 These checks supplement Origin and bearer authentication, not replace them.
+Legacy SSE keeps the old session reserved until SDK teardown runs. Teardown is
+delivered once, so a delayed/duplicate response-close event cannot clear a newly
+initialized SSE or Streamable HTTP connection.
 
 Streamable HTTP idle expiry is suspended while MCP requests or bounded uploads are active and
 re-armed after the last response or cancellation. An open GET stream alone does

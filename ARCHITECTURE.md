@@ -126,7 +126,10 @@ HTTP 409. Legacy SSE retains its authorized-client replacement behavior.
 missing/duplicate IDs; 404 for a mismatch while a session is active). Dispatch
 rechecks transport identity after body upload, so an admitted message cannot
 execute after its SSE connection is replaced. With no SSE session, the existing
-503 response is retained.
+503 response is retained. SSE cleanup follows the SDK transport close rather
+than the request close event, and suppresses duplicate close notifications.
+This retires the old protocol before replacement and prevents a late response
+close from detaching the new connection.
 
 `streamable-http.ts` uses the official `@modelcontextprotocol/node` adapter.
 It reserves one session after validating initialization, shares admission with
@@ -288,10 +291,11 @@ Unreleased security hardening adds an eleventh device-free suite,
 `test-code-scanning`, for bearer-parser limits, GraphQL error boundaries and the
 split-APK shell-alert data flow. These local fixture checks do not replace
 hosted CodeQL analysis or the release hardware baselines above.
-On Windows/Node 26.12.1, the eleven suites passed 321 checks with zero failures
-and 17 expected skips (338 total); the new suite contributed 26 passes. Build,
-lint and all eight real Chromium compatibility checks passed. Hardware and
-hosted CodeQL were not rerun for these changes.
+On Windows/Node 22.23.4, the eleven suites passed 322 checks under coverage with
+zero failures and 17 expected skips (339 total), including 26 security regressions
+and the delayed SSE close regression. Build, lint and all eight real Chromium
+compatibility checks passed. No hardware rerun or deployment was performed;
+hosted CodeQL results and remaining alert triage are tracked in the pull request.
 
 Model-driven validation with llama.cpp b11960 and Qwen3.5-4B Q4_K_M passed over
 native stdio and authenticated browser HTTP/SSE using `inspect`. Browser HTTP

@@ -107,6 +107,10 @@ handler with synthetic backend failures; no device is contacted. Keep known
 GraphQL limit messages in `middleware/graphql-errors.ts`, and never pass raw
 backend error messages or extensions into an HTTP response. Test both thrown
 request errors and errors returned inside an execution result.
+The SDK compatibility suite also holds an old SSE response's close event until
+after its replacement initializes, then verifies the new client remains usable.
+Keep this deterministic ordering test when changing transport teardown; a
+successful retry alone does not establish that a reconnect race is fixed.
 
 The aggregate runner requires one complete, internally consistent summary per
 suite. A nonzero child exit, missing/duplicate/malformed summary, failed assertion,

@@ -102,15 +102,21 @@ export async function startHttpTransport(
           const transport = new SSEServerTransport("/message", res);
           activeTransport = transport;
 
-          // When the SSE connection closes, clean up
-          req.on("close", () => {
-            logger.info("SSE client disconnected.");
-            if (activeTransport === transport) {
-              activeTransport = null;
-            }
-          });
-
           await server.connect(transport);
+          const sdkClose = transport.onclose;
+          let closed = false;
+          transport.onclose = () => {
+            // The legacy SDK signals close() immediately, then signals again
+            // when the response emits close. Its protocol teardown is shared
+            // by all transports, so a late duplicate could detach a new client.
+            if (closed) return;
+            closed = true;
+            logger.info("SSE client disconnected.");
+            if (activeTransport === transport) activeTransport = null;
+            sdkClose?.();
+          };
+          // Keep activeTransport until SDK teardown, not IncomingMessage.close:
+          // a replacement must close the old protocol before connecting itself.
           const sdkMessage = transport.onmessage;
           transport.onmessage = (message, extra) => {
             // handlePostMessage awaits the upload. The connection may have
