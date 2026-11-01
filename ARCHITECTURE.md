@@ -207,6 +207,12 @@ budgets precede execution; runtime device-operation budgets and a shared pool
 bound work across aliases, device lists and concurrent requests. Cancellation
 stops queued work; active bridge calls retain their timeouts. HTTP URL authority
 formatting brackets IPv6 literals independently of the listen address.
+The public error boundary uses a closed `GraphQLClientError` code/message table
+for request and work-limit failures. Schema validation stays informative;
+unexpected errors are masked in both the HTTP catch path and GraphQL execution
+results, with internal diagnostics restricted to stderr. Field paths, locations
+and execution-result `data` remain available to clients. Shared bearer parsing
+is bounded and linear before the existing exact, constant-time byte comparison.
 See SECURITY.md for numerical limits and snapshot consistency caveats.
 
 ## Testing model
@@ -222,9 +228,10 @@ Suites fall into two groups:
   `test-boundaries` (Zod bounds and enum rejection), `test-next-version`,
   `test-result-handles`, `test-supply-chain`, `test-transports` (boots each transport on an ephemeral
   port and does a real MCP round-trip), `test-sdk-compat` (v1/v2 clients,
-  plugin APIs and schemas, auth, reconnects, and catalog compatibility), and
-  `test-sanitize-fuzz`. Device-
-  dependent assertions inside an otherwise device-free suite skip-guard
+  plugin APIs and schemas, auth, reconnects, and catalog compatibility),
+  `test-sanitize-fuzz`, `test-browser-access`, `test-local-llm`,
+  `test-audit-hardening`, and `test-code-scanning`. Device-dependent assertions
+  inside an otherwise device-free suite skip-guard
   themselves when no device is present, so the run stays green either way.
 - Device-dependent: require a connected device or emulator and are run locally.
   `test-next-version-device` exercises the runtime audit, app-route context,
@@ -238,7 +245,7 @@ Useful commands:
 - `npm run test:ci` runs only the device-free suites (`run-all.mjs --ci`).
 - `npm run coverage` runs the suite under c8 and writes `coverage/` (lcov + summary).
 
-After the final audit fixes, the Windows/Node 22.23.4 coverage run passed 295
+The v1.1.5 final audit baseline on Windows/Node 22.23.4 passed 295
 checks with zero failures and 17 skips (312 total) across ten suites. Sixteen
 skips require hardware; one requires file-symlink creation privileges. The new
 41-check hardening suite also passes on Node 24.22.2. Eight disposable Pixel
@@ -269,13 +276,22 @@ Hosted CI covers Node 22/24/26, browser MCP compatibility, coverage and dependen
 auditing. CodeQL separately analyzes application code and GitHub Actions.
 
 The original nine CI suites contained 270 checks (254 device-free passes and
-16 hardware-dependent skips). A tenth suite, `test-audit-hardening`, now covers
+16 hardware-dependent skips). A tenth suite, `test-audit-hardening`, covers
 the seven final-audit findings; its symlink cases vary with host capabilities.
 Before that final hardening pass, the full Pixel 6a / Android 16 host-hardware
 run passed 687 checks with zero failures and 17 expected environment-specific
 skips (704 total), including PIN-based screen recovery, request-ID/cancellation
 handling, and cancelled plugin callback guards. The released v1.1.4 baseline was 604 passed with
 the same 17 skips. Real phone-to-watch Wear validation remains deferred.
+
+Unreleased security hardening adds an eleventh device-free suite,
+`test-code-scanning`, for bearer-parser limits, GraphQL error boundaries and the
+split-APK shell-alert data flow. These local fixture checks do not replace
+hosted CodeQL analysis or the release hardware baselines above.
+On Windows/Node 26.12.1, the eleven suites passed 321 checks with zero failures
+and 17 expected skips (338 total); the new suite contributed 26 passes. Build,
+lint and all eight real Chromium compatibility checks passed. Hardware and
+hosted CodeQL were not rerun for these changes.
 
 Model-driven validation with llama.cpp b11960 and Qwen3.5-4B Q4_K_M passed over
 native stdio and authenticated browser HTTP/SSE using `inspect`. Browser HTTP

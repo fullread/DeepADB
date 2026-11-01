@@ -224,7 +224,9 @@ Full-profile SQLite inspection uses private snapshots and bounded query
 subprocesses. Large/expensive queries may return a limit error; split them into
 smaller queries instead of weakening the limits. Host inspection requires
 Node 22.16+. GraphQL remains a separate optional full-profile API; it now
-rejects invalid Origins and limits query complexity and device work. Neither
+rejects invalid Origins and limits query complexity and device work. Unexpected
+GraphQL failures expose generic errors; inspect protected server stderr for
+backend diagnostics. Neither
 SQLite nor GraphQL is enabled by the three-tool `inspect` profile.
 
 Use a supported LTS Node runtime on both the host and phone. A passing host/ADB

@@ -72,6 +72,20 @@ All modules that spawn child processes (logcat watchers, RIL interceptors, scree
 - **WebSocket**: Same binding and Origin defaults, configured through `DA_WS_CORS_ORIGIN`. Origin and bearer authentication are checked before the upgrade. A second active client receives HTTP 409 instead of an unusable open socket.
 - **GraphQL**: Uses the same Origin-rejection middleware, with exact origins in `DA_GRAPHQL_CORS_ORIGIN`. An unlisted Origin receives 403 before resolver execution; native requests may omit Origin. Tokens remain mandatory when configured. POST bodies are capped at 1 MiB with a 15-second upload deadline; query text at 64 KiB and parsing at 4096 tokens. Expanded AST budgets cap depth at 10, fields at 100, aliases at 16 and selections at 256, including fragments. Property-key lists are capped at 100 and device lists at 16. Each request gets 64 device operations and a 30-second admission deadline; disconnect/deadline prevents queued work from starting. Already-running I/O retains its bridge timeout and concurrency slot. At most eight HTTP queries and four underlying operations run concurrently across the API. Responses are capped at 1 MiB.
 
+GraphQL errors are separated from internal diagnostics. Malformed request
+envelopes/JSON, syntax failures and pre-execution limits return HTTP 400 with
+fixed messages and `errors[].extensions.code`; syntax errors retain source
+locations, and schema-validation errors retain their actionable messages.
+GraphQL execution results retain HTTP 200, `data`, field paths and locations,
+but unexpected resolver errors expose only `INTERNAL_SERVER_ERROR`. Rejected
+operations/variables use `BAD_USER_INPUT` without echoing their values. Unexpected
+request-handler failures return HTTP 500 with the same generic internal-error
+message. Backend messages, stacks, causes and arbitrary extensions are not sent
+to clients. Known runtime limits use a closed server-owned message table, not
+exception text or a backend-supplied error name/code; limits reached during
+execution keep the GraphQL HTTP 200 error-result convention. Internal diagnostics go
+to server stderr; protect those logs as potentially sensitive device data.
+
 Legacy SSE `POST /message` requires exactly one session ID matching the active
 connection. Missing/duplicate IDs receive 400; mismatches receive 404 while an
 SSE session is active (503 when none is active). Transport identity is checked
@@ -113,6 +127,13 @@ trusted plugins or stop handlers that ignore cancellation from doing local work.
 ### Bearer Token Authentication
 
 When `DA_AUTH_TOKEN` is set, network requests (HTTP/SSE, WebSocket, GraphQL) must include a valid `Authorization: Bearer <token>` header. Requests without a valid token receive HTTP 401. WebSocket authentication fails before upgrade, replacing the old post-upgrade 4401 close behavior. Token comparison uses constant-time `crypto.timingSafeEqual()` to prevent timing-based side-channel attacks.
+
+Authorization parsing is linear and capped at 16,384 characters before token
+buffer allocation, in addition to Node's HTTP header limit. The `Bearer` scheme
+is case-insensitive; one or more spaces/tabs separate it from the token. Folded
+headers, control characters, Unicode line separators and empty tokens are
+rejected. The token itself is not trimmed or normalized, preserving exact UTF-8
+comparison and existing tokens with embedded spaces.
 
 Health check endpoints (`GET /health`) are exempt from authentication — they only return transport status and version info, no device data.
 

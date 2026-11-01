@@ -29,6 +29,9 @@ const AUTH_TOKEN = process.env.DA_AUTH_TOKEN ?? "";
 /** Pre-computed buffer for constant-time comparison (avoids re-allocation per request). */
 const AUTH_TOKEN_BUF = Buffer.from(AUTH_TOKEN);
 
+/** Bound parsing/allocation even when called outside Node's HTTP header parser. */
+const MAX_AUTH_HEADER_LENGTH = 16 * 1024;
+
 /** Minimum recommended token length in characters. Shorter tokens are warned at startup. */
 const MIN_TOKEN_LENGTH = 32;
 
@@ -147,8 +150,21 @@ export function hasValidToken(req: IncomingMessage): boolean {
   if (!AUTH_TOKEN) return true;
 
   const authHeader = req.headers.authorization ?? "";
-  const match = authHeader.match(/^Bearer\s+(.+)$/i);
-  const token = match?.[1] ?? "";
+  if (typeof authHeader !== "string" || authHeader.length > MAX_AUTH_HEADER_LENGTH
+    || authHeader.slice(0, 6).toLowerCase() !== "bearer") return false;
+
+  // Parse once, without overlapping regex quantifiers. Accept the existing
+  // space/tab separators, but never line folding or control characters.
+  let tokenStart = 6;
+  while (authHeader[tokenStart] === " " || authHeader[tokenStart] === "\t") tokenStart++;
+  if (tokenStart === 6 || tokenStart === authHeader.length) return false;
+  for (let i = tokenStart; i < authHeader.length; i++) {
+    const code = authHeader.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f || code === 0x2028 || code === 0x2029) return false;
+  }
+  // Do not trim/normalize the token itself: comparison remains exact, including
+  // for existing tokens containing non-ASCII characters or embedded spaces.
+  const token = authHeader.slice(tokenStart);
 
   // Constant-time comparison to prevent timing-based side-channel attacks.
   // Compare buffer byte lengths (not string char lengths) to handle multi-byte

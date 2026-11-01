@@ -119,7 +119,7 @@ AI Agent (Termux) ←→ MCP (stdio/HTTP) ←→ DeepADB (Termux) ←→ sh/su (
 ```
 When DeepADB runs directly on the Android device (e.g., inside Termux), it auto-detects the environment and switches to `LocalBridge`. Commands execute directly via `sh`/`su` — no ADB server, no USB, no serialization overhead. The same 209-tool MCP surface is registered, with capability-aware guidance when an optional on-device binary such as `sqlite3` is unavailable.
 
-Final audit-fix verification (Windows host): the ten device-free suites passed
+v1.1.5 final audit-fix verification (Windows host): the ten device-free suites passed
 **295 checks, zero failures, and 17 expected skips (312 total)** under Node
 22.23.4 with coverage. The new hardening suite separately passed **41 checks**
 on Node 24.22.2, with one Windows file-symlink capability skip; 16 other skips
@@ -710,6 +710,12 @@ Community sharing layer for the workflow orchestration engine. DeepADB ships no 
 ### GraphQL API
 Optional HTTP endpoint serving a GraphQL API for composed device queries. Enables clients to fetch device info, battery, network, and arbitrary properties in a single request instead of multiple MCP tool calls. POST body size limited to 1 MiB. Device properties are pre-fetched once per resolution to minimize subprocess calls. Requires the optional `graphql` npm package. Set `DA_GRAPHQL_PORT` to enable in the `full` profile; query and work budgets are documented in [SECURITY.md](SECURITY.md#network-transport-security).
 
+Request validation and known limit errors remain actionable. Unexpected
+request/resolver failures return generic errors, with backend diagnostics kept
+on server stderr. GraphQL execution errors retain the normal `errors[]`/`data` shape
+with HTTP 200; unexpected request-handler failures use HTTP 500. See
+[SECURITY.md](SECURITY.md#network-transport-security) for the error boundary.
+
 ### SELinux & Permission Auditing
 Inspects SELinux enforcement mode, queries AVC denials from logcat and kernel audit logs, and audits runtime permission grants per package. Groups granted permissions by dangerous category (Camera, Location, Phone, SMS, etc.) and flags high-sensitivity grants like background location and manage-external-storage. Extends the security auditing surface to the OS permission layer.
 
@@ -888,6 +894,7 @@ DeepADB/
     ├── test-next-version.mjs    # Focused diagnostic validation and device-free boundaries
     ├── test-next-version-device.mjs # Live runtime, SQLite, route, Wear and Shannon checks
     ├── test-audit-hardening.mjs # SQLite isolation, path guards, GraphQL budgets and runner failures
+    ├── test-code-scanning.mjs   # Bounded auth, safe GraphQL errors and split-APK quoting
     ├── browser/cors.mjs         # Separate real Chromium HTTP/SSE checks (8 tests)
     └── lib/
         └── harness.mjs          # Shared test harness (stdio JSON-RPC transport, assertion primitives)

@@ -26,6 +26,29 @@ All notable changes to DeepADB are documented in this file.
   action steps aligned in future pull requests. Runtime dependencies and the
   published package version are unchanged.
 
+### Security hardening
+
+- Replace the bearer-token regex with bounded linear parsing before buffer
+  allocation and constant-time comparison. Preserve case-insensitive `Bearer`,
+  space/tab separators and exact UTF-8 tokens; reject controls, line separators
+  and headers longer than 16,384 characters.
+- Mask unexpected GraphQL request and resolver errors, including arbitrary
+  backend extensions. Keep validation and server-owned budget errors useful,
+  preserve execution-result data/paths/locations, and log internal diagnostics
+  only on server stderr. Unexpected request failures now use HTTP 500; GraphQL
+  execution errors keep HTTP 200. Invalid JSON/envelopes receive safe HTTP 400
+  responses rather than raw parser or JavaScript exception text.
+- Replace the supply-chain test's misleading URL-substring assertion with an
+  exact expected-message check. Record why CodeQL alert #4 follows infeasible
+  LocalBridge dispatch paths; retain and extend adversarial shell regressions.
+- Add `test-code-scanning` to device-free CI for auth compatibility/limits,
+  GraphQL error boundaries and root/non-root split-APK argument preservation.
+- Local verification on Windows/Node 26.12.1: build and lint passed; eleven
+  device-free suites passed 321 checks with zero failures and 17 expected skips
+  (338 total), including 26 new regressions. All eight real Chromium checks
+  passed. Hosted CodeQL confirmation and any alert-state changes are pending;
+  no hardware deployment or published-version change is included.
+
 ## v1.1.5 — SDK v2 and Local LLM Support
 
 ### Release preparation

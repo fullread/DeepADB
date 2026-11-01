@@ -35,7 +35,7 @@ node --test tests/ci/emulator-reporting.test.mjs # CI reporting, no device acces
 The device-free suites (`test-boundaries`, `test-next-version`,
 `test-result-handles`, `test-supply-chain`, `test-transports`,
 `test-sanitize-fuzz`, `test-sdk-compat`, `test-browser-access`, `test-local-llm`,
-`test-audit-hardening`) run without any hardware and are the fastest way to
+`test-audit-hardening`, `test-code-scanning`) run without any hardware and are the fastest way to
 validate a change. A single suite can be run directly, e.g.
 `node tests/test-next-version.mjs`. Device-facing changes should also run the
 relevant hardware suite; the focused diagnostics use
@@ -101,6 +101,13 @@ paths. Linux runs file-symlink/race cases; Windows reports an explicit skip if
 its account cannot create file symlinks. Use Git for Windows' Bash for local
 POSIX guard checks. These tests use synthetic files and mock device I/O.
 
+`test-code-scanning` adds bounded bearer parsing, safe GraphQL request/resolver
+errors and adversarial split-APK argument checks. It uses the real GraphQL HTTP
+handler with synthetic backend failures; no device is contacted. Keep known
+GraphQL limit messages in `middleware/graphql-errors.ts`, and never pass raw
+backend error messages or extensions into an HTTP response. Test both thrown
+request errors and errors returned inside an execution result.
+
 The aggregate runner requires one complete, internally consistent summary per
 suite. A nonzero child exit, missing/duplicate/malformed summary, failed assertion,
 or empty suite selection fails the run; printed zero-failure counts cannot
@@ -118,7 +125,8 @@ turn a crashed suite green.
   high and critical advisories fail the audit job. Lower-severity findings
   remain visible in its output.
 - CodeQL analyzes JavaScript/TypeScript and GitHub Actions on pull requests,
-  main-branch pushes, and a weekly schedule.
+  main-branch pushes, and a weekly schedule. A successful workflow means analysis
+  completed, not that no alerts remain; inspect the code-scanning alert list.
 - The weekly emulator lane is informational, not a merge gate. Its job
   summary reports the actual pass/fail/skip counts and execution status;
   unsupported physical-device capabilities can still fail assertions.
@@ -136,6 +144,16 @@ rules also apply to administrators; force pushes and branch deletion are
 disabled. No additional approving reviewer is required for the solo-maintainer
 workflow. New audit and analysis jobs must be validated on GitHub before they
 are considered for required-check enforcement.
+
+Code-scanning triage must follow the reported source-to-sink path. For alert
+[#4](https://github.com/fullread/DeepADB/security/code-scanning/4), the split-APK
+tool always selects `install-multiple`, whose path operands are resolved and
+`shellQuote`-wrapped. The reported flows instead cross into `shell`, `logcat`,
+`install` flags or the unknown-command fallback, which that call cannot reach.
+`test-code-scanning` preserves exact argv for spaces, quotes, command
+substitutions, newlines and dash-leading names in root/non-root modes using
+harmless fake `su`/`pm` functions. This supports triaging that specific alert as
+a false positive; it is not a blanket exemption for LocalBridge command sinks.
 
 ## Build discipline
 
