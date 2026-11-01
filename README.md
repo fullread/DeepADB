@@ -29,7 +29,7 @@ Add `build/index.js` to your MCP client configuration, then begin with these wor
 | Inspect the current Android UI | `adb_screen_state`, then `adb_ui_dump` |
 | Diagnose a device or app | `adb_device_info`, `adb_logcat`, and `adb_dumpsys` |
 
-For a guided local connection, see [Claude Code Configuration](#claude-code-configuration). Read [SECURITY.md](SECURITY.md) before exposing HTTP, WebSocket, or GraphQL transports beyond loopback.
+For a guided local connection, see [MCP Client Configuration](#mcp-client-configuration). Read [SECURITY.md](SECURITY.md) before exposing HTTP, WebSocket, or GraphQL transports beyond loopback.
 
 Using llama.cpp or another local model? See [Local LLM clients](LOCAL_LLMS.md)
 for direct stdio, authenticated browser HTTP, and small tool profiles. WebSocket is not required.
@@ -234,7 +234,13 @@ Before replacing an existing device installation, stage the built package, keep
 a rollback copy, and verify its actual LocalBridge execution with the device's
 runtime and binaries. Host/ADB tests alone do not validate that deployment.
 
-## Claude Code Configuration
+<a id="claude-code-configuration"></a>
+
+## MCP Client Configuration
+
+Configure a local stdio MCP server with `node` as the command and the absolute
+path to `build/index.js` as its argument. The client starts the server process.
+For clients that use an `mcpServers` JSON configuration, the equivalent is:
 
 ```json
 {
@@ -246,6 +252,12 @@ runtime and binaries. Host/ADB tests alone do not validate that deployment.
   }
 }
 ```
+
+Other clients may use a settings form, TOML, or a different JSON layout; enter
+the same command and argument using that client's configuration format. Leave
+`DA_HTTP_PORT`, `DA_WS_PORT`, and `DA_GRAPHQL_PORT` unset for this stdio setup.
+See [Local LLM clients](LOCAL_LLMS.md) for explicit environment settings and
+authenticated browser connections.
 
 ## Available Tools (209)
 

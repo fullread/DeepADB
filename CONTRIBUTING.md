@@ -161,7 +161,12 @@ turn a crashed suite green.
 - The weekly emulator lane is informational, not a merge gate. Its job
   summary reports the actual pass/fail/skip counts and execution status;
   unsupported physical-device capabilities can still fail assertions.
-  A successful informational job is not proof that every test passed.
+  Failed assertions, missing/incomplete test summaries, interrupted tests and
+  emulator boot failures mark the job failed. Logs and summaries are uploaded
+  even after failure. The lane is not required by branch protection; investigate
+  failures individually rather than treating every hardware-related failure as
+  expected. Older runs that used `continue-on-error` can show green jobs despite
+  failed assertions; their logs remain the source of truth.
 - Dependabot groups compatible development patch/minor updates. Major
   updates are reviewed separately, and TypeScript 7 is deferred until the
   lint stack supports it.
@@ -183,8 +188,9 @@ tool always selects `install-multiple`, whose path operands are resolved and
 `install` flags or the unknown-command fallback, which that call cannot reach.
 `test-code-scanning` preserves exact argv for spaces, quotes, command
 substitutions, newlines and dash-leading names in root/non-root modes using
-harmless fake `su`/`pm` functions. This supports triaging that specific alert as
-a false positive; it is not a blanket exemption for LocalBridge command sinks.
+harmless fake `su`/`pm` functions. Alert #4 was dismissed as a false positive
+after this review and regression run; the rule remains enabled. This is not a
+blanket exemption for LocalBridge command sinks.
 
 ## Build discipline
 

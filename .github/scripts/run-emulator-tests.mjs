@@ -39,7 +39,7 @@ export function formatSummary(apiLevel, result) {
   const lines = [
     `## Emulator integration — API ${apiLevel}`,
     "",
-    "**Informational, non-gating run.** A green workflow does not mean every assertion passed.",
+    "**Informational, non-gating run.** Failed assertions, incomplete runs and emulator boot failures fail the job; this workflow is not a required merge check.",
     "",
     `**Result:** ${status}`,
     `**Test process:** ${startError ? "failed to start" : signal ? `terminated by ${signal}` : commandExitCode === null ? "exit status unavailable" : `exit ${commandExitCode}`}.`,
