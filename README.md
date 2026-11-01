@@ -152,8 +152,9 @@ Android auto-detection and all eight strict device checks passed again there.
 The 1.1.4 rollback copy is retained and also starts on the new runtime.
 The final host hardware rerun passed 728 checks with zero failures and 18 skips;
 device-free Node 24 coverage passed 295 checks with zero failures and 17 skips.
-GitHub CI and CodeQL for this change set still require a pushed PR; version
-1.1.5 is not yet published.
+GitHub CI covers Node 22/24/26 builds and regressions, real-browser MCP
+compatibility, coverage and dependency auditing, with separate CodeQL analysis
+for application code and GitHub Actions.
 
 **Earlier unreleased host hardware validation (October 31, 2026, before the final seven-finding hardening pass):** the expanded suite,
 including SDK migration, browser reconnect, request-ID/cancellation, plugin

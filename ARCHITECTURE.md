@@ -260,8 +260,8 @@ copy initializes successfully under the updated runtime and is retained. After
 promotion to the normal device path, auto-detection selected LocalBridge and
 all eight strict device checks passed again. The 1.1.5 host hardware rerun passed
 728/0/18 (pass/fail/skip); device-free Node 24 coverage passed 295/0/17.
-Hosted CI/CodeQL remain
-pending until the uncommitted release changes are pushed.
+Hosted CI covers Node 22/24/26, browser MCP compatibility, coverage and dependency
+auditing. CodeQL separately analyzes application code and GitHub Actions.
 
 The original nine CI suites contained 270 checks (254 device-free passes and
 16 hardware-dependent skips). A tenth suite, `test-audit-hardening`, now covers

@@ -2,11 +2,11 @@
 
 All notable changes to DeepADB are documented in this file.
 
-## v1.1.5 (unreleased)
+## v1.1.5 — SDK v2 and Local LLM Support
 
 ### Release preparation
 
-- Align package and MCP Registry metadata at 1.1.5; publication remains pending.
+- Align package and MCP Registry metadata at 1.1.5.
 - Refresh the compatible WebSocket dependency to 8.22.1. TypeScript 7 remains
   deferred because the lint stack requires TypeScript below 6.1.
 - Add real Chromium browser CORS, authentication, profile enforcement and reload
@@ -20,15 +20,15 @@ All notable changes to DeepADB are documented in this file.
   copy also starts successfully under the updated runtime.
 - Node 22.23.4 and 26.12.1 each passed the ten CI-selected suites with a Pixel
   connected: 311 passed, zero failed, one Windows symlink-capability skip.
-  All 13 emulator-reporting checks pass. Hosted CI/CodeQL remain pending.
+  All 13 emulator-reporting checks pass. Hosted Node 22/24/26 jobs, browser
+  compatibility, coverage, dependency auditing and both CodeQL analyses passed.
 - Final 1.1.5 host/ADB regression: 728 passed, zero failed, 18 expected skips
   across all 22 suites. Device-free Node 24.22.2 coverage: 295 passed, zero failed,
   17 expected skips. Build, lint, workflow lint, registry metadata validation and
   full/production dependency audits pass.
 - Promoted the verified package to the Pixel's normal installation path and
   repeated all eight strict device checks with automatic LocalBridge detection.
-  Keep the validated 1.1.4 rollback copy. Publication and hosted checks remain
-  separate, pending steps; the GitHub release and npm remain on 1.1.4.
+  Retain the validated 1.1.4 rollback copy for recovery.
 
 ### Final reliability and security audit fixes
 
