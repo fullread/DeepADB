@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [ 22.x, 24.x ]
+        node-version: [ 22.x, 24.x, 26.x ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -42,6 +42,33 @@ jobs:
       # emulator is required; device-dependent assertions skip-guard automatically.
       - name: Run device-free test suites
         run: node tests/run-all.mjs --ci
+
+  browser:
+    name: Browser MCP compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Use Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # Chrome is preinstalled on GitHub's Ubuntu runner. Fail explicitly if the
+      # runner image changes; never disable the browser sandbox or CORS checks.
+      - name: Locate Chrome
+        run: |
+          browser_path="$(command -v google-chrome)"
+          test -x "$browser_path"
+          echo "DA_TEST_BROWSER=$browser_path" >> "$GITHUB_ENV"
+
+      - name: Test real browser MCP connections
+        run: npm run test:browser
 
   coverage:
     name: Coverage (device-free)

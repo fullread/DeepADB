@@ -21,7 +21,7 @@
 
 import { z } from "zod";
 import { createConnection, Socket } from "net";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 
 /** Default ADB TCP ports to probe. */
@@ -76,14 +76,16 @@ interface DiscoveredDevice {
 
 export function registerNetworkDiscoveryTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_network_scan",
-    "Scan the local network for Android devices with ADB enabled over WiFi/TCP. Probes common ADB ports (5555-5558) on hosts from the ARP table and optionally a custom IP range. Discovered devices can be connected with adb_connect.",
     {
-      ipRange: z.string().optional().describe("IP range to scan (e.g., '192.168.1.1-254'). If omitted, scans hosts from the ARP table only."),
-      ports: z.array(z.number().min(1).max(65535)).max(20).optional().describe("Custom ports to probe (default: [5555, 5554, 5556, 5557, 5558], max 20)"),
-      timeoutMs: z.number().min(500).max(10000).optional().default(2000).describe("Connection timeout per host in ms (500-10000, default 2000)"),
-      device: z.string().optional().describe("Device serial (used to determine the local subnet if no ipRange given)"),
+      description: "Scan the local network for Android devices with ADB enabled over WiFi/TCP. Probes common ADB ports (5555-5558) on hosts from the ARP table and optionally a custom IP range. Discovered devices can be connected with adb_connect.",
+      inputSchema: z.object({
+        ipRange: z.string().optional().describe("IP range to scan (e.g., '192.168.1.1-254'). If omitted, scans hosts from the ARP table only."),
+        ports: z.array(z.number().min(1).max(65535)).max(20).optional().describe("Custom ports to probe (default: [5555, 5554, 5556, 5557, 5558], max 20)"),
+        timeoutMs: z.number().min(500).max(10000).optional().default(2000).describe("Connection timeout per host in ms (500-10000, default 2000)"),
+        device: z.string().optional().describe("Device serial (used to determine the local subnet if no ipRange given)"),
+      }),
     },
     async ({ ipRange, ports, timeoutMs, device }) => {
       try {
@@ -180,11 +182,13 @@ export function registerNetworkDiscoveryTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_network_device_ip",
-    "Get the WiFi IP address of a connected device. Useful for switching from USB to wireless debugging without needing to find the IP manually on the device.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "Get the WiFi IP address of a connected device. Useful for switching from USB to wireless debugging without needing to find the IP manually on the device.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {
@@ -248,13 +252,15 @@ export function registerNetworkDiscoveryTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_network_auto_connect",
-    "Discover and automatically connect to ADB devices on the local network. Combines network scanning with adb connect in one step. Probes a single port (default 5555) on each candidate; if you need to cover the full ADB port range (5555-5558) use adb_network_scan first, then adb_connect with the discovered host:port.",
     {
-      ipRange: z.string().optional().describe("IP range to scan (e.g., '192.168.1.1-254')"),
-      port: z.number().min(1).max(65535).optional().default(5555).describe("ADB port to probe and connect (1-65535, default 5555)"),
-      device: z.string().optional().describe("Device serial (used to determine local subnet for ARP-based discovery)"),
+      description: "Discover and automatically connect to ADB devices on the local network. Combines network scanning with adb connect in one step. Probes a single port (default 5555) on each candidate; if you need to cover the full ADB port range (5555-5558) use adb_network_scan first, then adb_connect with the discovered host:port.",
+      inputSchema: z.object({
+        ipRange: z.string().optional().describe("IP range to scan (e.g., '192.168.1.1-254')"),
+        port: z.number().min(1).max(65535).optional().default(5555).describe("ADB port to probe and connect (1-65535, default 5555)"),
+        device: z.string().optional().describe("Device serial (used to determine local subnet for ARP-based discovery)"),
+      }),
     },
     async ({ ipRange, port, device }) => {
       try {

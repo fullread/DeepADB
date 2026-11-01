@@ -3,7 +3,7 @@
 /** Unified, read-only DeepADB runtime readiness audit. */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { MODEM_PATHS, detectChipsetFamily } from "../middleware/chipset.js";
 import { isOnDevice } from "../config/config.js";
@@ -25,11 +25,13 @@ function parseCapabilities(output: string, names: string[]): Capability[] {
 }
 
 export function registerRuntimeAuditTools(ctx: ToolContext): void {
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_runtime_audit",
-    "Run a unified, read-only DeepADB readiness audit covering transport, authorization, Android state, root, SELinux, storage, common binaries, UI/network support, SQLite, chipset/modem nodes, and Wear prerequisites. Makes no device changes.",
     {
-      device: z.string().optional().describe("Device serial to audit"),
+      description: "Run a unified, read-only DeepADB readiness audit covering transport, authorization, Android state, root, SELinux, storage, common binaries, UI/network support, SQLite, chipset/modem nodes, and Wear prerequisites. Makes no device changes.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial to audit"),
+      }),
     },
     async ({ device }) => {
       try {

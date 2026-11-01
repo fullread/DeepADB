@@ -18,7 +18,7 @@ import { z } from "zod";
 import { join } from "path";
 import { readFileSync, existsSync, readdirSync} from "fs";
 import { ensurePrivateDir, sanitizeFilenameComponent, writeAtomicSync, isWithinDir, tryReadJsonOrWarn} from "../middleware/fs-utils.js";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 
 interface SystemFingerprint {
@@ -107,12 +107,14 @@ function compareFingerprints(saved: SystemFingerprint, current: SystemFingerprin
 
 export function registerOtaMonitorTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_ota_fingerprint",
-    "Capture and save the current system fingerprint: build ID, Android version, security patch, bootloader, baseband firmware, kernel version, and A/B partition slot. Saves to a timestamped JSON file for later comparison.",
     {
-      label: z.string().optional().default("current").describe("Label for this fingerprint (e.g., 'pre-update', 'post-ota')"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Capture and save the current system fingerprint: build ID, Android version, security patch, bootloader, baseband firmware, kernel version, and A/B partition slot. Saves to a timestamped JSON file for later comparison.",
+      inputSchema: z.object({
+        label: z.string().optional().default("current").describe("Label for this fingerprint (e.g., 'pre-update', 'post-ota')"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ label, device }) => {
       try {
@@ -153,12 +155,14 @@ export function registerOtaMonitorTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_ota_check",
-    "Compare the current system state against a saved fingerprint. Detects OTA updates by identifying changes in build ID, security patch, baseband firmware, bootloader, or kernel version.",
     {
-      fingerprintPath: z.string().optional().describe("Path to saved fingerprint JSON. If omitted, compares against the most recent fingerprint for this device."),
-      device: z.string().optional().describe("Device serial"),
+      description: "Compare the current system state against a saved fingerprint. Detects OTA updates by identifying changes in build ID, security patch, baseband firmware, bootloader, or kernel version.",
+      inputSchema: z.object({
+        fingerprintPath: z.string().optional().describe("Path to saved fingerprint JSON. If omitted, compares against the most recent fingerprint for this device."),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ fingerprintPath, device }) => {
       try {
@@ -225,11 +229,13 @@ export function registerOtaMonitorTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_ota_history",
-    "List all saved system fingerprints for a device, showing version progression over time. Highlights changes between consecutive snapshots.",
     {
-      device: z.string().optional().describe("Device serial (filters to this device). Omit for all devices."),
+      description: "List all saved system fingerprints for a device, showing version progression over time. Highlights changes between consecutive snapshots.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial (filters to this device). Omit for all devices."),
+      }),
     },
     async ({ device }) => {
       try {

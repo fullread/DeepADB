@@ -18,7 +18,7 @@ import { z } from "zod";
 import { join } from "path";
 import { readFileSync, existsSync, readdirSync} from "fs";
 import { ensurePrivateDir, sanitizeFilenameComponent, writeAtomicSync} from "../middleware/fs-utils.js";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { MODEM_PATHS, detectChipsetFamily, detectSimConfig } from "../middleware/chipset.js";
 
@@ -132,12 +132,14 @@ function getProfileDir(tempDir: string): string {
 
 export function registerDeviceProfileTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_profile_detect",
-    "Auto-detect and build a device profile from the connected device. Captures hardware identification, chipset family, modem info, root status, and matches against the built-in profile library for known quirks.",
     {
-      save: z.boolean().optional().default(false).describe("Automatically save the detected profile"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Auto-detect and build a device profile from the connected device. Captures hardware identification, chipset family, modem info, root status, and matches against the built-in profile library for known quirks.",
+      inputSchema: z.object({
+        save: z.boolean().optional().default(false).describe("Automatically save the detected profile"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ save, device }) => {
       try {
@@ -303,12 +305,14 @@ export function registerDeviceProfileTools(ctx: ToolContext): void {
     quirks: z.array(z.string()).optional(),
   });
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_profile_save",
-    "Save a device profile to the profiles library. Use after adb_profile_detect to persist the profile, or create a manual profile with custom quirks and notes.",
     {
-      name: z.string().describe("Profile name (used as filename)"),
-      profile: z.string().describe("Profile JSON string (from adb_profile_detect output or manually composed)"),
+      description: "Save a device profile to the profiles library. Use after adb_profile_detect to persist the profile, or create a manual profile with custom quirks and notes.",
+      inputSchema: z.object({
+        name: z.string().describe("Profile name (used as filename)"),
+        profile: z.string().describe("Profile JSON string (from adb_profile_detect output or manually composed)"),
+      }),
     },
     async ({ name, profile }) => {
       try {
@@ -361,10 +365,12 @@ export function registerDeviceProfileTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_profile_list",
-    "List all device profiles: built-in library entries and user-saved profiles.",
-    {},
+    {
+      description: "List all device profiles: built-in library entries and user-saved profiles.",
+      inputSchema: z.object({}),
+    },
     async () => {
       try {
         const sections: string[] = [];

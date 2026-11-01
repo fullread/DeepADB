@@ -17,11 +17,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // sanitize-fuzz). Pass --ci to restrict the run to this set.
 const CI_SAFE = new Set([
   "test-boundaries.mjs",
+  "test-browser-access.mjs",
+  "test-local-llm.mjs",
   "test-next-version.mjs",
   "test-result-handles.mjs",
   "test-sanitize-fuzz.mjs",
+  "test-sdk-compat.mjs",
   "test-supply-chain.mjs",
   "test-transports.mjs",
+  "test-audit-hardening.mjs",
 ]);
 
 const ciMode = process.argv.includes("--ci");
@@ -41,6 +45,17 @@ let totalFailed = 0;
 let totalSkipped = 0;
 const results = [];
 
+// Require one complete summary. Do not accept a progress message, a truncated
+// count, or conflicting summaries as evidence that the suite finished.
+function parseSummary(output) {
+  const matches = [...output.matchAll(/^.*?:\s*(\d+) passed, (\d+) failed, (\d+) skipped(?: \((\d+) total\))?\s*$/gm)];
+  if (matches.length !== 1) return null;
+  const [, p, f, s, total] = matches[0];
+  const values = [p, f, s].map(Number);
+  if (!values.every(Number.isSafeInteger) || (total !== undefined && Number(total) !== values.reduce((a, b) => a + b))) return null;
+  return values;
+}
+
 for (const suite of suites) {
   const suitePath = join(__dirname, suite);
   console.log(`\n${"▓".repeat(60)}`);
@@ -48,7 +63,7 @@ for (const suite of suites) {
   console.log("▓".repeat(60));
 
   try {
-    const output = execFileSync("node", [suitePath], {
+    const output = execFileSync(process.execPath, [suitePath], {
       encoding: "utf-8",
       timeout: 300000, // 5 minutes per suite
       windowsHide: true,
@@ -56,11 +71,9 @@ for (const suite of suites) {
     console.log(output);
 
     // Parse results from output
-    const match = output.match(/(\d+) passed, (\d+) failed, (\d+) skipped/);
+    const match = parseSummary(output);
     if (match) {
-      const p = parseInt(match[1], 10);
-      const f = parseInt(match[2], 10);
-      const s = parseInt(match[3], 10);
+      const [p, f, s] = match;
       totalPassed += p;
       totalFailed += f;
       totalSkipped += s;
@@ -74,11 +87,9 @@ for (const suite of suites) {
     console.log(output);
     if (err.stderr) console.error(err.stderr.toString());
 
-    const match = output.match(/(\d+) passed, (\d+) failed, (\d+) skipped/);
+    const match = parseSummary(output);
     if (match) {
-      const p = parseInt(match[1], 10);
-      const f = parseInt(match[2], 10);
-      const s = parseInt(match[3], 10);
+      const [p, f, s] = match;
       totalPassed += p;
       totalFailed += f;
       totalSkipped += s;
@@ -104,4 +115,8 @@ const totalLine = `  TOTAL: ${totalPassed} passed, ${totalFailed} failed, ${tota
 console.log(`${"║"}${totalLine}${" ".repeat(Math.max(0, 58 - totalLine.length))}${"║"}`);
 console.log(`${"╚"}${"═".repeat(58)}${"╝"}`);
 
-process.exit(totalFailed > 0 ? 1 : 0);
+const unsuccessful = results.filter(r => r.status !== "PASS");
+if (unsuccessful.length || !suites.length) {
+  console.error(`Incomplete/failed suites: ${unsuccessful.map(r => `${r.suite} (${r.status})`).join(", ") || "no suites selected"}`);
+}
+process.exit(totalFailed > 0 || unsuccessful.length > 0 || !suites.length ? 1 : 0);

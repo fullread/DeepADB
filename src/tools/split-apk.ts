@@ -12,23 +12,25 @@
  */
 
 import { z } from "zod";
-import { join } from "path";
+import { join, resolve } from "path";
 import { existsSync, statSync } from "fs";
 import { ensurePrivateDir, sanitizeFilenameComponentDotted, isWithinDir } from "../middleware/fs-utils.js";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 
 export function registerSplitApkTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_install_bundle",
-    "Install multiple APK splits (app bundle) on the device using `install-multiple`. Provide all split APK files — base APK plus config splits (language, density, ABI).",
     {
-      apkPaths: z.array(z.string()).min(1).describe("Array of local paths to split APK files (base + config splits)"),
-      device: z.string().optional().describe("Device serial"),
-      replace: z.boolean().optional().default(true).describe("Replace existing app (-r)"),
-      allowDowngrade: z.boolean().optional().default(false).describe("Allow version downgrade (-d)"),
+      description: "Install multiple APK splits (app bundle) on the device using `install-multiple`. Provide all split APK files — base APK plus config splits (language, density, ABI).",
+      inputSchema: z.object({
+        apkPaths: z.array(z.string()).min(1).describe("Array of local paths to split APK files (base + config splits)"),
+        device: z.string().optional().describe("Device serial"),
+        replace: z.boolean().optional().default(true).describe("Replace existing app (-r)"),
+        allowDowngrade: z.boolean().optional().default(false).describe("Allow version downgrade (-d)"),
+      }),
     },
     async ({ apkPaths, device, replace, allowDowngrade }) => {
       try {
@@ -46,7 +48,9 @@ export function registerSplitApkTools(ctx: ToolContext): void {
         const args = ["install-multiple"];
         if (replace) args.push("-r");
         if (allowDowngrade) args.push("-d");
-        args.push(...apkPaths);
+        // Resolve operands before constructing argv, so even a file named '-r'
+        // cannot be confused with an option by either ADB or LocalBridge.
+        args.push(...apkPaths.map(apk => resolve(apk)));
 
         const result = await ctx.bridge.exec(args, {
           device: serial,
@@ -69,12 +73,14 @@ export function registerSplitApkTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_list_splits",
-    "List all APK split paths installed for a package. Shows the base APK and any configuration splits (language, screen density, ABI).",
     {
-      packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
-      device: z.string().optional().describe("Device serial"),
+      description: "List all APK split paths installed for a package. Shows the base APK and any configuration splits (language, screen density, ABI).",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ packageName, device }) => {
       try {
@@ -144,13 +150,15 @@ export function registerSplitApkTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_extract_apks",
-    "Pull all APK splits for a package from the device to a local directory. Useful for analysis, backup, or transfer to another device.",
     {
-      packageName: z.string().describe("Package name to extract"),
-      outputDir: z.string().optional().describe("Local output directory (default: temp dir)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Pull all APK splits for a package from the device to a local directory. Useful for analysis, backup, or transfer to another device.",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name to extract"),
+        outputDir: z.string().optional().describe("Local output directory (default: temp dir)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ packageName, outputDir, device }) => {
       try {
@@ -234,11 +242,13 @@ export function registerSplitApkTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_apex_list",
-    "List installed APEX modules on the device. APEX (Android Pony EXpress) modules deliver updatable system components. Shows module name, version, and active/staged status.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "List installed APEX modules on the device. APEX (Android Pony EXpress) modules deliver updatable system components. Shows module name, version, and active/staged status.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {

@@ -8,8 +8,8 @@
  * current state" operations.
  */
 
-import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ToolContext } from "../tool-context.js";
+import { ResourceTemplate } from "@modelcontextprotocol/server";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 
 /**
@@ -50,7 +50,7 @@ function withCache(key: string, compute: () => Promise<string>): Promise<string>
 export function registerResources(ctx: ToolContext): void {
 
   // Dynamic resource: device info by serial
-  ctx.server.resource(
+  ctx.server.registerResource(
     "device-info",
     new ResourceTemplate("device://info/{serial}", { list: undefined }),
     { description: "Device properties (model, OS version, build, ABI)" },
@@ -78,7 +78,7 @@ export function registerResources(ctx: ToolContext): void {
   );
 
   // Dynamic resource: battery status by serial
-  ctx.server.resource(
+  ctx.server.registerResource(
     "device-battery",
     new ResourceTemplate("device://battery/{serial}", { list: undefined }),
     { description: "Battery status, level, temperature, and charging info" },
@@ -97,7 +97,7 @@ export function registerResources(ctx: ToolContext): void {
   );
 
   // Dynamic resource: telephony state by serial
-  ctx.server.resource(
+  ctx.server.registerResource(
     "device-telephony",
     new ResourceTemplate("device://telephony/{serial}", { list: undefined }),
     { description: "Telephony state: cell info, signal strength, network registration" },
@@ -118,7 +118,7 @@ export function registerResources(ctx: ToolContext): void {
   );
 
   // Static resource: list connected devices
-  ctx.server.resource(
+  ctx.server.registerResource(
     "devices-list",
     "device://list",
     { description: "List of all connected Android devices" },

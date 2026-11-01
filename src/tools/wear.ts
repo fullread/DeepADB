@@ -3,7 +3,7 @@
 /** Read-only Wear OS Data Layer preflight across a phone/watch pair. */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { DeviceInfo } from "../bridge/device-manager.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { shellQuote } from "../middleware/sanitize.js";
@@ -69,16 +69,18 @@ function countAssociations(output: string): number {
 }
 
 export function registerWearTools(ctx: ToolContext): void {
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_wear_datalayer_preflight",
-    "Run a read-only Wear OS Data Layer preflight across a connected phone and watch. Checks device roles, Google Play services, Bluetooth, optional app packages, companion association presence, and Data Layer service signals without exposing pairing identifiers.",
     {
-      phonePackage: z.string().regex(PACKAGE_NAME_PATTERN).optional()
-        .describe("Optional companion app package expected on the phone"),
-      wearPackage: z.string().regex(PACKAGE_NAME_PATTERN).optional()
-        .describe("Optional Wear app package expected on the watch"),
-      phoneDevice: z.string().optional().describe("Phone device serial; auto-detected when omitted"),
-      wearDevice: z.string().optional().describe("Wear device serial; auto-detected when omitted"),
+      description: "Run a read-only Wear OS Data Layer preflight across a connected phone and watch. Checks device roles, Google Play services, Bluetooth, optional app packages, companion association presence, and Data Layer service signals without exposing pairing identifiers.",
+      inputSchema: z.object({
+        phonePackage: z.string().regex(PACKAGE_NAME_PATTERN).optional()
+          .describe("Optional companion app package expected on the phone"),
+        wearPackage: z.string().regex(PACKAGE_NAME_PATTERN).optional()
+          .describe("Optional Wear app package expected on the watch"),
+        phoneDevice: z.string().optional().describe("Phone device serial; auto-detected when omitted"),
+        wearDevice: z.string().optional().describe("Wear device serial; auto-detected when omitted"),
+      }),
     },
     async ({ phonePackage, wearPackage, phoneDevice, wearDevice }) => {
       try {

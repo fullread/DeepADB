@@ -15,7 +15,7 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 
 /**
@@ -271,19 +271,21 @@ function parseGnssDumpsys(raw: string): Record<string, string | string[]> {
 
 export function registerWirelessFirmwareTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_wifi_firmware",
-    "WiFi chipset and firmware identification. Reports WiFi driver version, firmware version, chipset/hardware info, supported bands and standards, interface details, and dumpsys excerpts. BH7 fix: dumpsys truncation now configurable via maxLines. connection state. MAC address is opt-in only (permanent hardware identifier).",
     {
-      device: z.string().optional().describe("Device serial"),
-      includeMac: z.boolean().optional().default(false)
-        .describe("Include WiFi MAC address (permanent hardware identifier — opt-in only)"),
-      // BH7 fix: dumpsys truncation now operator-configurable. Default 200
-      // matches pre-fix behavior. Some Android variants (One UI, MIUI)
-      // produce more verbose dumpsys output where firmware lines appear
-      // past line 200 — operators on those devices can raise this.
-      maxLines: z.number().int().min(50).max(2000).optional().default(200)
-        .describe("Lines of dumpsys output to inspect (50-2000, default 200). Raise for verbose vendor builds where firmware info appears late in dumpsys output."),
+      description: "WiFi chipset and firmware identification. Reports WiFi driver version, firmware version, chipset/hardware info, supported bands and standards, interface details, and dumpsys excerpts. BH7 fix: dumpsys truncation now configurable via maxLines. connection state. MAC address is opt-in only (permanent hardware identifier).",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+        includeMac: z.boolean().optional().default(false)
+          .describe("Include WiFi MAC address (permanent hardware identifier — opt-in only)"),
+        // BH7 fix: dumpsys truncation now operator-configurable. Default 200
+        // matches pre-fix behavior. Some Android variants (One UI, MIUI)
+        // produce more verbose dumpsys output where firmware lines appear
+        // past line 200 — operators on those devices can raise this.
+        maxLines: z.number().int().min(50).max(2000).optional().default(200)
+          .describe("Lines of dumpsys output to inspect (50-2000, default 200). Raise for verbose vendor builds where firmware info appears late in dumpsys output."),
+      }),
     },
     async ({ device, includeMac, maxLines }) => {
       try {
@@ -357,16 +359,18 @@ export function registerWirelessFirmwareTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_bluetooth_firmware",
-    "Bluetooth firmware and chipset identification. Reports firmware version, BT version (4.x/5.x), chipset model, adapter state, supported profiles, LE capabilities, and bonded device count. MAC address and device name are opt-in only (permanent identifiers).",
     {
-      device: z.string().optional().describe("Device serial"),
-      includeIdentifiers: z.boolean().optional().default(false)
-        .describe("Include Bluetooth MAC address and device name (permanent identifiers — opt-in only)"),
-      // BH7 fix (same rationale as WiFi tool above)
-      maxLines: z.number().int().min(50).max(2000).optional().default(300)
-        .describe("Lines of dumpsys output to inspect (50-2000, default 300). Raise for verbose vendor builds."),
+      description: "Bluetooth firmware and chipset identification. Reports firmware version, BT version (4.x/5.x), chipset model, adapter state, supported profiles, LE capabilities, and bonded device count. MAC address and device name are opt-in only (permanent identifiers).",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+        includeIdentifiers: z.boolean().optional().default(false)
+          .describe("Include Bluetooth MAC address and device name (permanent identifiers — opt-in only)"),
+        // BH7 fix (same rationale as WiFi tool above)
+        maxLines: z.number().int().min(50).max(2000).optional().default(300)
+          .describe("Lines of dumpsys output to inspect (50-2000, default 300). Raise for verbose vendor builds."),
+      }),
     },
     async ({ device, includeIdentifiers, maxLines }) => {
       try {
@@ -421,14 +425,16 @@ export function registerWirelessFirmwareTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_nfc_firmware",
-    "NFC controller firmware identification. Reports controller type (NXP/Broadcom/Samsung/ST), firmware version, NCI version, supported technologies (NFC-A/B/F/V), secure element availability (eSE/UICC), and HCE (Host Card Emulation) support.",
     {
-      device: z.string().optional().describe("Device serial"),
-      // BH7 fix (same rationale)
-      maxLines: z.number().int().min(50).max(2000).optional().default(200)
-        .describe("Lines of dumpsys output to inspect (50-2000, default 200). Raise for verbose vendor builds."),
+      description: "NFC controller firmware identification. Reports controller type (NXP/Broadcom/Samsung/ST), firmware version, NCI version, supported technologies (NFC-A/B/F/V), secure element availability (eSE/UICC), and HCE (Host Card Emulation) support.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+        // BH7 fix (same rationale)
+        maxLines: z.number().int().min(50).max(2000).optional().default(200)
+          .describe("Lines of dumpsys output to inspect (50-2000, default 200). Raise for verbose vendor builds."),
+      }),
     },
     async ({ device, maxLines }) => {
       try {
@@ -487,11 +493,13 @@ export function registerWirelessFirmwareTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_gps_firmware",
-    "GNSS/GPS chipset and firmware identification. Reports GNSS hardware model (manufacturer, chip, firmware version), supported constellations (GPS, GLONASS, Galileo, BeiDou, QZSS, NavIC, SBAS), signal types with frequencies, dual-frequency (L1+L5) support, raw measurement capabilities (pseudorange access for spoofing detection), A-GPS modes (MSB/MSA — cellular-routed assisted GPS relevant to IMSI catcher research), carrier phase measurements, navigation message decoding, and SUPL server configuration.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "GNSS/GPS chipset and firmware identification. Reports GNSS hardware model (manufacturer, chip, firmware version), supported constellations (GPS, GLONASS, Galileo, BeiDou, QZSS, NavIC, SBAS), signal types with frequencies, dual-frequency (L1+L5) support, raw measurement capabilities (pseudorange access for spoofing detection), A-GPS modes (MSB/MSA — cellular-routed assisted GPS relevant to IMSI catcher research), carrier phase measurements, navigation message decoding, and SUPL server configuration.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {

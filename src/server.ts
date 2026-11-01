@@ -7,7 +7,7 @@
  * and all tool/resource/prompt modules into a single MCP server instance.
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { existsSync } from "fs";
 import { ensurePrivateDir } from "./middleware/fs-utils.js";
 import { AdbBridge } from "./bridge/adb-bridge.js";
@@ -16,7 +16,8 @@ import { DeviceManager } from "./bridge/device-manager.js";
 import { Logger } from "./middleware/logger.js";
 import { SecurityMiddleware } from "./middleware/security.js";
 import { config, validateConfig, isOnDevice, VERSION } from "./config/config.js";
-import { ToolContext } from "./tool-context.js";
+import { BuiltinToolContext as ToolContext } from "./tool-context.js";
+import { readToolProfile, withToolProfile } from "./tool-profile.js";
 
 // Tool module registrations
 import { registerDeviceTools } from "./tools/device.js";
@@ -82,6 +83,8 @@ export interface CreateServerResult {
 }
 
 export async function createServer(): Promise<CreateServerResult> {
+  // Validate before loading plugins or initializing device-facing modules.
+  const profile = readToolProfile();
   // BM1 fix (M2+Q1): validate DA_LOG_LEVEL against the enum at runtime instead
   // of using an unchecked `as` cast. The bare cast silently accepts any string
   // (e.g., DA_LOG_LEVEL=verbose) and was passed to Logger which then disabled
@@ -127,7 +130,15 @@ export async function createServer(): Promise<CreateServerResult> {
   });
 
   // Build unified tool context
-  const ctx: ToolContext = { server, bridge, deviceManager, logger, security, config };
+  const ctx: ToolContext = { server: withToolProfile(server, profile), bridge, deviceManager, logger, security, config };
+
+  if (profile === "inspect") {
+    // Only this reviewed module is initialized. Plugins, workflows, resources,
+    // prompts and result-handle stores are deliberately not loaded.
+    registerDeviceTools(ctx);
+    logger.info("DeepADB MCP server initialized — inspect profile: 3 tools, no resources, prompts or plugins. Ready.");
+    return { server, logger, bridge, deviceManager };
+  }
 
   // Register all tool modules (49 modules)
   registerDeviceTools(ctx);

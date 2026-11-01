@@ -8,18 +8,20 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 export function registerCiTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_ci_wait_boot",
-    "Wait for a device or emulator to fully boot. Polls sys.boot_completed and waits for the launcher to be ready. Essential for CI pipelines.",
     {
-      timeoutSeconds: z.number().min(10).max(300).optional().default(120)
-        .describe("Maximum time to wait for boot in seconds (default 120)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Wait for a device or emulator to fully boot. Polls sys.boot_completed and waits for the launcher to be ready. Essential for CI pipelines.",
+      inputSchema: z.object({
+        timeoutSeconds: z.number().min(10).max(300).optional().default(120)
+          .describe("Maximum time to wait for boot in seconds (default 120)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ timeoutSeconds, device }) => {
       try {
@@ -67,11 +69,13 @@ export function registerCiTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_ci_device_ready",
-    "Comprehensive CI readiness check. Verifies: device online, booted, package manager ready, screen unlocked, network available. Returns structured pass/fail results.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "Comprehensive CI readiness check. Verifies: device online, booted, package manager ready, screen unlocked, network available. Returns structured pass/fail results.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {
@@ -127,17 +131,19 @@ export function registerCiTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_ci_run_tests",
-    "Run Android instrumented tests (androidTest) via `am instrument` and capture results. Returns structured pass/fail output.",
     {
-      testPackage: z.string().describe("Test package (e.g., 'com.example.app.test')"),
-      runner: z.string().optional().default("androidx.test.runner.AndroidJUnitRunner")
-        .describe("Test runner class (default: AndroidX JUnit runner)"),
-      testClass: z.string().optional().describe("Specific test class to run (optional)"),
-      testMethod: z.string().optional().describe("Specific test method (requires testClass)"),
-      device: z.string().optional().describe("Device serial"),
-      timeout: z.number().min(10000).max(600000).optional().default(300000).describe("Timeout in ms (10s-10min, default 5 min)"),
+      description: "Run Android instrumented tests (androidTest) via `am instrument` and capture results. Returns structured pass/fail output.",
+      inputSchema: z.object({
+        testPackage: z.string().describe("Test package (e.g., 'com.example.app.test')"),
+        runner: z.string().optional().default("androidx.test.runner.AndroidJUnitRunner")
+          .describe("Test runner class (default: AndroidX JUnit runner)"),
+        testClass: z.string().optional().describe("Specific test class to run (optional)"),
+        testMethod: z.string().optional().describe("Specific test method (requires testClass)"),
+        device: z.string().optional().describe("Device serial"),
+        timeout: z.number().min(10000).max(600000).optional().default(300000).describe("Timeout in ms (10s-10min, default 5 min)"),
+      }),
     },
     async ({ testPackage, runner, testClass, testMethod, device, timeout }) => {
       try {

@@ -22,7 +22,7 @@ import { existsSync, readdirSync, statSync, unlinkSync } from "fs";
 import { ensurePrivateDir, sanitizeFilenameComponent, isWithinDir } from "../middleware/fs-utils.js";
 import { shellQuote } from "../middleware/sanitize.js";
 import { execFile, spawn, spawnSync, ChildProcess } from "child_process";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { isOnDevice } from "../config/config.js";
 import { registerCleanup, unregisterCleanup } from "../middleware/cleanup.js";
@@ -316,12 +316,14 @@ function updateCleanup(): void {
 
 export function registerQemuTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_qemu_setup",
-    "Check and install QEMU for on-device virtualization. Verifies KVM availability, checks if QEMU is installed, reports version info, and can install QEMU via Termux package manager. Only available in on-device mode.",
     {
-      install: z.boolean().optional().default(false)
-        .describe("If true, install QEMU via pkg if not already present"),
+      description: "Check and install QEMU for on-device virtualization. Verifies KVM availability, checks if QEMU is installed, reports version info, and can install QEMU via Termux package manager. Only available in on-device mode.",
+      inputSchema: z.object({
+        install: z.boolean().optional().default(false)
+          .describe("If true, install QEMU via pkg if not already present"),
+      }),
     },
     async ({ install }) => {
       try {
@@ -421,16 +423,18 @@ export function registerQemuTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_qemu_images",
-    "Manage QEMU disk images for virtual machines. List available images, create new qcow2/raw disk images, or delete existing ones. Images are stored in the DeepADB image directory.",
     {
-      action: z.enum(["list", "create", "delete"]).describe("Action to perform"),
-      name: z.string().optional().describe("Image name (for create/delete). Alphanumeric, hyphens, underscores only."),
-      sizeMb: z.number().min(64).max(65536).optional().default(8192)
-        .describe("Image size in MB (for create). Default 8192 (8GB). Range: 64-65536."),
-      format: z.enum(["qcow2", "raw"]).optional().default("qcow2")
-        .describe("Image format. qcow2 is recommended (sparse, snapshots). raw for maximum I/O performance."),
+      description: "Manage QEMU disk images for virtual machines. List available images, create new qcow2/raw disk images, or delete existing ones. Images are stored in the DeepADB image directory.",
+      inputSchema: z.object({
+        action: z.enum(["list", "create", "delete"]).describe("Action to perform"),
+        name: z.string().optional().describe("Image name (for create/delete). Alphanumeric, hyphens, underscores only."),
+        sizeMb: z.number().min(64).max(65536).optional().default(8192)
+          .describe("Image size in MB (for create). Default 8192 (8GB). Range: 64-65536."),
+        format: z.enum(["qcow2", "raw"]).optional().default("qcow2")
+          .describe("Image format. qcow2 is recommended (sparse, snapshots). raw for maximum I/O performance."),
+      }),
     },
     async ({ action, name, sizeMb, format }) => {
       try {
@@ -545,26 +549,28 @@ export function registerQemuTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_qemu_start",
-    "Boot a QEMU virtual machine with KVM hardware acceleration. Auto-detects optimal resource allocation: uses total cores minus 1 for the VM (reserving one for the host OS), and up to 65% of physical RAM. Custom values are accepted but capped at safe limits to prevent host starvation.",
     {
-      name: z.string().describe("VM name (used to track and stop the VM)"),
-      image: z.string().describe("Disk image filename (from adb_qemu_images) or absolute path"),
-      memoryMb: z.number().min(128).max(65536).optional()
-        .describe("RAM in MB. Auto-detected if omitted (65% of physical RAM). Capped at safe limit."),
-      cpus: z.number().min(1).max(64).optional()
-        .describe("Virtual CPUs. Auto-detected if omitted (total cores minus 1). Capped at safe limit."),
-      adbPort: z.number().min(1024).max(65535).optional().default(5556)
-        .describe("Host port to forward to guest ADB (port 5555). Default 5556."),
-      kernel: z.string().optional()
-        .describe("Path to kernel image (for Android boot). If omitted, QEMU uses the disk image's bootloader."),
-      initrd: z.string().optional()
-        .describe("Path to initrd/ramdisk image (for Android boot)."),
-      append: z.string().optional()
-        .describe("Kernel command line arguments (for Android boot)."),
-      display: z.enum(["none", "vnc"]).optional().default("none")
-        .describe("Display output. 'none' for headless (default). 'vnc' starts a VNC server on port 5900."),
+      description: "Boot a QEMU virtual machine with KVM hardware acceleration. Auto-detects optimal resource allocation: uses total cores minus 1 for the VM (reserving one for the host OS), and up to 65% of physical RAM. Custom values are accepted but capped at safe limits to prevent host starvation.",
+      inputSchema: z.object({
+        name: z.string().describe("VM name (used to track and stop the VM)"),
+        image: z.string().describe("Disk image filename (from adb_qemu_images) or absolute path"),
+        memoryMb: z.number().min(128).max(65536).optional()
+          .describe("RAM in MB. Auto-detected if omitted (65% of physical RAM). Capped at safe limit."),
+        cpus: z.number().min(1).max(64).optional()
+          .describe("Virtual CPUs. Auto-detected if omitted (total cores minus 1). Capped at safe limit."),
+        adbPort: z.number().min(1024).max(65535).optional().default(5556)
+          .describe("Host port to forward to guest ADB (port 5555). Default 5556."),
+        kernel: z.string().optional()
+          .describe("Path to kernel image (for Android boot). If omitted, QEMU uses the disk image's bootloader."),
+        initrd: z.string().optional()
+          .describe("Path to initrd/ramdisk image (for Android boot)."),
+        append: z.string().optional()
+          .describe("Kernel command line arguments (for Android boot)."),
+        display: z.enum(["none", "vnc"]).optional().default("none")
+          .describe("Display output. 'none' for headless (default). 'vnc' starts a VNC server on port 5900."),
+      }),
     },
     async ({ name, image, memoryMb, cpus, adbPort, kernel, initrd, append, display }) => {
       try {
@@ -868,12 +874,14 @@ export function registerQemuTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_qemu_stop",
-    "Stop a running QEMU virtual machine. Sends SIGTERM for graceful shutdown, with force kill option.",
     {
-      name: z.string().optional().describe("VM name to stop. If omitted, lists running VMs."),
-      force: z.boolean().optional().default(false).describe("Use SIGKILL instead of SIGTERM for immediate termination."),
+      description: "Stop a running QEMU virtual machine. Sends SIGTERM for graceful shutdown, with force kill option.",
+      inputSchema: z.object({
+        name: z.string().optional().describe("VM name to stop. If omitted, lists running VMs."),
+        force: z.boolean().optional().default(false).describe("Use SIGKILL instead of SIGTERM for immediate termination."),
+      }),
     },
     async ({ name, force }) => {
       try {
@@ -942,10 +950,12 @@ export function registerQemuTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_qemu_status",
-    "Show status of QEMU virtual machines — running VMs with resource usage and port mappings, plus KVM and QEMU availability.",
-    {},
+    {
+      description: "Show status of QEMU virtual machines — running VMs with resource usage and port mappings, plus KVM and QEMU availability.",
+      inputSchema: z.object({}),
+    },
     async () => {
       try {
         if (!isOnDevice()) {
@@ -1020,13 +1030,15 @@ export function registerQemuTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_qemu_connect",
-    "Connect to a running QEMU VM's ADB service, making the guest appear as a device for DeepADB tools. Requires the guest OS to have an ADB daemon running (e.g., Android guest with USB debugging enabled). Requires the 'adb' binary (install with: pkg install android-tools). Connections are restricted to localhost only — no remote host connections allowed.",
     {
-      name: z.string().describe("VM name to connect to (must be running)"),
-      timeout: z.number().min(3000).max(30000).optional().default(10000)
-        .describe("Connection timeout in milliseconds (3s-30s). Default 10s."),
+      description: "Connect to a running QEMU VM's ADB service, making the guest appear as a device for DeepADB tools. Requires the guest OS to have an ADB daemon running (e.g., Android guest with USB debugging enabled). Requires the 'adb' binary (install with: pkg install android-tools). Connections are restricted to localhost only — no remote host connections allowed.",
+      inputSchema: z.object({
+        name: z.string().describe("VM name to connect to (must be running)"),
+        timeout: z.number().min(3000).max(30000).optional().default(10000)
+          .describe("Connection timeout in milliseconds (3s-30s). Default 10s."),
+      }),
     },
     async ({ name, timeout }) => {
       try {
@@ -1107,11 +1119,13 @@ export function registerQemuTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_qemu_disconnect",
-    "Disconnect from a QEMU VM's ADB service. Removes the guest from the device list.",
     {
-      name: z.string().describe("VM name to disconnect from"),
+      description: "Disconnect from a QEMU VM's ADB service. Removes the guest from the device list.",
+      inputSchema: z.object({
+        name: z.string().describe("VM name to disconnect from"),
+      }),
     },
     async ({ name }) => {
       try {
@@ -1153,14 +1167,16 @@ export function registerQemuTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_qemu_guest_shell",
-    "Execute a shell command on a QEMU guest VM via ADB. The VM must be connected first (use adb_qemu_connect). The guest serial is derived internally — no user-supplied host/IP reaches the ADB binary. Subject to the same security middleware checks as adb_shell.",
     {
-      name: z.string().describe("VM name (must be connected via adb_qemu_connect)"),
-      command: z.string().describe("Shell command to execute on the guest"),
-      timeout: z.number().min(1000).max(60000).optional().default(15000)
-        .describe("Command timeout in milliseconds (1s-60s). Default 15s."),
+      description: "Execute a shell command on a QEMU guest VM via ADB. The VM must be connected first (use adb_qemu_connect). The guest serial is derived internally — no user-supplied host/IP reaches the ADB binary. Subject to the same security middleware checks as adb_shell.",
+      inputSchema: z.object({
+        name: z.string().describe("VM name (must be connected via adb_qemu_connect)"),
+        command: z.string().describe("Shell command to execute on the guest"),
+        timeout: z.number().min(1000).max(60000).optional().default(15000)
+          .describe("Command timeout in milliseconds (1s-60s). Default 15s."),
+      }),
     },
     async ({ name, command, timeout }) => {
       try {

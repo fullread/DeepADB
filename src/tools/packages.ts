@@ -5,20 +5,22 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { validateShellArg, validateShellArgs, shellQuote } from "../middleware/sanitize.js";
 
 export function registerPackageTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_install",
-    "Install an APK on the device. Provide the full local path to the APK file.",
     {
-      apkPath: z.string().describe("Local filesystem path to the APK file"),
-      device: z.string().optional().describe("Device serial"),
-      replace: z.boolean().optional().default(true).describe("Replace existing app (-r flag)"),
-      downgrade: z.boolean().optional().default(false).describe("Allow version downgrade (-d flag)"),
+      description: "Install an APK on the device. Provide the full local path to the APK file.",
+      inputSchema: z.object({
+        apkPath: z.string().describe("Local filesystem path to the APK file"),
+        device: z.string().optional().describe("Device serial"),
+        replace: z.boolean().optional().default(true).describe("Replace existing app (-r flag)"),
+        downgrade: z.boolean().optional().default(false).describe("Allow version downgrade (-d flag)"),
+      }),
     },
     async ({ apkPath, device, replace, downgrade }) => {
       try {
@@ -35,13 +37,15 @@ export function registerPackageTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_uninstall",
-    "Uninstall a package from the device",
     {
-      packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
-      device: z.string().optional().describe("Device serial"),
-      keepData: z.boolean().optional().default(false).describe("Keep app data and cache (-k flag)"),
+      description: "Uninstall a package from the device",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
+        device: z.string().optional().describe("Device serial"),
+        keepData: z.boolean().optional().default(false).describe("Keep app data and cache (-k flag)"),
+      }),
     },
     async ({ packageName, device, keepData }) => {
       try {
@@ -59,14 +63,16 @@ export function registerPackageTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_list_packages",
-    "List installed packages. Supports filtering by name.",
     {
-      filter: z.string().optional().describe("Filter packages containing this string"),
-      device: z.string().optional().describe("Device serial"),
-      type: z.enum(["all", "system", "third-party"]).optional().default("all")
-        .describe("Show all, system-only, or third-party-only packages"),
+      description: "List installed packages. Supports filtering by name.",
+      inputSchema: z.object({
+        filter: z.string().optional().describe("Filter packages containing this string"),
+        device: z.string().optional().describe("Device serial"),
+        type: z.enum(["all", "system", "third-party"]).optional().default("all")
+          .describe("Show all, system-only, or third-party-only packages"),
+      }),
     },
     async ({ filter, device, type }) => {
       try {
@@ -94,12 +100,14 @@ export function registerPackageTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_package_info",
-    "Get detailed info about an installed package (version, permissions, paths)",
     {
-      packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Get detailed info about an installed package (version, permissions, paths)",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ packageName, device }) => {
       try {
@@ -114,13 +122,15 @@ export function registerPackageTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_clear_data",
-    "Clear all data for a package (equivalent to clearing storage in settings). DESTRUCTIVE — irreversibly wipes all app data, cache, databases, shared preferences, and login state. AP5 fix: requires `confirm: <packageName>` to proceed.",
     {
-      packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
-      confirm: z.string().optional().describe("Must equal packageName to confirm the destructive operation. AP5 fix: prevents accidental data loss from misclicks/mistyped invocations."),
-      device: z.string().optional().describe("Device serial"),
+      description: "Clear all data for a package (equivalent to clearing storage in settings). DESTRUCTIVE — irreversibly wipes all app data, cache, databases, shared preferences, and login state. AP5 fix: requires `confirm: <packageName>` to proceed.",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
+        confirm: z.string().optional().describe("Must equal packageName to confirm the destructive operation. AP5 fix: prevents accidental data loss from misclicks/mistyped invocations."),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ packageName, confirm, device }) => {
       try {
@@ -139,13 +149,15 @@ export function registerPackageTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_grant_permission",
-    "Grant a runtime permission to a package",
     {
-      packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
-      permission: z.string().describe("Full permission string (e.g., 'android.permission.READ_PHONE_STATE')"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Grant a runtime permission to a package",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
+        permission: z.string().describe("Full permission string (e.g., 'android.permission.READ_PHONE_STATE')"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ packageName, permission, device }) => {
       try {
@@ -164,13 +176,15 @@ export function registerPackageTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_revoke_permission",
-    "Revoke a runtime permission from a package. Useful for resetting permission state to test first-run flows or denial handling.",
     {
-      packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
-      permission: z.string().describe("Full permission string (e.g., 'android.permission.CAMERA')"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Revoke a runtime permission from a package. Useful for resetting permission state to test first-run flows or denial handling.",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
+        permission: z.string().describe("Full permission string (e.g., 'android.permission.CAMERA')"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ packageName, permission, device }) => {
       try {
@@ -189,14 +203,16 @@ export function registerPackageTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_list_permissions",
-    "List permissions declared and granted for a package. Parses the package dump to show install-time and runtime permissions with their current grant state. Useful for auditing permission state before and after grant/revoke operations.",
     {
-      packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
-      filter: z.enum(["all", "granted", "denied"]).optional().default("all")
-        .describe("Show all permissions, only granted, or only denied (default: all)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "List permissions declared and granted for a package. Parses the package dump to show install-time and runtime permissions with their current grant state. Useful for auditing permission state before and after grant/revoke operations.",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
+        filter: z.enum(["all", "granted", "denied"]).optional().default("all")
+          .describe("Show all permissions, only granted, or only denied (default: all)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ packageName, filter, device }) => {
       try {
@@ -255,12 +271,14 @@ export function registerPackageTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_force_stop",
-    "Force-stop an app immediately. The most common debugging action.",
     {
-      packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Force-stop an app immediately. The most common debugging action.",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ packageName, device }) => {
       try {
@@ -275,12 +293,14 @@ export function registerPackageTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_start_app",
-    "Launch an app by package name (resolves and starts the default launcher activity)",
     {
-      packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Launch an app by package name (resolves and starts the default launcher activity)",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ packageName, device }) => {
       try {
@@ -302,13 +322,15 @@ export function registerPackageTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_restart_app",
-    "Force-stop then re-launch an app. The most frequent debugging workflow in a single call.",
     {
-      packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
-      device: z.string().optional().describe("Device serial"),
-      delayMs: z.number().min(0).max(10000).optional().default(500).describe("Delay between stop and start in ms (0-10000, default 500)"),
+      description: "Force-stop then re-launch an app. The most frequent debugging workflow in a single call.",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name (e.g., 'com.example.app')"),
+        device: z.string().optional().describe("Device serial"),
+        delayMs: z.number().min(0).max(10000).optional().default(500).describe("Delay between stop and start in ms (0-10000, default 500)"),
+      }),
     },
     async ({ packageName, device, delayMs }) => {
       try {
@@ -335,12 +357,14 @@ export function registerPackageTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_resolve_intents",
-    "Discover all activities, services, and receivers registered by a package with their intent filters",
     {
-      packageName: z.string().describe("Package name to query"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Discover all activities, services, and receivers registered by a package with their intent filters",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name to query"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ packageName, device }) => {
       try {

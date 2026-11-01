@@ -10,7 +10,7 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { shellQuote } from "../middleware/sanitize.js";
 import { sanitizeFilenameComponentDotted } from "../middleware/fs-utils.js";
@@ -19,17 +19,19 @@ import { join } from "path";
 
 export function registerInputGestureTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_input_drag",
-    "Drag from one point to another on screen. Uses Android's draganddrop input command. Useful for drag-and-drop UI elements, sliders, map panning, and reorder operations.",
     {
-      x1: z.number().int().min(0).max(9999).describe("Start X coordinate"),
-      y1: z.number().int().min(0).max(9999).describe("Start Y coordinate"),
-      x2: z.number().int().min(0).max(9999).describe("End X coordinate"),
-      y2: z.number().int().min(0).max(9999).describe("End Y coordinate"),
-      durationMs: z.number().int().min(100).max(10000).optional().default(1000)
-        .describe("Drag duration in ms (100-10000, default 1000)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Drag from one point to another on screen. Uses Android's draganddrop input command. Useful for drag-and-drop UI elements, sliders, map panning, and reorder operations.",
+      inputSchema: z.object({
+        x1: z.number().int().min(0).max(9999).describe("Start X coordinate"),
+        y1: z.number().int().min(0).max(9999).describe("Start Y coordinate"),
+        x2: z.number().int().min(0).max(9999).describe("End X coordinate"),
+        y2: z.number().int().min(0).max(9999).describe("End Y coordinate"),
+        durationMs: z.number().int().min(100).max(10000).optional().default(1000)
+          .describe("Drag duration in ms (100-10000, default 1000)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ x1, y1, x2, y2, durationMs, device }) => {
       try {
@@ -55,17 +57,19 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_input_fling",
-    "Perform a high-velocity fling gesture. Like swipe but with a short duration to create scroll momentum on lists, launchers, and paged views. Useful for fast-scrolling through long lists, dismissing notifications, or triggering velocity-sensitive behaviors.",
     {
-      x1: z.number().int().min(0).max(9999).describe("Start X coordinate"),
-      y1: z.number().int().min(0).max(9999).describe("Start Y coordinate"),
-      x2: z.number().int().min(0).max(9999).describe("End X coordinate"),
-      y2: z.number().int().min(0).max(9999).describe("End Y coordinate"),
-      durationMs: z.number().int().min(20).max(200).optional().default(50)
-        .describe("Fling duration in ms (20-200, default 50). Shorter = more velocity"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Perform a high-velocity fling gesture. Like swipe but with a short duration to create scroll momentum on lists, launchers, and paged views. Useful for fast-scrolling through long lists, dismissing notifications, or triggering velocity-sensitive behaviors.",
+      inputSchema: z.object({
+        x1: z.number().int().min(0).max(9999).describe("Start X coordinate"),
+        y1: z.number().int().min(0).max(9999).describe("Start Y coordinate"),
+        x2: z.number().int().min(0).max(9999).describe("End X coordinate"),
+        y2: z.number().int().min(0).max(9999).describe("End Y coordinate"),
+        durationMs: z.number().int().min(20).max(200).optional().default(50)
+          .describe("Fling duration in ms (20-200, default 50). Shorter = more velocity"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ x1, y1, x2, y2, durationMs, device }) => {
       try {
@@ -81,15 +85,17 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_input_long_press",
-    "Long press at a point on screen. Triggers context menus, selection mode, drag handles, and other long-press behaviors. Implemented as a zero-distance swipe with configurable hold duration.",
     {
-      x: z.number().int().min(0).max(9999).describe("X coordinate"),
-      y: z.number().int().min(0).max(9999).describe("Y coordinate"),
-      durationMs: z.number().int().min(300).max(10000).optional().default(1500)
-        .describe("Hold duration in ms (300-10000, default 1500)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Long press at a point on screen. Triggers context menus, selection mode, drag handles, and other long-press behaviors. Implemented as a zero-distance swipe with configurable hold duration.",
+      inputSchema: z.object({
+        x: z.number().int().min(0).max(9999).describe("X coordinate"),
+        y: z.number().int().min(0).max(9999).describe("Y coordinate"),
+        durationMs: z.number().int().min(300).max(10000).optional().default(1500)
+          .describe("Hold duration in ms (300-10000, default 1500)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ x, y, durationMs, device }) => {
       try {
@@ -106,15 +112,17 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_input_double_tap",
-    "Double tap at a point on screen. Triggers zoom, text selection, or double-tap gestures. Two rapid taps with a configurable interval.",
     {
-      x: z.number().int().min(0).max(9999).describe("X coordinate"),
-      y: z.number().int().min(0).max(9999).describe("Y coordinate"),
-      intervalMs: z.number().int().min(20).max(500).optional().default(80)
-        .describe("Interval between taps in ms (20-500, default 80)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Double tap at a point on screen. Triggers zoom, text selection, or double-tap gestures. Two rapid taps with a configurable interval.",
+      inputSchema: z.object({
+        x: z.number().int().min(0).max(9999).describe("X coordinate"),
+        y: z.number().int().min(0).max(9999).describe("Y coordinate"),
+        intervalMs: z.number().int().min(20).max(500).optional().default(80)
+          .describe("Interval between taps in ms (20-500, default 80)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ x, y, intervalMs, device }) => {
       try {
@@ -130,12 +138,14 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_input_text",
-    "Type text on the device. Handles special characters by converting spaces to %s and escaping shell metacharacters. For multi-line or complex text, consider using the clipboard tool instead.",
     {
-      text: z.string().min(1).max(5000).describe("Text to type on the device"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Type text on the device. Handles special characters by converting spaces to %s and escaping shell metacharacters. For multi-line or complex text, consider using the clipboard tool instead.",
+      inputSchema: z.object({
+        text: z.string().min(1).max(5000).describe("Text to type on the device"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ text, device }) => {
       try {
@@ -152,12 +162,14 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_open_url",
-    "Open a URL on the device in the default browser or handling app. Uses Android's VIEW intent action.",
     {
-      url: z.url().describe("URL to open (must be a valid URL with scheme)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Open a URL on the device in the default browser or handling app. Uses Android's VIEW intent action.",
+      inputSchema: z.object({
+        url: z.url().describe("URL to open (must be a valid URL with scheme)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ url, device }) => {
       try {
@@ -177,14 +189,16 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_orientation",
-    "Get or set screen orientation. Can lock to portrait, landscape, reverse portrait, reverse landscape, or restore auto-rotate.",
     {
-      action: z.enum(["get", "set"]).describe("'get' to read current orientation, 'set' to change it"),
-      orientation: z.enum(["auto", "portrait", "landscape", "reverse_portrait", "reverse_landscape"]).optional()
-        .describe("Orientation to set (required when action='set'): auto=sensor, portrait=0°, landscape=90°, reverse_portrait=180°, reverse_landscape=270°"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Get or set screen orientation. Can lock to portrait, landscape, reverse portrait, reverse landscape, or restore auto-rotate.",
+      inputSchema: z.object({
+        action: z.enum(["get", "set"]).describe("'get' to read current orientation, 'set' to change it"),
+        orientation: z.enum(["auto", "portrait", "landscape", "reverse_portrait", "reverse_landscape"]).optional()
+          .describe("Orientation to set (required when action='set'): auto=sensor, portrait=0°, landscape=90°, reverse_portrait=180°, reverse_landscape=270°"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ action, orientation, device }) => {
       try {
@@ -226,13 +240,15 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_clipboard",
-    "Read or write the device clipboard. Write mode sets the clipboard content; read mode retrieves it. Clipboard access requires Android 10+ and may need the app to be in foreground on Android 12+.",
     {
-      action: z.enum(["read", "write"]).describe("'read' to get clipboard, 'write' to set it"),
-      text: z.string().max(10000).optional().describe("Text to write to clipboard (required when action='write')"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Read or write the device clipboard. Write mode sets the clipboard content; read mode retrieves it. Clipboard access requires Android 10+ and may need the app to be in foreground on Android 12+.",
+      inputSchema: z.object({
+        action: z.enum(["read", "write"]).describe("'read' to get clipboard, 'write' to set it"),
+        text: z.string().max(10000).optional().describe("Text to write to clipboard (required when action='write')"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ action, text, device }) => {
       try {
@@ -334,16 +350,18 @@ export function registerInputGestureTools(ctx: ToolContext): void {
 
   // ── Batch 2: UI Automation Helpers ────────────────────────────────────
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_tap_element",
-    "Find a UI element by text, resource-id, or content-description, then tap its center. Combines UI hierarchy search with input tap in one atomic operation. More reliable than coordinate-based taps for dynamic layouts.",
     {
-      text: z.string().optional().describe("Match elements containing this text (case-insensitive)"),
-      resourceId: z.string().optional().describe("Match elements with this resource-id (partial match)"),
-      contentDesc: z.string().optional().describe("Match elements with this content-description (partial, case-insensitive)"),
-      index: z.number().int().min(0).max(99).optional().default(0)
-        .describe("Which match to tap if multiple found (0 = first match, default)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Find a UI element by text, resource-id, or content-description, then tap its center. Combines UI hierarchy search with input tap in one atomic operation. More reliable than coordinate-based taps for dynamic layouts.",
+      inputSchema: z.object({
+        text: z.string().optional().describe("Match elements containing this text (case-insensitive)"),
+        resourceId: z.string().optional().describe("Match elements with this resource-id (partial match)"),
+        contentDesc: z.string().optional().describe("Match elements with this content-description (partial, case-insensitive)"),
+        index: z.number().int().min(0).max(99).optional().default(0)
+          .describe("Which match to tap if multiple found (0 = first match, default)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ text, resourceId, contentDesc, index, device }) => {
       if (!text && !resourceId && !contentDesc) {
@@ -389,20 +407,22 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_wait_element",
-    "Wait for a UI element to appear or disappear. Polls the UI hierarchy at regular intervals until the condition is met or timeout expires. Useful for waiting after navigation, animations, or async content loading.",
     {
-      text: z.string().optional().describe("Match elements containing this text (case-insensitive)"),
-      resourceId: z.string().optional().describe("Match elements with this resource-id (partial match)"),
-      contentDesc: z.string().optional().describe("Match elements with this content-description (partial, case-insensitive)"),
-      condition: z.enum(["appear", "disappear"]).optional().default("appear")
-        .describe("Wait for element to 'appear' (default) or 'disappear'"),
-      timeoutMs: z.number().int().min(1000).max(60000).optional().default(10000)
-        .describe("Maximum wait time in ms (1s-60s, default 10s)"),
-      pollMs: z.number().int().min(200).max(5000).optional().default(500)
-        .describe("Polling interval in ms (200-5000, default 500)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Wait for a UI element to appear or disappear. Polls the UI hierarchy at regular intervals until the condition is met or timeout expires. Useful for waiting after navigation, animations, or async content loading.",
+      inputSchema: z.object({
+        text: z.string().optional().describe("Match elements containing this text (case-insensitive)"),
+        resourceId: z.string().optional().describe("Match elements with this resource-id (partial match)"),
+        contentDesc: z.string().optional().describe("Match elements with this content-description (partial, case-insensitive)"),
+        condition: z.enum(["appear", "disappear"]).optional().default("appear")
+          .describe("Wait for element to 'appear' (default) or 'disappear'"),
+        timeoutMs: z.number().int().min(1000).max(60000).optional().default(10000)
+          .describe("Maximum wait time in ms (1s-60s, default 10s)"),
+        pollMs: z.number().int().min(200).max(5000).optional().default(500)
+          .describe("Polling interval in ms (200-5000, default 500)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ text, resourceId, contentDesc, condition, timeoutMs, pollMs, device }) => {
       if (!text && !resourceId && !contentDesc) {
@@ -451,17 +471,19 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_wait_stable",
-    "Wait for the UI to stabilize. Polls the UI hierarchy and waits until consecutive dumps produce the same element count and structure. Useful after screen transitions, animations, or content loading before interacting with elements.",
     {
-      stableCount: z.number().int().min(2).max(10).optional().default(2)
-        .describe("Number of consecutive identical dumps required (2-10, default 2)"),
-      timeoutMs: z.number().int().min(1000).max(60000).optional().default(10000)
-        .describe("Maximum wait time in ms (1s-60s, default 10s)"),
-      pollMs: z.number().int().min(200).max(5000).optional().default(500)
-        .describe("Polling interval in ms (200-5000, default 500)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Wait for the UI to stabilize. Polls the UI hierarchy and waits until consecutive dumps produce the same element count and structure. Useful after screen transitions, animations, or content loading before interacting with elements.",
+      inputSchema: z.object({
+        stableCount: z.number().int().min(2).max(10).optional().default(2)
+          .describe("Number of consecutive identical dumps required (2-10, default 2)"),
+        timeoutMs: z.number().int().min(1000).max(60000).optional().default(10000)
+          .describe("Maximum wait time in ms (1s-60s, default 10s)"),
+        pollMs: z.number().int().min(200).max(5000).optional().default(500)
+          .describe("Polling interval in ms (200-5000, default 500)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ stableCount, timeoutMs, pollMs, device }) => {
       try {
@@ -502,20 +524,22 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_scroll_until",
-    "Scroll the screen repeatedly until a target element is found. Performs a swipe gesture, then checks the UI hierarchy for the target. Repeats until found or max iterations reached. Useful for finding elements in long lists or scrollable content.",
     {
-      text: z.string().optional().describe("Match elements containing this text (case-insensitive)"),
-      resourceId: z.string().optional().describe("Match elements with this resource-id (partial match)"),
-      contentDesc: z.string().optional().describe("Match elements with this content-description (partial, case-insensitive)"),
-      direction: z.enum(["up", "down", "left", "right"]).optional().default("down")
-        .describe("Scroll direction (default 'down' = content moves up, revealing lower items)"),
-      maxScrolls: z.number().int().min(1).max(50).optional().default(10)
-        .describe("Maximum scroll attempts (1-50, default 10)"),
-      tapWhenFound: z.boolean().optional().default(false)
-        .describe("Automatically tap the element when found"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Scroll the screen repeatedly until a target element is found. Performs a swipe gesture, then checks the UI hierarchy for the target. Repeats until found or max iterations reached. Useful for finding elements in long lists or scrollable content.",
+      inputSchema: z.object({
+        text: z.string().optional().describe("Match elements containing this text (case-insensitive)"),
+        resourceId: z.string().optional().describe("Match elements with this resource-id (partial match)"),
+        contentDesc: z.string().optional().describe("Match elements with this content-description (partial, case-insensitive)"),
+        direction: z.enum(["up", "down", "left", "right"]).optional().default("down")
+          .describe("Scroll direction (default 'down' = content moves up, revealing lower items)"),
+        maxScrolls: z.number().int().min(1).max(50).optional().default(10)
+          .describe("Maximum scroll attempts (1-50, default 10)"),
+        tapWhenFound: z.boolean().optional().default(false)
+          .describe("Automatically tap the element when found"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ text, resourceId, contentDesc, direction, maxScrolls, tapWhenFound, device }) => {
       if (!text && !resourceId && !contentDesc) {
@@ -588,16 +612,18 @@ export function registerInputGestureTools(ctx: ToolContext): void {
 
   // ── Batch 3: Efficiency Features ──────────────────────────────────────
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_screenshot_compressed",
-    "Take a screenshot and pull the full-resolution PNG, plus metadata for client-side compression. Returns local file path, dimensions, file size, and a ready-to-run imagemagick command for converting to a smaller JPEG. (Android doesn't ship imagemagick, so the actual compression is post-processing — this tool sets up everything you need.)",
     {
-      quality: z.number().int().min(10).max(100).optional().default(50)
-        .describe("JPEG quality (10-100, default 50). Lower = smaller file, more artifacts"),
-      scale: z.number().min(0.1).max(1.0).optional().default(0.5)
-        .describe("Scale factor (0.1-1.0, default 0.5). 0.5 = half resolution"),
-      filename: z.string().optional().describe("Output filename (default: screenshot_compressed_<timestamp>.jpg)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Take a screenshot and pull the full-resolution PNG, plus metadata for client-side compression. Returns local file path, dimensions, file size, and a ready-to-run imagemagick command for converting to a smaller JPEG. (Android doesn't ship imagemagick, so the actual compression is post-processing — this tool sets up everything you need.)",
+      inputSchema: z.object({
+        quality: z.number().int().min(10).max(100).optional().default(50)
+          .describe("JPEG quality (10-100, default 50). Lower = smaller file, more artifacts"),
+        scale: z.number().min(0.1).max(1.0).optional().default(0.5)
+          .describe("Scale factor (0.1-1.0, default 0.5). 0.5 = half resolution"),
+        filename: z.string().optional().describe("Output filename (default: screenshot_compressed_<timestamp>.jpg)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ quality, scale, filename, device }) => {
       try {
@@ -654,21 +680,23 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_batch_actions",
-    "Execute multiple input actions in a single tool call. Reduces ADB round-trips for multi-step UI interactions. Each action runs sequentially with an optional delay between them. Supported action types: tap, swipe, fling, long_press, double_tap, keyevent, text, drag, pinch, back, home, sleep.",
     {
-      actions: z.array(z.object({
-        type: z.enum(["tap", "swipe", "fling", "long_press", "double_tap", "keyevent", "text", "drag", "pinch", "back", "home", "sleep"])
-          .describe("Action type — one of: tap, swipe, fling, long_press, double_tap, keyevent, text, drag, pinch, back, home, sleep. The args field documents the expected argument format per type."),
-        args: z.string().optional()
-          .describe("Action arguments: tap='x y', swipe='x1 y1 x2 y2 [ms]', fling='x1 y1 x2 y2 [ms]', long_press='x y [ms]', double_tap='x y', keyevent='KEYCODE_*', text='string', drag='x1 y1 x2 y2 [ms]', pinch='cx cy startRadius endRadius [durationMs]', sleep='ms', back/home=none"),
-      })).min(1).max(50).describe("Array of actions to execute (1-50)"),
-      delayMs: z.number().int().min(0).max(5000).optional().default(100)
-        .describe("Delay between actions in ms (0-5000, default 100)"),
-      stopOnError: z.boolean().optional().default(true)
-        .describe("Stop execution if any action fails (default true)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Execute multiple input actions in a single tool call. Reduces ADB round-trips for multi-step UI interactions. Each action runs sequentially with an optional delay between them. Supported action types: tap, swipe, fling, long_press, double_tap, keyevent, text, drag, pinch, back, home, sleep.",
+      inputSchema: z.object({
+        actions: z.array(z.object({
+          type: z.enum(["tap", "swipe", "fling", "long_press", "double_tap", "keyevent", "text", "drag", "pinch", "back", "home", "sleep"])
+            .describe("Action type — one of: tap, swipe, fling, long_press, double_tap, keyevent, text, drag, pinch, back, home, sleep. The args field documents the expected argument format per type."),
+          args: z.string().optional()
+            .describe("Action arguments: tap='x y', swipe='x1 y1 x2 y2 [ms]', fling='x1 y1 x2 y2 [ms]', long_press='x y [ms]', double_tap='x y', keyevent='KEYCODE_*', text='string', drag='x1 y1 x2 y2 [ms]', pinch='cx cy startRadius endRadius [durationMs]', sleep='ms', back/home=none"),
+        })).min(1).max(50).describe("Array of actions to execute (1-50)"),
+        delayMs: z.number().int().min(0).max(5000).optional().default(100)
+          .describe("Delay between actions in ms (0-5000, default 100)"),
+        stopOnError: z.boolean().optional().default(true)
+          .describe("Stop execution if any action fails (default true)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ actions, delayMs, stopOnError, device }) => {
       try {
@@ -802,11 +830,13 @@ export function registerInputGestureTools(ctx: ToolContext): void {
 
   // ── Device Awareness: Screen Size, Device State, Notifications ────
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_screen_size",
-    "Get the screen resolution and display density. Returns physical width, height (in pixels), and DPI density. Useful for calculating tap/swipe coordinates and understanding the UI layout grid.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "Get the screen resolution and display density. Returns physical width, height (in pixels), and DPI density. Useful for calculating tap/swipe coordinates and understanding the UI layout grid.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {
@@ -840,11 +870,13 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_device_state",
-    "Get a combined device state snapshot in one call: battery level/status, network connectivity, screen on/off, foreground activity, and orientation. Useful as a pre-check before UI automation or as a quick device health summary.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "Get a combined device state snapshot in one call: battery level/status, network connectivity, screen on/off, foreground activity, and orientation. Useful as a pre-check before UI automation or as a quick device health summary.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {
@@ -913,14 +945,16 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_notifications",
-    "Read active notifications on the device. Parses the notification manager dump to extract package, title, text, importance, channel, and flags for each notification. Useful for verifying push notification delivery, monitoring notification state, and testing notification-related features.",
     {
-      filter: z.string().optional().describe("Filter by package name (partial match, case-insensitive)"),
-      maxResults: z.number().int().min(1).max(50).optional().default(20)
-        .describe("Maximum notifications to return (1-50, default 20)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Read active notifications on the device. Parses the notification manager dump to extract package, title, text, importance, channel, and flags for each notification. Useful for verifying push notification delivery, monitoring notification state, and testing notification-related features.",
+      inputSchema: z.object({
+        filter: z.string().optional().describe("Filter by package name (partial match, case-insensitive)"),
+        maxResults: z.number().int().min(1).max(50).optional().default(20)
+          .describe("Maximum notifications to return (1-50, default 20)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ filter, maxResults, device }) => {
       try {
@@ -1060,23 +1094,25 @@ export function registerInputGestureTools(ctx: ToolContext): void {
     return null;
   }
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_input_pinch",
-    "Perform a multi-touch pinch (zoom out) or spread (zoom in) gesture. Two fingers move symmetrically toward or away from a center point. Uses parallel swipe injection by default (universal, no root); when root is available, can use raw sendevent for true multi-touch MT protocol injection. The 'auto' method selects the best available approach.",
     {
-      cx: z.number().int().min(0).max(9999).describe("Center X coordinate of the pinch gesture"),
-      cy: z.number().int().min(0).max(9999).describe("Center Y coordinate of the pinch gesture"),
-      startRadius: z.number().int().min(10).max(2000).describe("Starting distance (px) from center to each finger"),
-      endRadius: z.number().int().min(10).max(2000).describe("Ending distance (px) from center to each finger. Smaller than startRadius = pinch/zoom-out, larger = spread/zoom-in"),
-      durationMs: z.number().int().min(100).max(5000).optional().default(500)
-        .describe("Gesture duration in ms (100-5000, default 500)"),
-      angle: z.number().min(0).max(360).optional().default(90)
-        .describe("Angle in degrees for the pinch axis (0=horizontal, 90=vertical, default 90)"),
-      steps: z.number().int().min(5).max(60).optional().default(20)
-        .describe("Interpolation steps for sendevent method (5-60, default 20). More steps = smoother gesture"),
-      method: z.enum(["auto", "swipe", "sendevent"]).optional().default("auto")
-        .describe("Injection method: 'auto' (sendevent if root, else swipe), 'swipe' (parallel swipes, universal), 'sendevent' (raw MT protocol, requires root)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Perform a multi-touch pinch (zoom out) or spread (zoom in) gesture. Two fingers move symmetrically toward or away from a center point. Uses parallel swipe injection by default (universal, no root); when root is available, can use raw sendevent for true multi-touch MT protocol injection. The 'auto' method selects the best available approach.",
+      inputSchema: z.object({
+        cx: z.number().int().min(0).max(9999).describe("Center X coordinate of the pinch gesture"),
+        cy: z.number().int().min(0).max(9999).describe("Center Y coordinate of the pinch gesture"),
+        startRadius: z.number().int().min(10).max(2000).describe("Starting distance (px) from center to each finger"),
+        endRadius: z.number().int().min(10).max(2000).describe("Ending distance (px) from center to each finger. Smaller than startRadius = pinch/zoom-out, larger = spread/zoom-in"),
+        durationMs: z.number().int().min(100).max(5000).optional().default(500)
+          .describe("Gesture duration in ms (100-5000, default 500)"),
+        angle: z.number().min(0).max(360).optional().default(90)
+          .describe("Angle in degrees for the pinch axis (0=horizontal, 90=vertical, default 90)"),
+        steps: z.number().int().min(5).max(60).optional().default(20)
+          .describe("Interpolation steps for sendevent method (5-60, default 20). More steps = smoother gesture"),
+        method: z.enum(["auto", "swipe", "sendevent"]).optional().default("auto")
+          .describe("Injection method: 'auto' (sendevent if root, else swipe), 'swipe' (parallel swipes, universal), 'sendevent' (raw MT protocol, requires root)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ cx, cy, startRadius, endRadius, durationMs, angle, steps, method, device }) => {
       try {

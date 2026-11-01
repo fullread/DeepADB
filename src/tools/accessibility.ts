@@ -9,7 +9,7 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { captureUiDump, parseUiNodes } from "../middleware/ui-dump.js";
 
@@ -154,11 +154,13 @@ function runAudit(elements: A11yElement[], density: number): A11yIssue[] {
 
 export function registerAccessibilityTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_a11y_audit",
-    "Run an automated accessibility audit on the current screen. Checks for: missing labels on interactive elements, undersized touch targets (<48dp), images without content-descriptions, clickable elements missing focusability, and duplicate descriptions. Returns a structured report with severity and rule violations.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "Run an automated accessibility audit on the current screen. Checks for: missing labels on interactive elements, undersized touch targets (<48dp), images without content-descriptions, clickable elements missing focusability, and duplicate descriptions. Returns a structured report with severity and rule violations.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {
@@ -210,12 +212,14 @@ export function registerAccessibilityTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_a11y_touch_targets",
-    "List all interactive elements with their touch target dimensions in dp. Highlights elements below the 48dp minimum. Useful for quickly identifying cramped UI layouts.",
     {
-      belowMinOnly: z.boolean().optional().default(false).describe("Only show elements below the 48dp minimum"),
-      device: z.string().optional().describe("Device serial"),
+      description: "List all interactive elements with their touch target dimensions in dp. Highlights elements below the 48dp minimum. Useful for quickly identifying cramped UI layouts.",
+      inputSchema: z.object({
+        belowMinOnly: z.boolean().optional().default(false).describe("Only show elements below the 48dp minimum"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ belowMinOnly, device }) => {
       try {
@@ -257,11 +261,13 @@ export function registerAccessibilityTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_a11y_tree",
-    "Dump the accessibility-focused view of the UI hierarchy. Shows only elements relevant to screen readers: their roles, labels, states, and navigation order. Filters out decorative/layout containers.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "Dump the accessibility-focused view of the UI hierarchy. Shows only elements relevant to screen readers: their roles, labels, states, and navigation order. Filters out decorative/layout containers.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {

@@ -14,8 +14,8 @@
  */
 
 import { z } from "zod";
-import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ToolContext } from "../tool-context.js";
+import { ResourceTemplate } from "@modelcontextprotocol/server";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import {
   storeResult as _storeResult,
   getResult,
@@ -72,10 +72,12 @@ function formatHandleRow(h: HandleMeta, now: number): string {
 export function registerResultHandleTools(ctx: ToolContext): void {
 
   // adb_result_list — enumerate active handles
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_result_list",
-    "List all result handles currently stored in this session. Returns metadata for each: tool, name, size, creation/expiry/last-access times. Use the URIs (`result://<tool>/<name>`) with adb_result_get or by reading them as MCP Resources to retrieve stored content. Handles are scoped per-auth-token and survive server restart within their TTL.",
-    {},
+    {
+      description: "List all result handles currently stored in this session. Returns metadata for each: tool, name, size, creation/expiry/last-access times. Use the URIs (`result://<tool>/<name>`) with adb_result_get or by reading them as MCP Resources to retrieve stored content. Handles are scoped per-auth-token and survive server restart within their TTL.",
+      inputSchema: z.object({}),
+    },
     async () => {
       try {
         const handles = listHandles();
@@ -111,14 +113,16 @@ export function registerResultHandleTools(ctx: ToolContext): void {
   );
 
   // adb_result_get — retrieve a handle's content as structured blocks
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_result_get",
-    "Retrieve the content of a stored result handle by tool name + handle name. Returns the original content blocks as the source tool produced them. Updates the handle's last-accessed time. For URI-based retrieval, read `result://<tool>/<name>` as an MCP Resource instead.",
     {
-      tool: z.string().min(1).max(32).regex(/^[a-zA-Z0-9_-]+$/)
-        .describe("Source tool name (the tool that originally stored the handle, e.g., 'bugreport')"),
-      name: z.string().min(1).max(32).regex(/^[a-zA-Z0-9_-]+$/)
-        .describe("Handle name supplied at storage time (e.g., 'initial')"),
+      description: "Retrieve the content of a stored result handle by tool name + handle name. Returns the original content blocks as the source tool produced them. Updates the handle's last-accessed time. For URI-based retrieval, read `result://<tool>/<name>` as an MCP Resource instead.",
+      inputSchema: z.object({
+        tool: z.string().min(1).max(32).regex(/^[a-zA-Z0-9_-]+$/)
+          .describe("Source tool name (the tool that originally stored the handle, e.g., 'bugreport')"),
+        name: z.string().min(1).max(32).regex(/^[a-zA-Z0-9_-]+$/)
+          .describe("Handle name supplied at storage time (e.g., 'initial')"),
+      }),
     },
     async ({ tool, name }) => {
       try {
@@ -150,16 +154,18 @@ export function registerResultHandleTools(ctx: ToolContext): void {
   );
 
   // adb_result_drop — delete a single handle, or clear all
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_result_drop",
-    "Delete a stored result handle, or clear all handles in this session. Either provide both `tool` and `name` to drop one specific handle, or pass `all: true` to drop everything in the current namespace. Useful for freeing up the store cap proactively or removing stale data before a sensitive operation.",
     {
-      tool: z.string().min(1).max(32).regex(/^[a-zA-Z0-9_-]+$/).optional()
-        .describe("Source tool name (required unless all=true)"),
-      name: z.string().min(1).max(32).regex(/^[a-zA-Z0-9_-]+$/).optional()
-        .describe("Handle name (required unless all=true)"),
-      all: z.boolean().optional().default(false)
-        .describe("If true, delete every handle in this namespace. tool/name must be omitted when all=true."),
+      description: "Delete a stored result handle, or clear all handles in this session. Either provide both `tool` and `name` to drop one specific handle, or pass `all: true` to drop everything in the current namespace. Useful for freeing up the store cap proactively or removing stale data before a sensitive operation.",
+      inputSchema: z.object({
+        tool: z.string().min(1).max(32).regex(/^[a-zA-Z0-9_-]+$/).optional()
+          .describe("Source tool name (required unless all=true)"),
+        name: z.string().min(1).max(32).regex(/^[a-zA-Z0-9_-]+$/).optional()
+          .describe("Handle name (required unless all=true)"),
+        all: z.boolean().optional().default(false)
+          .describe("If true, delete every handle in this namespace. tool/name must be omitted when all=true."),
+      }),
     },
     async ({ tool, name, all }) => {
       try {
@@ -208,7 +214,7 @@ export function registerResultHandleTools(ctx: ToolContext): void {
   // does not leak active handle names. Discoverability goes through
   // adb_result_list, which is auth-gated.
 
-  ctx.server.resource(
+  ctx.server.registerResource(
     "result-handle",
     new ResourceTemplate("result://{tool}/{name}", { list: undefined }),
     {

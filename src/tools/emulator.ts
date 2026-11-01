@@ -11,7 +11,7 @@ import { z } from "zod";
 import { execFile, spawn, ChildProcess } from "child_process";
 import { platform } from "os";
 import { existsSync } from "fs";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { isOnDevice } from "../config/config.js";
 import { registerCleanup, gracefulKill } from "../middleware/cleanup.js";
@@ -53,10 +53,12 @@ export function registerEmulatorTools(ctx: ToolContext): void {
 
   ensureCleanupRegistered();
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_avd_list",
-    "List all available Android Virtual Devices (AVDs) that can be started.",
-    {},
+    {
+      description: "List all available Android Virtual Devices (AVDs) that can be started.",
+      inputSchema: z.object({}),
+    },
     async () => {
       try {
         // On-device mode: SDK emulator binary is not available (it's compiled for
@@ -128,15 +130,17 @@ export function registerEmulatorTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_emulator_start",
-    "Launch an Android Virtual Device (AVD) emulator. Returns once the emulator process has started.",
     {
-      avdName: z.string().describe("AVD name (from adb_avd_list)"),
-      headless: z.boolean().optional().default(false).describe("Run without GUI window (-no-window)"),
-      coldBoot: z.boolean().optional().default(false).describe("Force cold boot (-no-snapshot-load)"),
-      gpuMode: z.enum(["auto", "host", "swiftshader_indirect", "off"]).optional().default("auto")
-        .describe("GPU acceleration mode"),
+      description: "Launch an Android Virtual Device (AVD) emulator. Returns once the emulator process has started.",
+      inputSchema: z.object({
+        avdName: z.string().describe("AVD name (from adb_avd_list)"),
+        headless: z.boolean().optional().default(false).describe("Run without GUI window (-no-window)"),
+        coldBoot: z.boolean().optional().default(false).describe("Force cold boot (-no-snapshot-load)"),
+        gpuMode: z.enum(["auto", "host", "swiftshader_indirect", "off"]).optional().default("auto")
+          .describe("GPU acceleration mode"),
+      }),
     },
     async ({ avdName, headless, coldBoot, gpuMode }) => {
       try {
@@ -214,12 +218,14 @@ export function registerEmulatorTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_emulator_stop",
-    "Stop a running emulator. Uses 'adb emu kill' for graceful shutdown.",
     {
-      avdName: z.string().optional().describe("AVD name to stop. If omitted, lists running emulators."),
-      device: z.string().optional().describe("Emulator device serial (e.g., 'emulator-5554') — alternative to avdName"),
+      description: "Stop a running emulator. Uses 'adb emu kill' for graceful shutdown.",
+      inputSchema: z.object({
+        avdName: z.string().optional().describe("AVD name to stop. If omitted, lists running emulators."),
+        device: z.string().optional().describe("Emulator device serial (e.g., 'emulator-5554') — alternative to avdName"),
+      }),
     },
     async ({ avdName, device }) => {
       try {

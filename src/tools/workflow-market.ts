@@ -20,7 +20,7 @@ import { join } from "path";
 import { readFileSync, existsSync, readdirSync} from "fs";
 import { ensurePrivateDir, sanitizeFilenameComponent, writeAtomicSync, tryReadJsonOrWarn} from "../middleware/fs-utils.js";
 import { createHash } from "crypto";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { fetchJson, fetchText } from "../middleware/fetch-utils.js";
 
@@ -91,12 +91,14 @@ function getInstalledWorkflows(dir: string): Map<string, { version: string; desc
 
 export function registerWorkflowMarketTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_market_search",
-    "Search the workflow marketplace for community-shared workflow definitions. Shows name, description, tags, author, and step count. Indicates which workflows are already installed locally.",
     {
-      query: z.string().optional().describe("Filter by name, description, or tag keyword"),
-      tag: z.string().optional().describe("Filter by exact tag (e.g., 'testing', 'diagnostics', 'security')"),
+      description: "Search the workflow marketplace for community-shared workflow definitions. Shows name, description, tags, author, and step count. Indicates which workflows are already installed locally.",
+      inputSchema: z.object({
+        query: z.string().optional().describe("Filter by name, description, or tag keyword"),
+        tag: z.string().optional().describe("Filter by exact tag (e.g., 'testing', 'diagnostics', 'security')"),
+      }),
     },
     async ({ query, tag }) => {
       try {
@@ -161,12 +163,14 @@ export function registerWorkflowMarketTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_market_install",
-    "Download and install a workflow from the marketplace. Saves to the workflows directory for immediate use with adb_workflow_run.",
     {
-      name: z.string().describe("Workflow name from the marketplace"),
-      force: z.boolean().optional().default(false).describe("Overwrite if a workflow with this name already exists locally"),
+      description: "Download and install a workflow from the marketplace. Saves to the workflows directory for immediate use with adb_workflow_run.",
+      inputSchema: z.object({
+        name: z.string().describe("Workflow name from the marketplace"),
+        force: z.boolean().optional().default(false).describe("Overwrite if a workflow with this name already exists locally"),
+      }),
     },
     async ({ name, force }) => {
       try {
@@ -274,14 +278,16 @@ export function registerWorkflowMarketTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_market_export",
-    "Export a local workflow with marketplace metadata for sharing. Produces a JSON file with name, description, version, author, and tags suitable for submission to the marketplace registry.",
     {
-      workflow: z.string().describe("Name of the local workflow to export (from adb_workflow_list)"),
-      author: z.string().optional().describe("Author name to include in metadata"),
-      version: z.string().optional().default("1.0.0").describe("Version string (semver-style, e.g., '1.2.3'). Defaults to '1.0.0' if omitted. Increment when publishing an updated workflow so registry consumers can detect changes."),
-      tags: z.array(z.string()).optional().describe("Tags for discovery (e.g., ['testing', 'diagnostics'])"),
+      description: "Export a local workflow with marketplace metadata for sharing. Produces a JSON file with name, description, version, author, and tags suitable for submission to the marketplace registry.",
+      inputSchema: z.object({
+        workflow: z.string().describe("Name of the local workflow to export (from adb_workflow_list)"),
+        author: z.string().optional().describe("Author name to include in metadata"),
+        version: z.string().optional().default("1.0.0").describe("Version string (semver-style, e.g., '1.2.3'). Defaults to '1.0.0' if omitted. Increment when publishing an updated workflow so registry consumers can detect changes."),
+        tags: z.array(z.string()).optional().describe("Tags for discovery (e.g., ['testing', 'diagnostics'])"),
+      }),
     },
     async ({ workflow, author, version, tags }) => {
       try {

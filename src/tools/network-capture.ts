@@ -10,7 +10,7 @@
 
 import { z } from "zod";
 import { join } from "path";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 
@@ -19,14 +19,16 @@ const activeCaptures = new Map<string, { remotePath: string; startedAt: number }
 
 export function registerNetworkCaptureTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_tcpdump_start",
-    "Start a packet capture on the device using tcpdump. Requires root or tcpdump binary on device. Capture runs in background.",
     {
-      interface: z.string().optional().default("any").describe("Network interface to capture (default: 'any')"),
-      filter: z.string().optional().describe("tcpdump filter expression (e.g., 'port 443', 'host 10.0.0.1')"),
-      maxPackets: z.number().min(1).max(1000000).optional().describe("Stop after N packets (1-1000000, omit for continuous until stop)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Start a packet capture on the device using tcpdump. Requires root or tcpdump binary on device. Capture runs in background.",
+      inputSchema: z.object({
+        interface: z.string().optional().default("any").describe("Network interface to capture (default: 'any')"),
+        filter: z.string().optional().describe("tcpdump filter expression (e.g., 'port 443', 'host 10.0.0.1')"),
+        maxPackets: z.number().min(1).max(1000000).optional().describe("Stop after N packets (1-1000000, omit for continuous until stop)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ interface: iface, filter, maxPackets, device }) => {
       try {
@@ -99,11 +101,13 @@ export function registerNetworkCaptureTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_tcpdump_stop",
-    "Stop an active packet capture and pull the pcap file locally for analysis.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "Stop an active packet capture and pull the pcap file locally for analysis.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       let resolvedSerial: string | undefined;
@@ -160,12 +164,14 @@ export function registerNetworkCaptureTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_network_connections",
-    "Show active network connections on the device (TCP/UDP). Similar to netstat — shows established connections, listening ports, and connection states.",
     {
-      protocol: z.enum(["tcp", "udp", "all"]).optional().default("all").describe("Filter by protocol"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Show active network connections on the device (TCP/UDP). Similar to netstat — shows established connections, listening ports, and connection states.",
+      inputSchema: z.object({
+        protocol: z.enum(["tcp", "udp", "all"]).optional().default("all").describe("Filter by protocol"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ protocol, device }) => {
       try {

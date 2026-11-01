@@ -17,7 +17,7 @@ import { spawn, ChildProcess, execFile } from "child_process";
 import { platform } from "os";
 import { existsSync } from "fs";
 import { isWithinDir } from "../middleware/fs-utils.js";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { registerCleanup, gracefulKill } from "../middleware/cleanup.js";
 
@@ -87,21 +87,23 @@ export function registerMirroringTools(ctx: ToolContext): void {
 
   ensureCleanupRegistered();
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_mirror_start",
-    "Start live screen mirroring for a device using scrcpy. Requires scrcpy installed and on PATH. Supports windowed (visual) and headless (no display) modes. One session per device.",
     {
-      device: z.string().optional().describe("Device serial"),
-      headless: z.boolean().optional().default(false).describe("No-display mode — useful with recording. Omits the scrcpy window."),
-      maxFps: z.number().min(1).max(120).optional().default(30).describe("Maximum frame rate (1-120, default 30)"),
-      bitrate: z.string().regex(
-        /^\d+(\.\d+)?[KMG]?$/,
-        "Bitrate must be a numeric value optionally followed by K, M, or G (e.g., '4M', '8M', '500K')."
-      ).optional().default("4M").describe("Video bitrate (e.g., '4M', '8M', '2M'). AK2 fix: format-validated at schema layer."),
-      maxSize: z.number().min(0).max(4096).optional().default(0).describe("Max dimension in pixels (0 = no limit, max 4096)"),
-      record: z.string().optional().describe("Record to a local file path (e.g., 'mirror.mp4')"),
-      stayAwake: z.boolean().optional().default(true).describe("Keep device awake while mirroring"),
-      turnScreenOff: z.boolean().optional().default(false).describe("Turn device screen off during mirroring (saves battery)"),
+      description: "Start live screen mirroring for a device using scrcpy. Requires scrcpy installed and on PATH. Supports windowed (visual) and headless (no display) modes. One session per device.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+        headless: z.boolean().optional().default(false).describe("No-display mode — useful with recording. Omits the scrcpy window."),
+        maxFps: z.number().min(1).max(120).optional().default(30).describe("Maximum frame rate (1-120, default 30)"),
+        bitrate: z.string().regex(
+          /^\d+(\.\d+)?[KMG]?$/,
+          "Bitrate must be a numeric value optionally followed by K, M, or G (e.g., '4M', '8M', '500K')."
+        ).optional().default("4M").describe("Video bitrate (e.g., '4M', '8M', '2M'). AK2 fix: format-validated at schema layer."),
+        maxSize: z.number().min(0).max(4096).optional().default(0).describe("Max dimension in pixels (0 = no limit, max 4096)"),
+        record: z.string().optional().describe("Record to a local file path (e.g., 'mirror.mp4')"),
+        stayAwake: z.boolean().optional().default(true).describe("Keep device awake while mirroring"),
+        turnScreenOff: z.boolean().optional().default(false).describe("Turn device screen off during mirroring (saves battery)"),
+      }),
     },
     async ({ device, headless, maxFps, bitrate, maxSize, record, stayAwake, turnScreenOff }) => {
       try {
@@ -206,11 +208,13 @@ export function registerMirroringTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_mirror_stop",
-    "Stop an active scrcpy mirroring session for a device.",
     {
-      device: z.string().optional().describe("Device serial (stops that device's session). Omit to stop all."),
+      description: "Stop an active scrcpy mirroring session for a device.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial (stops that device's session). Omit to stop all."),
+      }),
     },
     async ({ device }) => {
       try {
@@ -251,10 +255,12 @@ export function registerMirroringTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_mirror_status",
-    "Check scrcpy availability and list active mirroring sessions.",
-    {},
+    {
+      description: "Check scrcpy availability and list active mirroring sessions.",
+      inputSchema: z.object({}),
+    },
     async () => {
       try {
         const scrcpyPath = findScrcpy();

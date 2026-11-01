@@ -13,6 +13,38 @@ through ADB (or directly, on-device). It is plain TypeScript compiled to
 structure is a small set of explicit layers wired together at startup in
 `server.ts`.
 
+The server core uses `@modelcontextprotocol/server` v2. Built-in modules use
+`registerTool`, `registerResource`, and `registerPrompt`, with explicit schema
+objects. `BuiltinToolContext` exposes that native API; the original exported
+`ToolContext` prefers legacy overloads for existing typed plugins;
+`NativePluginToolContext` exposes v2 callback types for new plugins.
+`plugin-compat.ts` adapts
+legacy registrations, Zod 3/4 schemas, callback context, and registration-handle
+updates before forwarding them to the same v2 server. Public handles retain
+the original callbacks, Zod schemas (raw shapes become Zod objects), and resource
+templates; successful updates synchronize that view with the converted SDK
+registration. Prompt argument
+completion metadata survives Zod 3/4 conversion and registration updates,
+including optional arguments, without changing schema validation. Plugin initialization
+(including asynchronous `register`) runs once at startup.
+
+The adapter guards legacy and adapted v2 callback helpers with the originating
+request's abort signal. Cancelled notifications/logging become no-ops; requests,
+sampling and elicitation reject without contacting the current client. Legacy
+requests retain v1's `ConnectionClosed` error contract, and native helpers use
+the v2 SDK error. This preserves request lifetime across reconnects without
+sandboxing plugin code or stopping handlers that ignore cancellation.
+
+The v1 SDK remains a compatibility dependency for plugin imports and schema
+conversion. Legacy SSE comes from `@modelcontextprotocol/server-legacy/sse`.
+This migration keeps the existing 2024/2025 initialization protocol and the
+stdio, `/sse` + `/message`, and `/ws` endpoints. It does not opt into the
+2026-07-28 request lifecycle. The subsequent `/mcp` transport shares the same
+server and single-client admission policy. Device managers, plugins, and handle cleanup are
+not recreated per request. Plugins that use low-level SDK request handlers
+directly must migrate those calls to v2; the adapter covers the registration
+APIs above, not SDK-private or experimental task APIs.
+
 ## Layered design
 
 ```
@@ -72,13 +104,62 @@ bridge they run against.
 `index.ts` reads environment variables and selects exactly one MCP transport:
 
 - default: stdio (JSON-RPC over stdin/stdout), for Claude Code and local clients
-- `DA_HTTP_PORT`: HTTP/SSE (`GET /sse`, `POST /message`, `GET /health`)
+- `DA_HTTP_PORT`: Streamable HTTP (`POST/GET/DELETE /mcp`), legacy SSE (`GET /sse`, `POST /message`), and `GET /health`
 - `DA_WS_PORT`: WebSocket (`ws://host/ws`, `GET /health`), needs the optional `ws` package
 
 A standalone GraphQL API (`DA_GRAPHQL_PORT`, `POST /graphql`) can run alongside
-any of the above for composed device queries; it needs the optional `graphql`
+any of the above in the full profile for composed device queries; it needs the optional `graphql`
 package. Network transports support bearer-token auth (`DA_AUTH_TOKEN`) and CORS
 restriction; read SECURITY.md before exposing a port beyond loopback.
+
+`middleware/origin.ts` enforces exact browser Origins before HTTP/SSE session
+handling, GraphQL resolver execution or WebSocket upgrade. Native clients may omit Origin. Browser
+preflights use explicit method/header allowlists; actual requests authenticate
+independently. WebSocket accepts one active client and rejects another with
+HTTP 409. Legacy SSE retains its authorized-client replacement behavior.
+`POST /message` requires exactly one current `sessionId` query value (400 for
+missing/duplicate IDs; 404 for a mismatch while a session is active). Dispatch
+rechecks transport identity after body upload, so an admitted message cannot
+execute after its SSE connection is replaced. With no SSE session, the existing
+503 response is retained.
+
+`streamable-http.ts` uses the official `@modelcontextprotocol/node` adapter.
+It reserves one session after validating initialization, shares admission with
+SSE, limits POST bodies to 1 MiB/15 seconds, and expires inactive sessions
+(30 minutes by default, configurable from 1 second to 1 hour). A session ID
+never bypasses Origin or bearer checks. Request IDs are reserved atomically
+before SDK dispatch; duplicate in-flight IDs and within-batch duplicates reject
+the whole body with 400 / `-32600`. Undispatched reservations are released if the
+SDK rejects headers or the batch. Accepted IDs are tracked until their response
+is sent or valid cancellation is processed; the idle countdown restarts after
+the last active request leaves that set. Bounded uploads also suspend expiry;
+cancelled requests with lingering response streams do not. Idle GET streams do not hold the
+session open. Bookkeeping belongs to each transport, so late replies cannot
+affect a replacement session. DELETE can still terminate active sessions;
+the idle timeout is not an absolute tool execution deadline. DELETE and expiry close the transport;
+invalid initialization releases the slot. Plugin registration and device/tool
+state survive reconnections. No event replay or per-client device isolation is
+provided. Long-lived watchers remain process-owned.
+
+Browser reload recovery tracks peer-aborted successful GET notification streams
+and all in-flight HTTP responses, including uploads before body parsing. A valid
+initialize from the session's same non-empty Origin can replace it only when no
+MCP requests or HTTP streams remain. Header validation precedes retirement, and
+an admission guard holds the slot throughout close/connect, including against
+SSE. A retained ID can resume before replacement; the retired ID returns 404.
+Originless native sessions, POST-only sessions without a GET disconnect, and
+server-initiated GET closure retain the explicit DELETE/expiry lifecycle.
+Per-request ownership tokens prevent late sends or upload cleanup from deleting
+a newer request's reservation. Cancellation validation matches the SDK, and
+bookkeeping is released after its cancellation handler runs.
+
+`tool-profile.ts` validates the startup-only `full`/`inspect` choice. Full mode
+returns the original server unchanged. Inspect initializes only the device
+module and guards registration, registration-handle renames/updates, and
+invocation against three approved tool names. Other modules, resources, prompts,
+plugins and the result-handle sweep do not run. GraphQL configuration fails
+startup in inspect mode because its resolvers bypass MCP handlers. This is a
+tool admission policy, not a device allowlist or a plugin sandbox.
 
 ## Security boundary
 
@@ -95,7 +176,8 @@ security middleware. The guarantees are narrow and explicit:
   refused outright rather than escaped.
 
 What this layer does NOT do: it does not decide whether a command is allowed
-(that is the opt-in allowlist/blocklist in SecurityMiddleware), and it does not
+(the opt-in SecurityMiddleware filters only paths that call it; it is not a
+global policy for dedicated tools), and it does not
 validate semantic correctness (that is the per-tool Zod schema). It only
 guarantees that a value cannot escape the lexical position it was placed in.
 These properties are exercised by `tests/test-sanitize-fuzz.mjs`, which
@@ -103,6 +185,24 @@ property-tests round-trip faithfulness and the rejection invariant across
 thousands of generated, metacharacter-dense inputs. See SECURITY.md for the
 complete model, including transport auth, privilege escalation, and AT-command
 handling.
+
+## SQLite and GraphQL execution boundaries
+
+SQLite reads pin the package directory and validate opened descriptors before
+copying the main database/WAL to a private directory. This prevents a root read
+from following an app-controlled parent link. Both backends query the private
+snapshot: an isolated Node subprocess on hosts, or sqlite3 on the device.
+Cancellation kills the query child and cleanup waits for child close before
+removing files. Native SQLite heap limits complement V8/output limits; bounded
+SQL projection prevents large BLOB materialization on older LTS Node. The source
+app's SHM file is never opened. Host inspection needs Node 22.16+.
+
+GraphQL shares Origin admission with MCP HTTP and WebSocket. Expanded-AST
+budgets precede execution; runtime device-operation budgets and a shared pool
+bound work across aliases, device lists and concurrent requests. Cancellation
+stops queued work; active bridge calls retain their timeouts. HTTP URL authority
+formatting brackets IPv6 literals independently of the listen address.
+See SECURITY.md for numerical limits and snapshot consistency caveats.
 
 ## Testing model
 
@@ -116,7 +216,9 @@ Suites fall into two groups:
 - Device-free: validate behavior with no hardware attached. These run in CI.
   `test-boundaries` (Zod bounds and enum rejection), `test-next-version`,
   `test-result-handles`, `test-supply-chain`, `test-transports` (boots each transport on an ephemeral
-  port and does a real MCP round-trip), and `test-sanitize-fuzz`. Device-
+  port and does a real MCP round-trip), `test-sdk-compat` (v1/v2 clients,
+  plugin APIs and schemas, auth, reconnects, and catalog compatibility), and
+  `test-sanitize-fuzz`. Device-
   dependent assertions inside an otherwise device-free suite skip-guard
   themselves when no device is present, so the run stays green either way.
 - Device-dependent: require a connected device or emulator and are run locally.
@@ -131,10 +233,60 @@ Useful commands:
 - `npm run test:ci` runs only the device-free suites (`run-all.mjs --ci`).
 - `npm run coverage` runs the suite under c8 and writes `coverage/` (lcov + summary).
 
-The six server CI suites contain 187 checks. A strictly device-free run passes
-171 and skips 16 hardware-dependent assertions, with zero failures. The
-v1.1.4 full Pixel 6a host-hardware baseline completed 604 tests with zero
-failures and 17 expected environment-specific skips.
+After the final audit fixes, the Windows/Node 22.23.4 coverage run passed 295
+checks with zero failures and 17 skips (312 total) across ten suites. Sixteen
+skips require hardware; one requires file-symlink creation privileges. The new
+41-check hardening suite also passes on Node 24.22.2. Eight disposable Pixel
+path/link/race probes cover the POSIX cases unavailable on this Windows account.
+Those initial host checks preceded the separate on-device release validation.
+
+The subsequent full host/ADB regression on Pixel 6a / Android 16, with Node
+24.22.2, passed all 22 suites: 728 passed, zero failed, 18 expected skips
+(746 checks). It includes all 41 hardening checks, 33 local-LLM checks,
+36 client/plugin compatibility checks and 46 UI checks with PIN recovery.
+The skips comprise five on-device-only QEMU checks, twelve Windows/POSIX/
+tcpdump cases and the Windows file-symlink capability case. Every suite had
+an explicit successful summary; the aggregate runner exited zero. The run itself
+changed no repository files and did not deploy the build.
+
+Release preparation separately validates the production package on Termux Node
+24.22.1 with SQLite 3.54.1. The staged LocalBridge passed strict schema/query
+reads, rejected SQL writes, runtime/health checks and the live Shannon handshake.
+Eight Chromium checks exercised its authenticated SSE/Streamable HTTP routes,
+Origin denial and repeated reloads; six optional WebSocket/GraphQL checks verified
+real device reads and token/Origin admission. Production installs need optional
+`ws`/`graphql` packages when those transports are enabled. The 1.1.4 rollback
+copy initializes successfully under the updated runtime and is retained. After
+promotion to the normal device path, auto-detection selected LocalBridge and
+all eight strict device checks passed again. The 1.1.5 host hardware rerun passed
+728/0/18 (pass/fail/skip); device-free Node 24 coverage passed 295/0/17.
+Hosted CI/CodeQL remain
+pending until the uncommitted release changes are pushed.
+
+The original nine CI suites contained 270 checks (254 device-free passes and
+16 hardware-dependent skips). A tenth suite, `test-audit-hardening`, now covers
+the seven final-audit findings; its symlink cases vary with host capabilities.
+Before that final hardening pass, the full Pixel 6a / Android 16 host-hardware
+run passed 687 checks with zero failures and 17 expected environment-specific
+skips (704 total), including PIN-based screen recovery, request-ID/cancellation
+handling, and cancelled plugin callback guards. The released v1.1.4 baseline was 604 passed with
+the same 17 skips. Real phone-to-watch Wear validation remains deferred.
+
+Model-driven validation with llama.cpp b11960 and Qwen3.5-4B Q4_K_M passed over
+native stdio and authenticated browser HTTP/SSE using `inspect`. Browser HTTP
+reloads that lose the client's session ID now use the guarded reclamation path
+above. See LOCAL_LLMS.md for the tested client matrix and remaining lifecycle limits.
+
+`test-browser-access` covers Origin rejection, preflight headers, authentication,
+and WebSocket admission without hardware. The separate `npm run test:browser`
+command performs eight real Chromium CORS/session/profile checks with a temporary browser profile;
+it is not part of the default CI suite and requires Chrome, Edge, or Chromium.
+`test-local-llm` covers Streamable HTTP lifecycle and admission, v1/v2 clients,
+stateful legacy plugins, malformed/oversized uploads, long-running concurrent
+calls, cancellation, DELETE/replacement, guarded browser reloads, stale SSE uploads, and profile enforcement
+across stdio, SSE, Streamable HTTP and WebSocket.
+It also verifies atomic duplicate-ID rejection, reservation cleanup, malformed
+cancellation, and the security guide's shared/network deployment recipes.
 
 GitHub also runs dependency-advisory auditing and CodeQL analysis. The weekly
 emulator lane is informational: it preserves execution failures and publishes
@@ -152,7 +304,9 @@ Build discipline: the project compiles clean under a strict `tsconfig`
 
 1. Add (or extend) a module in `src/tools/` that exports a
    `registerXxxTools(ctx: ToolContext)` function.
-2. Inside it, call `ctx.server.tool(name, description, zodSchema, handler)`.
+2. Inside it, call `ctx.server.registerTool(name,
+   { description, inputSchema: z.object(zodShape) }, handler)` using the
+   native `BuiltinToolContext` type (often imported locally as `ToolContext`).
    Give every `z.number()` an explicit `.min()/.max()`, add a `.describe()` to
    each parameter, and pass any value that reaches a shell command through
    `shellQuote()` (never interpolate raw input).
@@ -169,7 +323,8 @@ src/
   index.ts            entrypoint: env parsing, transport selection
   server.ts           createServer(): builds ToolContext, registers everything
   tool-context.ts     the injected dependency bundle
-  http-transport.ts   HTTP/SSE transport (MCP SDK SSEServerTransport)
+  plugin-compat.ts     legacy plugin registration and callback adapter
+  http-transport.ts   HTTP/SSE transport (official server-legacy bridge)
   ws-transport.ts     WebSocket transport (optional ws package)
   graphql-api.ts      standalone GraphQL API (optional graphql package)
   config/             version and configuration

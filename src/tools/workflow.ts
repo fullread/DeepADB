@@ -33,7 +33,7 @@
 import { z } from "zod";
 import { join } from "path";
 import { readFileSync, existsSync, readdirSync } from "fs";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 import { sanitizeFilenameComponent } from "../middleware/fs-utils.js";
@@ -221,14 +221,16 @@ function validateWorkflow(def: unknown): string[] {
 
 export function registerWorkflowTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_workflow_run",
-    "Execute a workflow — a JSON-defined sequence of device operations with variable substitution, conditional steps, and loop support. Supported actions: shell, root_shell, install, screenshot, logcat, getprop, sleep. Pass the workflow as a JSON string or provide a saved workflow name.",
     {
-      workflow: z.string().describe("Workflow JSON string, or the name of a saved workflow file"),
-      variables: z.record(z.string(), z.string()).optional().describe("Override workflow variables (merged with defaults)"),
-      device: z.string().optional().describe("Device serial"),
-      dryRun: z.boolean().optional().default(false).describe("Validate and show execution plan without running"),
+      description: "Execute a workflow — a JSON-defined sequence of device operations with variable substitution, conditional steps, and loop support. Supported actions: shell, root_shell, install, screenshot, logcat, getprop, sleep. Pass the workflow as a JSON string or provide a saved workflow name.",
+      inputSchema: z.object({
+        workflow: z.string().describe("Workflow JSON string, or the name of a saved workflow file"),
+        variables: z.record(z.string(), z.string()).optional().describe("Override workflow variables (merged with defaults)"),
+        device: z.string().optional().describe("Device serial"),
+        dryRun: z.boolean().optional().default(false).describe("Validate and show execution plan without running"),
+      }),
     },
     async ({ workflow, variables, device, dryRun }) => {
       try {
@@ -420,11 +422,13 @@ export function registerWorkflowTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_workflow_validate",
-    "Validate a workflow JSON definition without executing it. Reports structural errors and shows the execution plan.",
     {
-      workflow: z.string().describe("Workflow JSON string to validate"),
+      description: "Validate a workflow JSON definition without executing it. Reports structural errors and shows the execution plan.",
+      inputSchema: z.object({
+        workflow: z.string().describe("Workflow JSON string to validate"),
+      }),
     },
     async ({ workflow }) => {
       try {
@@ -463,10 +467,12 @@ export function registerWorkflowTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_workflow_list",
-    "List saved workflow files in the workflows directory.",
-    {},
+    {
+      description: "List saved workflow files in the workflows directory.",
+      inputSchema: z.object({}),
+    },
     async () => {
       try {
         const dir = getWorkflowDir(ctx.config.tempDir);

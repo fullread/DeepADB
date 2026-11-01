@@ -7,7 +7,7 @@
 
 import { z } from "zod";
 import { join } from "path";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { resultHandleSchemaFields, withResultHandle } from "./result-handles.js";
 import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
@@ -15,14 +15,16 @@ import { sanitizeFilenameComponent, sanitizeFilenameComponentDotted } from "../m
 
 export function registerDiagnosticTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_dumpsys",
-    "Run dumpsys for a specific service. Use 'list' as the service to see all available services.",
     {
-      service: z.string().describe("Service name (e.g., 'battery', 'telephony.registry', 'activity') or 'list'"),
-      args: z.string().optional().describe("Additional arguments passed to dumpsys"),
-      device: z.string().optional().describe("Device serial"),
-      ...resultHandleSchemaFields,
+      description: "Run dumpsys for a specific service. Use 'list' as the service to see all available services.",
+      inputSchema: z.object({
+        service: z.string().describe("Service name (e.g., 'battery', 'telephony.registry', 'activity') or 'list'"),
+        args: z.string().optional().describe("Additional arguments passed to dumpsys"),
+        device: z.string().optional().describe("Device serial"),
+        ...resultHandleSchemaFields,
+      }),
     },
     async ({ service, args, device, result_handle, result_handle_ttl }) => {
       try {
@@ -48,10 +50,12 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_telephony",
-    "Get telephony state including cell info, signal strength, and network registration.",
-    { device: z.string().optional().describe("Device serial") },
+    {
+      description: "Get telephony state including cell info, signal strength, and network registration.",
+      inputSchema: z.object({ device: z.string().optional().describe("Device serial") }),
+    },
     async ({ device }) => {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
@@ -73,10 +77,12 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_battery",
-    "Get battery status, level, temperature, and charging info",
-    { device: z.string().optional().describe("Device serial") },
+    {
+      description: "Get battery status, level, temperature, and charging info",
+      inputSchema: z.object({ device: z.string().optional().describe("Device serial") }),
+    },
     async ({ device }) => {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
@@ -88,10 +94,12 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_network",
-    "Get network connectivity info including WiFi, cellular, and active connections",
-    { device: z.string().optional().describe("Device serial") },
+    {
+      description: "Get network connectivity info including WiFi, cellular, and active connections",
+      inputSchema: z.object({ device: z.string().optional().describe("Device serial") }),
+    },
     async ({ device }) => {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
@@ -113,12 +121,14 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_top",
-    "Get current CPU and memory usage snapshot",
     {
-      count: z.number().min(1).max(100).optional().default(1).describe("Number of iterations (1-100, 1 = snapshot)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Get current CPU and memory usage snapshot",
+      inputSchema: z.object({
+        count: z.number().min(1).max(100).optional().default(1).describe("Number of iterations (1-100, 1 = snapshot)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ count, device }) => {
       try {
@@ -134,12 +144,14 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_perf_snapshot",
-    "Capture a performance snapshot for a package: memory usage, frame stats, and CPU info in one call.",
     {
-      packageName: z.string().describe("Package name to profile (e.g., 'com.example.app')"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Capture a performance snapshot for a package: memory usage, frame stats, and CPU info in one call.",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name to profile (e.g., 'com.example.app')"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ packageName, device }) => {
       try {
@@ -167,11 +179,13 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_bugreport",
-    "Capture a full bug report zip (device state, logs, dumpsys, system info). Returns the local file path.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "Capture a full bug report zip (device state, logs, dumpsys, system info). Returns the local file path.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {
@@ -203,15 +217,17 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
 
   // ── Debugging & Crash Analysis ────────────────────────────────────
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_crash_logs",
-    "Read ANR (Application Not Responding) traces and tombstone crash dumps from the device. Requires root access for /data/anr/ and /data/tombstones/. Returns the most recent entries.",
     {
-      type: z.enum(["anr", "tombstones", "both"]).optional().default("both")
-        .describe("Type of crash data to retrieve (default: both)"),
-      maxEntries: z.number().int().min(1).max(20).optional().default(5)
-        .describe("Maximum entries to return per type (1-20, default 5)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Read ANR (Application Not Responding) traces and tombstone crash dumps from the device. Requires root access for /data/anr/ and /data/tombstones/. Returns the most recent entries.",
+      inputSchema: z.object({
+        type: z.enum(["anr", "tombstones", "both"]).optional().default("both")
+          .describe("Type of crash data to retrieve (default: both)"),
+        maxEntries: z.number().int().min(1).max(20).optional().default(5)
+          .describe("Maximum entries to return per type (1-20, default 5)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ type, maxEntries, device }) => {
       try {
@@ -277,13 +293,15 @@ export function registerDiagnosticTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_heap_dump",
-    "Capture a heap dump from a running process for memory analysis. Triggers `am dumpheap` and pulls the resulting .hprof file. Requires the target process PID or package name.",
     {
-      target: z.string().describe("Process PID (number) or package name (e.g., com.example.app)"),
-      filename: z.string().optional().describe("Output filename (default: heap_<target>_<timestamp>.hprof)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Capture a heap dump from a running process for memory analysis. Triggers `am dumpheap` and pulls the resulting .hprof file. Requires the target process PID or package name.",
+      inputSchema: z.object({
+        target: z.string().describe("Process PID (number) or package name (e.g., com.example.app)"),
+        filename: z.string().optional().describe("Output filename (default: heap_<target>_<timestamp>.hprof)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ target, filename, device }) => {
       try {

@@ -5,18 +5,20 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 
 export function registerShellTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_shell",
-    "Execute a shell command on the Android device. Returns stdout and stderr.",
     {
-      command: z.string().describe("Shell command to execute on the device"),
-      device: z.string().optional().describe("Device serial"),
-      timeout: z.number().min(1000).max(600000).optional().describe("Timeout in milliseconds (1s-10min)"),
+      description: "Execute a shell command on the Android device. Returns stdout and stderr.",
+      inputSchema: z.object({
+        command: z.string().describe("Shell command to execute on the device"),
+        device: z.string().optional().describe("Device serial"),
+        timeout: z.number().min(1000).max(600000).optional().describe("Timeout in milliseconds (1s-10min)"),
+      }),
     },
     async ({ command, device, timeout }) => {
       try {
@@ -45,12 +47,14 @@ export function registerShellTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_root_shell",
-    "Execute a command as root via su. Requires rooted device.",
     {
-      command: z.string().describe("Command to run as root"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Execute a command as root via su. Requires rooted device.",
+      inputSchema: z.object({
+        command: z.string().describe("Command to run as root"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ command, device }) => {
       try {

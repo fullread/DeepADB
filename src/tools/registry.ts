@@ -16,7 +16,7 @@ import { join } from "path";
 import { existsSync, readdirSync } from "fs";
 import { ensurePrivateDir, isWithinDir, writeAtomicSync, tryReadJsonOrWarn} from "../middleware/fs-utils.js";
 import { createHash } from "crypto";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { fetchJson, fetchText } from "../middleware/fetch-utils.js";
 
@@ -80,11 +80,13 @@ function getInstalledPlugins(pluginDir: string): Map<string, string> {
 
 export function registerRegistryTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_registry_search",
-    "Search the community plugin registry for available plugins. Shows name, description, version, and author. Fetches the latest manifest from the configured registry URL.",
     {
-      query: z.string().optional().describe("Filter plugins by name or description keyword"),
+      description: "Search the community plugin registry for available plugins. Shows name, description, version, and author. Fetches the latest manifest from the configured registry URL.",
+      inputSchema: z.object({
+        query: z.string().optional().describe("Filter plugins by name or description keyword"),
+      }),
     },
     async ({ query }) => {
       try {
@@ -141,12 +143,14 @@ export function registerRegistryTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_registry_install",
-    "Install a plugin from the community registry by name. Downloads the plugin JavaScript file into the plugins directory. Restart DeepADB to load it.",
     {
-      name: z.string().describe("Plugin name from the registry"),
-      force: z.boolean().optional().default(false).describe("Overwrite if already installed"),
+      description: "Install a plugin from the community registry by name. Downloads the plugin JavaScript file into the plugins directory. Restart DeepADB to load it.",
+      inputSchema: z.object({
+        name: z.string().describe("Plugin name from the registry"),
+        force: z.boolean().optional().default(false).describe("Overwrite if already installed"),
+      }),
     },
     async ({ name, force }) => {
       try {
@@ -255,10 +259,12 @@ export function registerRegistryTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_registry_installed",
-    "List all locally installed plugins with their versions and metadata. Shows which plugins have updates available in the registry.",
-    {},
+    {
+      description: "List all locally installed plugins with their versions and metadata. Shows which plugins have updates available in the registry.",
+      inputSchema: z.object({}),
+    },
     async () => {
       try {
         const pluginDir = getPluginDir(ctx);

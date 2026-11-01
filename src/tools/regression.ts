@@ -12,7 +12,7 @@ import { z } from "zod";
 import { join } from "path";
 import { readFileSync, existsSync, readdirSync } from "fs";
 import { ensurePrivateDir, writeAtomicSync, sanitizeFilenameComponent, sanitizeFilenameComponentDotted, isWithinDir, tryReadJsonOrWarn} from "../middleware/fs-utils.js";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 interface PerfBaseline {
@@ -94,13 +94,15 @@ function parseBatteryLevel(output: string): number | null {
 
 export function registerRegressionTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_regression_baseline",
-    "Capture a performance baseline for a package: memory, CPU, frame stats, battery, and network state. Saves to a timestamped JSON file for later comparison with adb_regression_check.",
     {
-      packageName: z.string().describe("Package name to profile"),
-      label: z.string().optional().default("baseline").describe("Label for this baseline (e.g., 'before-refactor', 'v2.5.0')"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Capture a performance baseline for a package: memory, CPU, frame stats, battery, and network state. Saves to a timestamped JSON file for later comparison with adb_regression_check.",
+      inputSchema: z.object({
+        packageName: z.string().describe("Package name to profile"),
+        label: z.string().optional().default("baseline").describe("Label for this baseline (e.g., 'before-refactor', 'v2.5.0')"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ packageName, label, device }) => {
       try {
@@ -161,15 +163,17 @@ export function registerRegressionTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_regression_check",
-    "Compare current performance against a saved baseline. Flags regressions in memory (>20% increase), CPU (>50% increase), and jank rate (>25% increase). Thresholds are configurable.",
     {
-      baselinePath: z.string().describe("Path to the saved baseline JSON file"),
-      memoryThreshold: z.number().min(0).max(1000).optional().default(20).describe("Memory regression threshold in percent (0-1000, default 20%)"),
-      cpuThreshold: z.number().min(0).max(1000).optional().default(50).describe("CPU regression threshold in percent (0-1000, default 50%)"),
-      jankThreshold: z.number().min(0).max(1000).optional().default(25).describe("Jank rate regression threshold in percent (0-1000, default 25%)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Compare current performance against a saved baseline. Flags regressions in memory (>20% increase), CPU (>50% increase), and jank rate (>25% increase). Thresholds are configurable.",
+      inputSchema: z.object({
+        baselinePath: z.string().describe("Path to the saved baseline JSON file"),
+        memoryThreshold: z.number().min(0).max(1000).optional().default(20).describe("Memory regression threshold in percent (0-1000, default 20%)"),
+        cpuThreshold: z.number().min(0).max(1000).optional().default(50).describe("CPU regression threshold in percent (0-1000, default 50%)"),
+        jankThreshold: z.number().min(0).max(1000).optional().default(25).describe("Jank rate regression threshold in percent (0-1000, default 25%)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ baselinePath, memoryThreshold, cpuThreshold, jankThreshold, device }) => {
       try {
@@ -247,11 +251,13 @@ export function registerRegressionTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_regression_history",
-    "List all saved regression baselines, optionally filtered by package name. Shows trends over time.",
     {
-      packageName: z.string().optional().describe("Filter by package name"),
+      description: "List all saved regression baselines, optionally filtered by package name. Shows trends over time.",
+      inputSchema: z.object({
+        packageName: z.string().optional().describe("Filter by package name"),
+      }),
     },
     async ({ packageName }) => {
       try {

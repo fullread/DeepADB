@@ -8,18 +8,20 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 
 export function registerMultiDeviceTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_multi_shell",
-    "Execute a shell command on multiple (or all) connected devices in parallel. Returns results grouped by device.",
     {
-      command: z.string().describe("Shell command to execute on each device"),
-      devices: z.array(z.string()).optional().describe("Device serials to target (omit for all online devices)"),
-      timeout: z.number().min(1000).max(600000).optional().describe("Timeout per device in milliseconds (1s-10min)"),
+      description: "Execute a shell command on multiple (or all) connected devices in parallel. Returns results grouped by device.",
+      inputSchema: z.object({
+        command: z.string().describe("Shell command to execute on each device"),
+        devices: z.array(z.string()).optional().describe("Device serials to target (omit for all online devices)"),
+        timeout: z.number().min(1000).max(600000).optional().describe("Timeout per device in milliseconds (1s-10min)"),
+      }),
     },
     async ({ command, devices, timeout }) => {
       try {
@@ -66,13 +68,15 @@ export function registerMultiDeviceTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_multi_install",
-    "Install an APK on multiple (or all) connected devices in parallel.",
     {
-      apkPath: z.string().describe("Local filesystem path to the APK file"),
-      devices: z.array(z.string()).optional().describe("Device serials (omit for all online devices)"),
-      replace: z.boolean().optional().default(true).describe("Replace existing app (-r)"),
+      description: "Install an APK on multiple (or all) connected devices in parallel.",
+      inputSchema: z.object({
+        apkPath: z.string().describe("Local filesystem path to the APK file"),
+        devices: z.array(z.string()).optional().describe("Device serials (omit for all online devices)"),
+        replace: z.boolean().optional().default(true).describe("Replace existing app (-r)"),
+      }),
     },
     async ({ apkPath, devices, replace }) => {
       try {
@@ -114,12 +118,14 @@ export function registerMultiDeviceTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_multi_compare",
-    "Run a command on all devices and compare outputs side by side. Highlights differences across devices.",
     {
-      command: z.string().describe("Shell command to compare across devices"),
-      devices: z.array(z.string()).optional().describe("Device serials (omit for all online devices)"),
+      description: "Run a command on all devices and compare outputs side by side. Highlights differences across devices.",
+      inputSchema: z.object({
+        command: z.string().describe("Shell command to compare across devices"),
+        devices: z.array(z.string()).optional().describe("Device serials (omit for all online devices)"),
+      }),
     },
     async ({ command, devices }) => {
       try {
@@ -235,21 +241,23 @@ export function registerMultiDeviceTools(ctx: ToolContext): void {
     },
   };
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_multi_test",
-    "Run a comparative test workflow across all connected devices (host + QEMU guests). Executes a predefined diagnostic profile or custom command list on every device in parallel, compares results per-check, and reports matches and differences. Profiles: 'firmware' (baseband, bootloader, kernel, security patch), 'security' (SELinux, verified boot, encryption), 'network' (radio, WiFi, SIM), 'identity' (model, chipset, architecture), 'full' (all profiles). Custom commands also supported.",
     {
-      profile: z.enum(["firmware", "security", "network", "identity", "full"]).optional()
-        .describe("Predefined test profile to run. 'full' runs all profiles."),
-      commands: z.array(z.object({
-        label: z.string().describe("Human-readable label for this check"),
-        command: z.string().describe("Shell command to execute"),
-      })).max(50).optional()
-        .describe("Custom checks to run (max 50). Each has a label and command."),
-      devices: z.array(z.string()).optional()
-        .describe("Device serials to target (omit for all online devices)"),
-      timeout: z.number().min(1000).max(60000).optional().default(10000)
-        .describe("Timeout per command per device in ms (1s-60s, default 10s)"),
+      description: "Run a comparative test workflow across all connected devices (host + QEMU guests). Executes a predefined diagnostic profile or custom command list on every device in parallel, compares results per-check, and reports matches and differences. Profiles: 'firmware' (baseband, bootloader, kernel, security patch), 'security' (SELinux, verified boot, encryption), 'network' (radio, WiFi, SIM), 'identity' (model, chipset, architecture), 'full' (all profiles). Custom commands also supported.",
+      inputSchema: z.object({
+        profile: z.enum(["firmware", "security", "network", "identity", "full"]).optional()
+          .describe("Predefined test profile to run. 'full' runs all profiles."),
+        commands: z.array(z.object({
+          label: z.string().describe("Human-readable label for this check"),
+          command: z.string().describe("Shell command to execute"),
+        })).max(50).optional()
+          .describe("Custom checks to run (max 50). Each has a label and command."),
+        devices: z.array(z.string()).optional()
+          .describe("Device serials to target (omit for all online devices)"),
+        timeout: z.number().min(1000).max(60000).optional().default(10000)
+          .describe("Timeout per command per device in ms (1s-60s, default 10s)"),
+      }),
     },
     async ({ profile, commands, devices, timeout }) => {
       try {

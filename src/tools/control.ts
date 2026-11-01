@@ -9,18 +9,20 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { validateShellArg, validateShellArgs, shellQuote } from "../middleware/sanitize.js";
 
 export function registerControlTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_airplane_mode",
-    "Toggle airplane mode on/off. Useful for resetting cellular registration during radio testing.",
     {
-      enabled: z.boolean().describe("true = enable airplane mode, false = disable"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Toggle airplane mode on/off. Useful for resetting cellular registration during radio testing.",
+      inputSchema: z.object({
+        enabled: z.boolean().describe("true = enable airplane mode, false = disable"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ enabled, device }) => {
       try {
@@ -46,12 +48,14 @@ export function registerControlTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_wifi",
-    "Enable or disable WiFi",
     {
-      enabled: z.boolean().describe("true = enable WiFi, false = disable"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Enable or disable WiFi",
+      inputSchema: z.object({
+        enabled: z.boolean().describe("true = enable WiFi, false = disable"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ enabled, device }) => {
       try {
@@ -65,12 +69,14 @@ export function registerControlTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_mobile_data",
-    "Enable or disable mobile data",
     {
-      enabled: z.boolean().describe("true = enable mobile data, false = disable"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Enable or disable mobile data",
+      inputSchema: z.object({
+        enabled: z.boolean().describe("true = enable mobile data, false = disable"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ enabled, device }) => {
       try {
@@ -84,14 +90,16 @@ export function registerControlTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_location",
-    "Enable or disable location services",
     {
-      mode: z.enum(["off", "sensors", "battery", "high"]).describe(
-        "Location mode: off, sensors (GPS only), battery (network only), high (GPS + network)"
-      ),
-      device: z.string().optional().describe("Device serial"),
+      description: "Enable or disable location services",
+      inputSchema: z.object({
+        mode: z.enum(["off", "sensors", "battery", "high"]).describe(
+          "Location mode: off, sensors (GPS only), battery (network only), high (GPS + network)"
+        ),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ mode, device }) => {
       try {
@@ -110,13 +118,15 @@ export function registerControlTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_screen",
-    "Control screen state: wake, sleep, toggle, lock, or unlock. Lock and unlock verify actual keyguard state via dumpsys window. Unlock uses wm dismiss-keyguard (works for swipe keyguards); supply 'pin' to perform the full PIN entry sequence for PIN-protected devices: wakes screen, dismisses keyguard, swipes up to reveal keypad, types PIN, confirms with ENTER, and verifies the keyguard sleep token was released.",
     {
-      action: z.enum(["wake", "sleep", "toggle", "lock", "unlock"]).describe("Screen action — one of: wake (power on + dismiss keyguard if no PIN), sleep (power off), toggle (flip current state), lock (force keyguard), unlock (dismiss keyguard, with PIN if supplied)"),
-      pin: z.string().trim().regex(/^[a-zA-Z0-9]+$/, "PIN must be alphanumeric only").optional().describe("PIN/password to enter when unlock encounters an active keyguard (digits only for PIN, alphanumeric for password). Only used with action='unlock'."),
-      device: z.string().optional().describe("Device serial"),
+      description: "Control screen state: wake, sleep, toggle, lock, or unlock. Lock and unlock verify actual keyguard state via dumpsys window. Unlock uses wm dismiss-keyguard (works for swipe keyguards); supply 'pin' to perform the full PIN entry sequence for PIN-protected devices: wakes screen, dismisses keyguard, swipes up to reveal keypad, types PIN, confirms with ENTER, and verifies the keyguard sleep token was released.",
+      inputSchema: z.object({
+        action: z.enum(["wake", "sleep", "toggle", "lock", "unlock"]).describe("Screen action — one of: wake (power on + dismiss keyguard if no PIN), sleep (power off), toggle (flip current state), lock (force keyguard), unlock (dismiss keyguard, with PIN if supplied)"),
+        pin: z.string().trim().regex(/^[a-zA-Z0-9]+$/, "PIN must be alphanumeric only").optional().describe("PIN/password to enter when unlock encounters an active keyguard (digits only for PIN, alphanumeric for password). Only used with action='unlock'."),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ action, pin, device }) => {
       try {
@@ -216,12 +226,14 @@ export function registerControlTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_airplane_cycle",
-    "Cycle airplane mode on then off after a delay. Forces cellular re-registration — useful for radio diagnostics and network testing.",
     {
-      delaySeconds: z.number().min(1).max(60).optional().default(3).describe("Seconds to keep airplane mode on (1-60, default 3)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Cycle airplane mode on then off after a delay. Forces cellular re-registration — useful for radio diagnostics and network testing.",
+      inputSchema: z.object({
+        delaySeconds: z.number().min(1).max(60).optional().default(3).describe("Seconds to keep airplane mode on (1-60, default 3)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ delaySeconds, device }) => {
       try {
@@ -257,13 +269,15 @@ export function registerControlTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_settings_get",
-    "Read an Android settings value from any namespace (system, secure, global)",
     {
-      namespace: z.enum(["system", "secure", "global"]).describe("Settings namespace"),
-      key: z.string().min(1).describe("Setting key (e.g., 'screen_brightness', 'location_mode', 'airplane_mode_on')"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Read an Android settings value from any namespace (system, secure, global)",
+      inputSchema: z.object({
+        namespace: z.enum(["system", "secure", "global"]).describe("Settings namespace"),
+        key: z.string().min(1).describe("Setting key (e.g., 'screen_brightness', 'location_mode', 'airplane_mode_on')"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ namespace, key, device }) => {
       try {
@@ -279,14 +293,16 @@ export function registerControlTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_settings_put",
-    "Write an Android settings value to any namespace (system, secure, global)",
     {
-      namespace: z.enum(["system", "secure", "global"]).describe("Settings namespace"),
-      key: z.string().min(1).describe("Setting key (e.g., 'screen_brightness' for system namespace, 'wifi_on' or 'airplane_mode_on' for global, 'location_providers_allowed' for secure). Use `adb_shell` with `settings list <namespace>` to enumerate available keys for a device."),
-      value: z.string().describe("Value to write. Type depends on the key — typically a string, integer, or 0/1 for booleans. The setting framework accepts everything as a string and parses on read."),
-      device: z.string().optional().describe("Device serial"),
+      description: "Write an Android settings value to any namespace (system, secure, global)",
+      inputSchema: z.object({
+        namespace: z.enum(["system", "secure", "global"]).describe("Settings namespace"),
+        key: z.string().min(1).describe("Setting key (e.g., 'screen_brightness' for system namespace, 'wifi_on' or 'airplane_mode_on' for global, 'location_providers_allowed' for secure). Use `adb_shell` with `settings list <namespace>` to enumerate available keys for a device."),
+        value: z.string().describe("Value to write. Type depends on the key — typically a string, integer, or 0/1 for booleans. The setting framework accepts everything as a string and parses on read."),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ namespace, key, value, device }) => {
       try {
@@ -303,13 +319,15 @@ export function registerControlTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_reboot",
-    "Reboot the device. Supports normal, recovery, and bootloader modes.",
     {
-      mode: z.enum(["normal", "recovery", "bootloader"]).optional().default("normal")
-        .describe("Reboot mode: normal (default), recovery, or bootloader"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Reboot the device. Supports normal, recovery, and bootloader modes.",
+      inputSchema: z.object({
+        mode: z.enum(["normal", "recovery", "bootloader"]).optional().default("normal")
+          .describe("Reboot mode: normal (default), recovery, or bootloader"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ mode, device }) => {
       try {

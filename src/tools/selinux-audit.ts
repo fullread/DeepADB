@@ -16,7 +16,7 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 
@@ -99,11 +99,13 @@ const DANGEROUS_PERMISSION_GROUPS: Record<string, string[]> = {
 
 export function registerSelinuxAuditTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_selinux_status",
-    "Check SELinux enforcement mode, policy version, and recent denial count. Shows whether the device is in Enforcing, Permissive, or Disabled mode. Root access provides additional policy details from dmesg audit logs.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "Check SELinux enforcement mode, policy version, and recent denial count. Shows whether the device is in Enforcing, Permissive, or Disabled mode. Root access provides additional policy details from dmesg audit logs.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {
@@ -184,13 +186,15 @@ export function registerSelinuxAuditTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_selinux_denials",
-    "List recent SELinux AVC denial messages from logcat and kernel logs. Shows which processes were blocked, what they tried to do, and the SELinux contexts involved. Useful for diagnosing permission issues and understanding security policy enforcement.",
     {
-      lines: z.number().min(1).max(1000).optional().default(50).describe("Max denial entries to return (1-1000, default 50)"),
-      process: z.string().optional().describe("Filter denials by process/source context name"),
-      device: z.string().optional().describe("Device serial"),
+      description: "List recent SELinux AVC denial messages from logcat and kernel logs. Shows which processes were blocked, what they tried to do, and the SELinux contexts involved. Useful for diagnosing permission issues and understanding security policy enforcement.",
+      inputSchema: z.object({
+        lines: z.number().min(1).max(1000).optional().default(50).describe("Max denial entries to return (1-1000, default 50)"),
+        process: z.string().optional().describe("Filter denials by process/source context name"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ lines, process: processFilter, device }) => {
       try {
@@ -262,15 +266,17 @@ export function registerSelinuxAuditTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_permission_audit",
-    "Audit runtime permission grants for a package. Lists all granted dangerous permissions grouped by category (Camera, Location, Phone, SMS, etc.) and flags potentially over-provisioned permissions. Compares grants against the dangerous permission manifest to identify unnecessary access.",
     {
-      packageName: z.string().regex(
-        /^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/,
-        "Package name must be a dotted Java identifier (e.g., 'com.example.app'). Each segment must start with a letter and contain only letters, digits, or underscores."
-      ).describe("Package name to audit (e.g., 'com.example.app'). AZ7 fix: enforces Java-identifier shape so injection attempts are rejected at the schema layer before reaching validateShellArg."),
-      device: z.string().optional().describe("Device serial"),
+      description: "Audit runtime permission grants for a package. Lists all granted dangerous permissions grouped by category (Camera, Location, Phone, SMS, etc.) and flags potentially over-provisioned permissions. Compares grants against the dangerous permission manifest to identify unnecessary access.",
+      inputSchema: z.object({
+        packageName: z.string().regex(
+          /^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/,
+          "Package name must be a dotted Java identifier (e.g., 'com.example.app'). Each segment must start with a letter and contain only letters, digits, or underscores."
+        ).describe("Package name to audit (e.g., 'com.example.app'). AZ7 fix: enforces Java-identifier shape so injection attempts are rejected at the schema layer before reaching validateShellArg."),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ packageName, device }) => {
       try {

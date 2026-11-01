@@ -1,6 +1,6 @@
 {
   "name": "deepadb",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "DeepADB — full-featured Android Debug Bridge MCP server. 209 tools across 49 modules for device inspection from UI to baseband.",
   "mcpName": "io.github.fullread/deepadb",
   "type": "module",
@@ -15,13 +15,15 @@
     "test": "node tests/run-all.mjs",
     "coverage": "npm run build && c8 node tests/run-all.mjs",
     "test:ci": "npm run build && node tests/run-all.mjs --ci",
+    "test:browser": "npm run build && node tests/browser/cors.mjs",
     "lint": "eslint src",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
     "prepublishOnly": "npm run build"
   },
   "files": [
     "build",
-    "NOTICE"
+    "NOTICE",
+    "LOCAL_LLMS.md"
   ],
   "keywords": [
     "mcp",
@@ -34,18 +36,37 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.1",
-    "zod": "^4.6.5"
+    "@modelcontextprotocol/node": "^2.1.2",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "@modelcontextprotocol/server-legacy": "^2.4.0",
+    "zod": "^4.6.7"
+  },
+  "overrides": {
+    "eslint@^10.14.0": {
+      "minimatch": "11.0.3"
+    },
+    "@eslint/config-array@0.23.5": {
+      "minimatch": "11.0.3"
+    },
+    "@typescript-eslint/typescript-estree@8.72.1": {
+      "minimatch": "11.0.3"
+    },
+    "test-exclude@8.0.0": {
+      "minimatch": "11.0.3",
+      "glob": "14.0.3"
+    }
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^26.6.5",
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@types/node": "^26.6.6",
     "c8": "^12.0.0",
-    "eslint": "^10.12.0",
+    "eslint": "^10.14.0",
     "fast-check": "^4.10.2",
     "graphql": "^17.0.2",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.71.1",
+    "typescript-eslint": "^8.72.1",
     "ws": "^8.22.0"
   }
 }

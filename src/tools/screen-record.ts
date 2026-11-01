@@ -10,7 +10,7 @@
 import { z } from "zod";
 import { join } from "path";
 import { statSync } from "fs";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { shellQuote } from "../middleware/sanitize.js";
 
@@ -26,13 +26,15 @@ const recordings = new Map<string, RecordingSession>();
 
 export function registerScreenRecordTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_screenrecord_start",
-    "Start recording the device screen. Recording runs on-device. Use adb_screenrecord_stop to finish and pull the video file.",
     {
-      maxDuration: z.number().min(1).max(180).optional().default(60)
-        .describe("Maximum recording duration in seconds (1-180, default 60)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Start recording the device screen. Recording runs on-device. Use adb_screenrecord_stop to finish and pull the video file.",
+      inputSchema: z.object({
+        maxDuration: z.number().min(1).max(180).optional().default(60)
+          .describe("Maximum recording duration in seconds (1-180, default 60)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ maxDuration, device }) => {
       try {
@@ -72,11 +74,13 @@ export function registerScreenRecordTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_screenrecord_stop",
-    "Stop an active screen recording and pull the video file locally. If the recording has already finished (hit time limit), this just pulls the file.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "Stop an active screen recording and pull the video file locally. If the recording has already finished (hit time limit), this just pulls the file.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       let resolvedSerial: string | undefined;

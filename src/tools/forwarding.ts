@@ -8,7 +8,7 @@
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { createServer } from "net";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { registerCleanup } from "../middleware/cleanup.js";
 
@@ -119,13 +119,15 @@ function pickFreeHostPort(): Promise<number> {
 
 export function registerForwardingTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_forward",
-    "Forward a local port to a port on the device (host → device). Use for connecting to services running on the device.",
     {
-      local: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>").describe("Local (host) spec, e.g., 'tcp:8080'. AF2 fix: format-validated."),
-      remote: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>").describe("Remote (device) spec, e.g., 'tcp:8080' or 'localabstract:app_socket'. AF2 fix: format-validated."),
-      device: z.string().optional().describe("Device serial"),
+      description: "Forward a local port to a port on the device (host → device). Use for connecting to services running on the device.",
+      inputSchema: z.object({
+        local: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>").describe("Local (host) spec, e.g., 'tcp:8080'. AF2 fix: format-validated."),
+        remote: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>").describe("Remote (device) spec, e.g., 'tcp:8080' or 'localabstract:app_socket'. AF2 fix: format-validated."),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ local, remote, device }) => {
       try {
@@ -140,13 +142,15 @@ export function registerForwardingTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_reverse",
-    "Reverse-forward a device port to a port on the host (device → host). Use for letting device apps reach services on your machine.",
     {
-      remote: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>").describe("Remote (device) spec, e.g., 'tcp:3000'. AF2 fix: format-validated."),
-      local: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>").describe("Local (host) spec, e.g., 'tcp:3000'. AF2 fix: format-validated."),
-      device: z.string().optional().describe("Device serial"),
+      description: "Reverse-forward a device port to a port on the host (device → host). Use for letting device apps reach services on your machine.",
+      inputSchema: z.object({
+        remote: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>").describe("Remote (device) spec, e.g., 'tcp:3000'. AF2 fix: format-validated."),
+        local: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>").describe("Local (host) spec, e.g., 'tcp:3000'. AF2 fix: format-validated."),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ remote, local, device }) => {
       try {
@@ -161,10 +165,12 @@ export function registerForwardingTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_forward_list",
-    "List all active port forwards and reverse forwards",
-    { device: z.string().optional().describe("Device serial (omit for all devices)") },
+    {
+      description: "List all active port forwards and reverse forwards",
+      inputSchema: z.object({ device: z.string().optional().describe("Device serial (omit for all devices)") }),
+    },
     async ({ device }) => {
       try {
         const resolved = device ? await ctx.deviceManager.resolveDevice(device) : null;
@@ -199,12 +205,14 @@ export function registerForwardingTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_forward_remove",
-    "Remove a port forward (host → device), or all forwards. Use after testing to clean up.",
     {
-      local: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>").optional().describe("Local spec to remove (e.g., 'tcp:8080'). Omit to remove all forwards. AF2 fix: format-validated."),
-      device: z.string().optional().describe("Device serial"),
+      description: "Remove a port forward (host → device), or all forwards. Use after testing to clean up.",
+      inputSchema: z.object({
+        local: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>").optional().describe("Local spec to remove (e.g., 'tcp:8080'). Omit to remove all forwards. AF2 fix: format-validated."),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ local, device }) => {
       try {
@@ -221,12 +229,14 @@ export function registerForwardingTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_reverse_remove",
-    "Remove a reverse forward (device → host), or all reverse forwards. Use after testing to clean up.",
     {
-      remote: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>").optional().describe("Remote spec to remove (e.g., 'tcp:3000'). Omit to remove all reverse forwards. AF2 fix: format-validated."),
-      device: z.string().optional().describe("Device serial"),
+      description: "Remove a reverse forward (device → host), or all reverse forwards. Use after testing to clean up.",
+      inputSchema: z.object({
+        remote: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>").optional().describe("Remote spec to remove (e.g., 'tcp:3000'). Omit to remove all reverse forwards. AF2 fix: format-validated."),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ remote, device }) => {
       try {
@@ -253,17 +263,19 @@ export function registerForwardingTools(ctx: ToolContext): void {
   // so server shutdown removes managed tunnels automatically.
   // ═══════════════════════════════════════════════════════════════════
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_tunnel_open",
-    "Open a managed tunnel between host and device. Higher-level convenience wrapper over adb_forward / adb_reverse: auto-picks a free host port when one isn't specified (forward only), returns an opaque tunnel ID for later close, and registers cleanup so the tunnel is removed on server exit. Direction 'forward' = host port forwards TO device service; 'reverse' = device port forwards TO host service.",
     {
-      direction: z.enum(["forward", "reverse"])
-        .describe("'forward' (host → device) or 'reverse' (device → host)"),
-      deviceSpec: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>")
-        .describe("Device-side spec, e.g., 'tcp:3000' or 'localabstract:app_socket'"),
-      hostSpec: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>").optional()
-        .describe("Host-side spec, e.g., 'tcp:8080'. For 'forward' direction: omit to auto-pick a free host port. For 'reverse' direction: required (can't auto-pick device-side ports without an extra probe call)."),
-      device: z.string().optional().describe("Device serial"),
+      description: "Open a managed tunnel between host and device. Higher-level convenience wrapper over adb_forward / adb_reverse: auto-picks a free host port when one isn't specified (forward only), returns an opaque tunnel ID for later close, and registers cleanup so the tunnel is removed on server exit. Direction 'forward' = host port forwards TO device service; 'reverse' = device port forwards TO host service.",
+      inputSchema: z.object({
+        direction: z.enum(["forward", "reverse"])
+          .describe("'forward' (host → device) or 'reverse' (device → host)"),
+        deviceSpec: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>")
+          .describe("Device-side spec, e.g., 'tcp:3000' or 'localabstract:app_socket'"),
+        hostSpec: z.string().regex(FORWARD_SPEC_RE, "Spec must be one of tcp:<port>, localabstract:<name>, localreserved:<name>, localfilesystem:<path>, dev:<path>, jdwp:<pid>").optional()
+          .describe("Host-side spec, e.g., 'tcp:8080'. For 'forward' direction: omit to auto-pick a free host port. For 'reverse' direction: required (can't auto-pick device-side ports without an extra probe call)."),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ direction, deviceSpec, hostSpec, device }) => {
       try {
@@ -320,11 +332,13 @@ export function registerForwardingTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_tunnel_list",
-    "List all active managed tunnels (opened via adb_tunnel_open). Shows tunnel ID, device, direction, and both endpoints. Note: this only surfaces tunnels created via adb_tunnel_open — tunnels created via the low-level adb_forward / adb_reverse won't appear here. For those, use adb_forward_list.",
     {
-      device: z.string().optional().describe("Filter to a specific device serial (default: all devices)"),
+      description: "List all active managed tunnels (opened via adb_tunnel_open). Shows tunnel ID, device, direction, and both endpoints. Note: this only surfaces tunnels created via adb_tunnel_open — tunnels created via the low-level adb_forward / adb_reverse won't appear here. For those, use adb_forward_list.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Filter to a specific device serial (default: all devices)"),
+      }),
     },
     async ({ device }) => {
       try {
@@ -358,11 +372,13 @@ export function registerForwardingTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_tunnel_close",
-    "Close a managed tunnel by ID, or all managed tunnels at once. The corresponding adb forward/reverse entry is removed and the tunnel is dropped from the cleanup registry. Use adb_tunnel_list to see active tunnel IDs.",
     {
-      id: z.string().describe("Tunnel ID (tun_XXXXXX) returned by adb_tunnel_open, or the literal string 'all' to close every managed tunnel."),
+      description: "Close a managed tunnel by ID, or all managed tunnels at once. The corresponding adb forward/reverse entry is removed and the tunnel is dropped from the cleanup registry. Use adb_tunnel_list to see active tunnel IDs.",
+      inputSchema: z.object({
+        id: z.string().describe("Tunnel ID (tun_XXXXXX) returned by adb_tunnel_open, or the literal string 'all' to close every managed tunnel."),
+      }),
     },
     async ({ id }) => {
       try {

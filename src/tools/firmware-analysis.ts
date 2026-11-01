@@ -26,7 +26,7 @@ import { z } from "zod";
 import { join } from "path";
 import { readFileSync, existsSync, readdirSync } from "fs";
 import { isWithinDir, sanitizeFilenameComponent, tryReadJsonOrWarn } from "../middleware/fs-utils.js";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { resultHandleSchemaFields, withResultHandle } from "./result-handles.js";
 import { detectChipsetFamily } from "../middleware/chipset.js";
@@ -284,11 +284,13 @@ function loadFingerprints(dir: string, deviceFilter?: string): SavedFingerprint[
 
 export function registerFirmwareAnalysisTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_firmware_probe",
-    "Comprehensive firmware identification for the connected device. Reports all firmware components: baseband (parsed by chipset family — Shannon, Qualcomm, MediaTek, Unisoc, HiSilicon, Intel), bootloader, RIL implementation, kernel, security patch, A/B slot, verified boot state, and OTA-updatable partitions.",
     {
-      device: z.string().optional().describe("Device serial"),
+      description: "Comprehensive firmware identification for the connected device. Reports all firmware components: baseband (parsed by chipset family — Shannon, Qualcomm, MediaTek, Unisoc, HiSilicon, Intel), bootloader, RIL implementation, kernel, security patch, A/B slot, verified boot state, and OTA-updatable partitions.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ device }) => {
       try {
@@ -439,14 +441,16 @@ export function registerFirmwareAnalysisTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_firmware_diff",
-    "Compare all firmware components between two saved OTA fingerprints, or between the current device state and a saved fingerprint. Compares baseband (with chipset-specific parsed component diffs), bootloader, kernel, security patch, build ID, and Android version.",
     {
-      from: z.string().optional().describe("Path to 'from' fingerprint JSON (or 'current' to use live device state). Defaults to the second-most-recent fingerprint."),
-      to: z.string().optional().describe("Path to 'to' fingerprint JSON (or 'current' to use live device state). Defaults to the most recent fingerprint."),
-      device: z.string().optional().describe("Device serial (used when 'from' or 'to' is 'current', or for auto-selecting fingerprints)"),
-      ...resultHandleSchemaFields,
+      description: "Compare all firmware components between two saved OTA fingerprints, or between the current device state and a saved fingerprint. Compares baseband (with chipset-specific parsed component diffs), bootloader, kernel, security patch, build ID, and Android version.",
+      inputSchema: z.object({
+        from: z.string().optional().describe("Path to 'from' fingerprint JSON (or 'current' to use live device state). Defaults to the second-most-recent fingerprint."),
+        to: z.string().optional().describe("Path to 'to' fingerprint JSON (or 'current' to use live device state). Defaults to the most recent fingerprint."),
+        device: z.string().optional().describe("Device serial (used when 'from' or 'to' is 'current', or for auto-selecting fingerprints)"),
+        ...resultHandleSchemaFields,
+      }),
     },
     async ({ from, to, device, result_handle, result_handle_ttl }) => {
       try {
@@ -633,11 +637,13 @@ export function registerFirmwareAnalysisTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_firmware_history",
-    "Show firmware version progression across all saved OTA fingerprints for a device. Tracks baseband, bootloader, kernel, security patch, and build ID changes between consecutive snapshots with parsed component diffs.",
     {
-      device: z.string().optional().describe("Device serial (filters fingerprints to this device)"),
+      description: "Show firmware version progression across all saved OTA fingerprints for a device. Tracks baseband, bootloader, kernel, security patch, and build ID changes between consecutive snapshots with parsed component diffs.",
+      inputSchema: z.object({
+        device: z.string().optional().describe("Device serial (filters fingerprints to this device)"),
+      }),
     },
     async ({ device }) => {
       try {

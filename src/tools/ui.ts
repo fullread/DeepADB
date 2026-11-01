@@ -7,7 +7,7 @@
 import { z } from "zod";
 import { join, basename } from "path";
 import { writeFileSync } from "fs";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { shellQuote } from "../middleware/sanitize.js";
 import { sanitizeFilenameComponentDotted } from "../middleware/fs-utils.js";
@@ -26,12 +26,14 @@ function sanitizeFilename(name: string): string {
 
 export function registerUiTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_screencap",
-    "Take a screenshot and save to local filesystem. Returns the file path.",
     {
-      filename: z.string().optional().describe("Output filename (default: screenshot_<timestamp>.png)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Take a screenshot and save to local filesystem. Returns the file path.",
+      inputSchema: z.object({
+        filename: z.string().optional().describe("Output filename (default: screenshot_<timestamp>.png)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ filename, device }) => {
       try {
@@ -53,10 +55,12 @@ export function registerUiTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_current_activity",
-    "Get the currently focused activity and window stack",
-    { device: z.string().optional().describe("Device serial") },
+    {
+      description: "Get the currently focused activity and window stack",
+      inputSchema: z.object({ device: z.string().optional().describe("Device serial") }),
+    },
     async ({ device }) => {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
@@ -79,15 +83,17 @@ export function registerUiTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_input",
-    "Send input events to the device (tap, swipe, text, keyevent)",
     {
-      type: z.enum(["tap", "swipe", "text", "keyevent"]).describe("Input type — one of: tap (single touch), swipe (drag between two points), text (literal string entry), keyevent (Android key code like KEYCODE_HOME). The args field documents the expected argument format per type."),
-      args: z.string().describe(
-        "Arguments: tap='x y', swipe='x1 y1 x2 y2 [duration_ms]', text='string', keyevent='KEYCODE_HOME'"
-      ),
-      device: z.string().optional().describe("Device serial"),
+      description: "Send input events to the device (tap, swipe, text, keyevent)",
+      inputSchema: z.object({
+        type: z.enum(["tap", "swipe", "text", "keyevent"]).describe("Input type — one of: tap (single touch), swipe (drag between two points), text (literal string entry), keyevent (Android key code like KEYCODE_HOME). The args field documents the expected argument format per type."),
+        args: z.string().describe(
+          "Arguments: tap='x y', swipe='x1 y1 x2 y2 [duration_ms]', text='string', keyevent='KEYCODE_HOME'"
+        ),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ type, args, device }) => {
       try {
@@ -133,12 +139,14 @@ export function registerUiTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_start_activity",
-    "Start an activity or app by intent or component name",
     {
-      intent: z.string().describe("Intent or component (e.g., 'com.example/.MainActivity' or '-a android.intent.action.VIEW -d https://example.com')"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Start an activity or app by intent or component name",
+      inputSchema: z.object({
+        intent: z.string().describe("Intent or component (e.g., 'com.example/.MainActivity' or '-a android.intent.action.VIEW -d https://example.com')"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ intent, device }) => {
       try {
@@ -158,14 +166,16 @@ export function registerUiTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_ui_dump",
-    "Dump the current UI hierarchy. Parses the view tree into structured element data with coordinates, text, resource IDs, and interaction flags. Use format='tsv' for token-efficient compact output, format='xml' for raw uiautomator XML.",
     {
-      clickableOnly: z.boolean().optional().default(false).describe("Only show clickable/interactive elements"),
-      format: z.enum(["text", "tsv", "xml"]).optional().default("text")
-        .describe("Output format: 'text' (default, human-readable), 'tsv' (tab-separated, token-efficient), 'xml' (raw uiautomator XML)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Dump the current UI hierarchy. Parses the view tree into structured element data with coordinates, text, resource IDs, and interaction flags. Use format='tsv' for token-efficient compact output, format='xml' for raw uiautomator XML.",
+      inputSchema: z.object({
+        clickableOnly: z.boolean().optional().default(false).describe("Only show clickable/interactive elements"),
+        format: z.enum(["text", "tsv", "xml"]).optional().default("text")
+          .describe("Output format: 'text' (default, human-readable), 'tsv' (tab-separated, token-efficient), 'xml' (raw uiautomator XML)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ clickableOnly, format, device }) => {
       try {
@@ -201,14 +211,16 @@ export function registerUiTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_ui_find",
-    "Search the UI hierarchy for elements matching text, resource-id, or content-description. Returns matching elements with coordinates for precise adb_input targeting.",
     {
-      text: z.string().optional().describe("Match elements containing this text (case-insensitive)"),
-      resourceId: z.string().optional().describe("Match elements with this resource-id (partial match)"),
-      contentDesc: z.string().optional().describe("Match elements with this content-description (partial, case-insensitive)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Search the UI hierarchy for elements matching text, resource-id, or content-description. Returns matching elements with coordinates for precise adb_input targeting.",
+      inputSchema: z.object({
+        text: z.string().optional().describe("Match elements containing this text (case-insensitive)"),
+        resourceId: z.string().optional().describe("Match elements with this resource-id (partial match)"),
+        contentDesc: z.string().optional().describe("Match elements with this content-description (partial, case-insensitive)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ text, resourceId, contentDesc, device }) => {
       if (!text && !resourceId && !contentDesc) {
@@ -247,15 +259,17 @@ export function registerUiTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_screencap_annotated",
-    "Take a screenshot with UI element bounding boxes and numbered labels composited directly onto the image. Returns the annotated PNG path plus a text legend mapping each element number to its identity. Ideal for LLM workflows that need to reference specific UI elements by number rather than by coordinates.",
     {
-      clickableOnly: z.boolean().optional().default(true)
-        .describe("Only annotate clickable/scrollable elements (default true — reduces visual noise)"),
-      filename: z.string().optional()
-        .describe("Output filename (default: annotated_<timestamp>.png)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Take a screenshot with UI element bounding boxes and numbered labels composited directly onto the image. Returns the annotated PNG path plus a text legend mapping each element number to its identity. Ideal for LLM workflows that need to reference specific UI elements by number rather than by coordinates.",
+      inputSchema: z.object({
+        clickableOnly: z.boolean().optional().default(true)
+          .describe("Only annotate clickable/scrollable elements (default true — reduces visual noise)"),
+        filename: z.string().optional()
+          .describe("Output filename (default: annotated_<timestamp>.png)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ clickableOnly, filename, device }) => {
       try {
@@ -327,13 +341,15 @@ export function registerUiTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_screen_state",
-    "Get a combined screen state snapshot in one call: foreground activity, screen dimensions and density, orientation, battery level, and a TSV list of interactive UI elements. Replaces 3-4 separate tool calls with a single round-trip. Ideal as a first step in any automation workflow.",
     {
-      clickableOnly: z.boolean().optional().default(true)
-        .describe("Only include clickable/scrollable elements in TSV output (default true)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Get a combined screen state snapshot in one call: foreground activity, screen dimensions and density, orientation, battery level, and a TSV list of interactive UI elements. Replaces 3-4 separate tool calls with a single round-trip. Ideal as a first step in any automation workflow.",
+      inputSchema: z.object({
+        clickableOnly: z.boolean().optional().default(true)
+          .describe("Only include clickable/scrollable elements in TSV output (default true)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ clickableOnly, device }) => {
       try {

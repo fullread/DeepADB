@@ -9,7 +9,7 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { shellQuote } from "../middleware/sanitize.js";
 
@@ -66,14 +66,16 @@ function summarizeConnectivity(output: string): string[] {
 }
 
 export function registerAppNetworkTools(ctx: ToolContext): void {
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_app_route_context",
-    "Show the effective Android routing context for one installed app by correlating its UID with ip rules, route tables, network policy, VPN, and default-network state. Read-only; does not alter routes or app policy.",
     {
-      packageName: z.string().regex(PACKAGE_NAME_PATTERN).describe("Installed Android package to inspect"),
-      includeConnectivitySummary: z.boolean().optional().default(true)
-        .describe("Include a privacy-conscious connectivity/VPN/default-network summary"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Show the effective Android routing context for one installed app by correlating its UID with ip rules, route tables, network policy, VPN, and default-network state. Read-only; does not alter routes or app policy.",
+      inputSchema: z.object({
+        packageName: z.string().regex(PACKAGE_NAME_PATTERN).describe("Installed Android package to inspect"),
+        includeConnectivitySummary: z.boolean().optional().default(true)
+          .describe("Include a privacy-conscious connectivity/VPN/default-network summary"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ packageName, includeConnectivitySummary, device }) => {
       try {

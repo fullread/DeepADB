@@ -16,7 +16,7 @@ import { join } from "path";
 import { readFileSync, existsSync, readdirSync, statSync, unlinkSync } from "fs";
 import { ensurePrivateDir, writeAtomicSync, sanitizeFilenameComponent } from "../middleware/fs-utils.js";
 import { createHash } from "crypto";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { resultHandleSchemaFields, withResultHandle } from "./result-handles.js";
 import { shellQuote } from "../middleware/sanitize.js";
@@ -153,13 +153,15 @@ function compareScreenshots(pathA: string, pathB: string): PixelDiffResult {
 
 export function registerScreenshotDiffTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_screenshot_baseline",
-    "Capture a named screenshot baseline for later comparison. Saves the screenshot and metadata to the baselines directory.",
     {
-      name: z.string().describe("Baseline name (e.g., 'home_screen', 'login_page', 'threat_alert')"),
-      device: z.string().optional().describe("Device serial"),
-      ...resultHandleSchemaFields,
+      description: "Capture a named screenshot baseline for later comparison. Saves the screenshot and metadata to the baselines directory.",
+      inputSchema: z.object({
+        name: z.string().describe("Baseline name (e.g., 'home_screen', 'login_page', 'threat_alert')"),
+        device: z.string().optional().describe("Device serial"),
+        ...resultHandleSchemaFields,
+      }),
     },
     async ({ name, device, result_handle, result_handle_ttl }) => {
       try {
@@ -202,15 +204,17 @@ export function registerScreenshotDiffTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_screenshot_diff",
-    "Compare the current screen against a saved screenshot baseline. Decodes PNGs and performs pixel-level comparison (RGB channels), reporting exact pixel difference count, percentage, and the bounding box of the changed region. Supports a tolerance threshold for absorbing minor dynamic elements like clocks or notification badges.",
     {
-      baseline: z.string().describe("Baseline name to compare against (from adb_screenshot_baseline)"),
-      tolerancePercent: z.number().min(0).max(100).optional().default(0)
-        .describe("Pixel difference percentage threshold below which the result reports IDENTICAL. 0 = exact match required. 1-2 absorbs clock/status bar changes."),
-      device: z.string().optional().describe("Device serial"),
-      ...resultHandleSchemaFields,
+      description: "Compare the current screen against a saved screenshot baseline. Decodes PNGs and performs pixel-level comparison (RGB channels), reporting exact pixel difference count, percentage, and the bounding box of the changed region. Supports a tolerance threshold for absorbing minor dynamic elements like clocks or notification badges.",
+      inputSchema: z.object({
+        baseline: z.string().describe("Baseline name to compare against (from adb_screenshot_baseline)"),
+        tolerancePercent: z.number().min(0).max(100).optional().default(0)
+          .describe("Pixel difference percentage threshold below which the result reports IDENTICAL. 0 = exact match required. 1-2 absorbs clock/status bar changes."),
+        device: z.string().optional().describe("Device serial"),
+        ...resultHandleSchemaFields,
+      }),
     },
     async ({ baseline, tolerancePercent, device, result_handle, result_handle_ttl }) => {
       try {
@@ -318,11 +322,13 @@ export function registerScreenshotDiffTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_screenshot_history",
-    "List all saved screenshot baselines with their metadata (timestamp, dimensions, device, file size).",
     {
-      ...resultHandleSchemaFields,
+      description: "List all saved screenshot baselines with their metadata (timestamp, dimensions, device, file size).",
+      inputSchema: z.object({
+        ...resultHandleSchemaFields,
+      }),
     },
     async ({ result_handle, result_handle_ttl }) => {
       try {

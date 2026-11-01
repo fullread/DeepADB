@@ -11,7 +11,7 @@
 
 import { z } from "zod";
 import { ChildProcess } from "child_process";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { resultHandleSchemaFields, withResultHandle } from "./result-handles.js";
 import { registerCleanup, gracefulKill } from "../middleware/cleanup.js";
@@ -65,14 +65,16 @@ export function registerLogcatWatchTools(ctx: ToolContext): void {
   // Ensure orphaned processes get cleaned up on server exit
   ensureCleanupRegistered();
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_logcat_start",
-    "Start a background logcat watcher. Lines accumulate in a ring buffer. Use adb_logcat_poll to retrieve new entries.",
     {
-      tag: z.string().regex(/^[a-zA-Z0-9_]+$/, "Logcat tag must be alphanumeric or underscore (e.g., 'MyApp', 'AT_Cmd')").optional().describe("Filter by tag (e.g., 'MyApp'). Must match /^[a-zA-Z0-9_]+$/ — Android tags are identifier-shaped in practice."),
-      priority: z.enum(["V", "D", "I", "W", "E", "F"]).optional().describe("Minimum priority level"),
-      bufferSize: z.number().min(100).max(50000).optional().default(2000).describe("Max lines to keep in ring buffer (100-50000, default 2000)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Start a background logcat watcher. Lines accumulate in a ring buffer. Use adb_logcat_poll to retrieve new entries.",
+      inputSchema: z.object({
+        tag: z.string().regex(/^[a-zA-Z0-9_]+$/, "Logcat tag must be alphanumeric or underscore (e.g., 'MyApp', 'AT_Cmd')").optional().describe("Filter by tag (e.g., 'MyApp'). Must match /^[a-zA-Z0-9_]+$/ — Android tags are identifier-shaped in practice."),
+        priority: z.enum(["V", "D", "I", "W", "E", "F"]).optional().describe("Minimum priority level"),
+        bufferSize: z.number().min(100).max(50000).optional().default(2000).describe("Max lines to keep in ring buffer (100-50000, default 2000)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ tag, priority, bufferSize, device }) => {
       try {
@@ -166,13 +168,15 @@ export function registerLogcatWatchTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_logcat_poll",
-    "Retrieve new logcat lines since the last poll from a running watcher session.",
     {
-      session: z.string().describe("Session ID from adb_logcat_start (e.g., 'watch_1')"),
-      maxLines: z.number().min(1).max(10000).optional().default(200).describe("Max lines to return per poll (1-10000)"),
-      ...resultHandleSchemaFields,
+      description: "Retrieve new logcat lines since the last poll from a running watcher session.",
+      inputSchema: z.object({
+        session: z.string().describe("Session ID from adb_logcat_start (e.g., 'watch_1')"),
+        maxLines: z.number().min(1).max(10000).optional().default(200).describe("Max lines to return per poll (1-10000)"),
+        ...resultHandleSchemaFields,
+      }),
     },
     async ({ session: sessionId, maxLines, result_handle, result_handle_ttl }) => {
       try {
@@ -221,11 +225,13 @@ export function registerLogcatWatchTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_logcat_stop",
-    "Stop a running logcat watcher session",
     {
-      session: z.string().describe("Session ID to stop (e.g., 'watch_1'), or 'all' to stop all"),
+      description: "Stop a running logcat watcher session",
+      inputSchema: z.object({
+        session: z.string().describe("Session ID to stop (e.g., 'watch_1'), or 'all' to stop all"),
+      }),
     },
     async ({ session: sessionId }) => {
       try {
@@ -249,10 +255,12 @@ export function registerLogcatWatchTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_logcat_sessions",
-    "List all active logcat watcher sessions",
-    {},
+    {
+      description: "List all active logcat watcher sessions",
+      inputSchema: z.object({}),
+    },
     async () => {
       try {
         if (sessions.size === 0) {

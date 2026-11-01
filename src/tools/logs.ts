@@ -5,26 +5,28 @@
  */
 
 import { z } from "zod";
-import { ToolContext } from "../tool-context.js";
+import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { resultHandleSchemaFields, withResultHandle } from "./result-handles.js";
 import { validateShellArg, shellQuote } from "../middleware/sanitize.js";
 
 export function registerLogTools(ctx: ToolContext): void {
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_logcat",
-    "Capture a logcat snapshot. Supports tag filtering, priority levels, and grep patterns.",
     {
-      lines: z.number().min(1).max(10000).optional().default(100).describe("Number of recent lines to capture (1-10000)"),
-      tag: z.string().optional().describe("Filter by tag (e.g., 'ActivityManager' or 'MyApp')"),
-      priority: z.enum(["V", "D", "I", "W", "E", "F"]).optional()
-        .describe("Minimum priority: V(erbose), D(ebug), I(nfo), W(arn), E(rror), F(atal)"),
-      grep: z.string().optional().describe("Grep filter applied to output (literal string match, case-insensitive)"),
-      device: z.string().optional().describe("Device serial"),
-      buffer: z.enum(["main", "system", "crash", "events", "all"]).optional().default("main")
-        .describe("Logcat buffer to read from"),
-      ...resultHandleSchemaFields,
+      description: "Capture a logcat snapshot. Supports tag filtering, priority levels, and grep patterns.",
+      inputSchema: z.object({
+        lines: z.number().min(1).max(10000).optional().default(100).describe("Number of recent lines to capture (1-10000)"),
+        tag: z.string().optional().describe("Filter by tag (e.g., 'ActivityManager' or 'MyApp')"),
+        priority: z.enum(["V", "D", "I", "W", "E", "F"]).optional()
+          .describe("Minimum priority: V(erbose), D(ebug), I(nfo), W(arn), E(rror), F(atal)"),
+        grep: z.string().optional().describe("Grep filter applied to output (literal string match, case-insensitive)"),
+        device: z.string().optional().describe("Device serial"),
+        buffer: z.enum(["main", "system", "crash", "events", "all"]).optional().default("main")
+          .describe("Logcat buffer to read from"),
+        ...resultHandleSchemaFields,
+      }),
     },
     async ({ lines, tag, priority, grep, device, buffer, result_handle, result_handle_ttl }) => {
       try {
@@ -67,10 +69,12 @@ export function registerLogTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_logcat_clear",
-    "Clear all logcat buffers on the device",
-    { device: z.string().optional().describe("Device serial") },
+    {
+      description: "Clear all logcat buffers on the device",
+      inputSchema: z.object({ device: z.string().optional().describe("Device serial") }),
+    },
     async ({ device }) => {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
@@ -82,12 +86,14 @@ export function registerLogTools(ctx: ToolContext): void {
     }
   );
 
-  ctx.server.tool(
+  ctx.server.registerTool(
     "adb_logcat_crash",
-    "Get recent crash logs from the crash buffer",
     {
-      lines: z.number().min(1).max(10000).optional().default(50).describe("Number of lines (1-10000)"),
-      device: z.string().optional().describe("Device serial"),
+      description: "Get recent crash logs from the crash buffer",
+      inputSchema: z.object({
+        lines: z.number().min(1).max(10000).optional().default(50).describe("Number of lines (1-10000)"),
+        device: z.string().optional().describe("Device serial"),
+      }),
     },
     async ({ lines, device }) => {
       try {
