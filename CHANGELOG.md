@@ -17,6 +17,15 @@ All notable changes to DeepADB are documented in this file.
 - Include `SECURITY.md` in future npm packages so the bundled local-LLM guide's
   relative security links resolve. Runtime behavior and tool contracts are unchanged.
 
+### CI maintenance
+
+- Update CodeQL `init` and `analyze` together to the pinned v4.39.1 release.
+  Separate updates produced incompatible configuration versions and failed
+  both JavaScript/TypeScript and GitHub Actions analysis.
+- Group `github/codeql-action/*` version updates in Dependabot to keep the
+  action steps aligned in future pull requests. Runtime dependencies and the
+  published package version are unchanged.
+
 ## v1.1.5 — SDK v2 and Local LLM Support
 
 ### Release preparation
