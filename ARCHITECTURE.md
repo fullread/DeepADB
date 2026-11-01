@@ -348,7 +348,7 @@ This includes the runtime-audit suite, live SQLite and AT/OK checks, and PIN-bas
 UI recovery. Five QEMU checks require on-device execution, twelve security checks
 require POSIX or `tcpdump`, and one requires Windows file-symlink privileges.
 All eight real Chromium checks also passed. Version metadata is aligned at
-1.1.6; the release remains unpublished.
+1.1.6, published on GitHub, npm and the official MCP Registry.
 
 The subsequent on-device deployment and regression passed 836 checks with zero
 failures and three cached-VM setup skips (839 total) across all 24 suites using

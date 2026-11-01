@@ -2,12 +2,14 @@
 
 All notable changes to DeepADB are documented in this file.
 
-## v1.1.6 — Reliability and Security (unreleased)
+## v1.1.6 — Reliability and Security
 
-### Release preparation
+### Release validation and publication
 
-- Align package, lockfile and MCP Registry metadata at 1.1.6. This version is
-  deployed locally to the Pixel but has not been published.
+- Published on November 1, 2026 to [GitHub with the prebuilt ZIP](https://github.com/fullread/DeepADB/releases/tag/v1.1.6),
+  [npm](https://www.npmjs.com/package/deepadb/v/1.1.6) and the official MCP Registry.
+  Package, lockfile and registry metadata are aligned at 1.1.6, which is also
+  deployed on the validation Pixel.
 - Earlier November 1, 2026 host/ADB regression on Windows/Node 24.22.2 against the
   rooted Pixel 6a / Android 16: **783 passed, zero failed, 18 expected skips
   (801 total), across all 24 suites**. This includes the 28 runtime-audit
@@ -39,7 +41,6 @@ All notable changes to DeepADB are documented in this file.
   audited 1.1.6 package. After verification, remove older 1.0.8, 1.1.2, 1.1.4
   and 1.1.5 device installations, temporary replacement copies and obsolete
   test launchers at the operator's request. Preserve shared DeepADB state.
-  Version 1.1.6 remains unpublished.
 
 ### Documentation and package contents
 
