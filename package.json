@@ -1,6 +1,6 @@
 {
   "name": "deepadb",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "DeepADB — full-featured Android Debug Bridge MCP server. 209 tools across 49 modules for device inspection from UI to baseband.",
   "mcpName": "io.github.fullread/deepadb",
   "type": "module",

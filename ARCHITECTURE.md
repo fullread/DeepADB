@@ -218,12 +218,45 @@ and execution-result `data` remain available to clients. Shared bearer parsing
 is bounded and linear before the existing exact, constant-time byte comparison.
 See SECURITY.md for numerical limits and snapshot consistency caveats.
 
+## Runtime audit failure isolation
+
+`adb_runtime_audit` resolves the target before issuing diagnostic probes. A
+missing, unauthorized or ambiguous target still returns a tool error. After
+resolution, independent probes settle separately: a failed properties, battery,
+root or other check does not discard successful results. Shell probes have
+explicit 5- or 10-second timeouts and no retries; discovery and version retain
+their bridge-level bounds. The tool checks exit status, timeout and output-buffer
+flags before interpreting stdout, including results returned with
+`ignoreExitCode`. Partial command output is not evidence of a capability.
+
+Readiness is available, unavailable or inconclusive. The command-capability
+batch emits an explicit presence/absence row per binary; missing, invalid or
+duplicate rows leave only the affected commands inconclusive. Modem probing
+requires confirmed root and usable device properties; a failed dependency never
+becomes a claim that modem nodes are absent. SQLite readiness uses the same
+execution-mode selection as the inspector: the host Node backend in host ADB
+mode, and device `sqlite3` in LocalBridge mode. The host backend remains
+available when the device capability probe fails, but device CLI presence
+cannot compensate for a missing/disabled host module. On-device CLI readiness
+remains inconclusive if its command probe fails. Availability describes the
+backend prerequisite, not access to a particular app database.
+
+Reports retain the existing tool input schema and text-content response shape.
+`Audit status: partial` and a bounded, server-owned probe-issue summary identify
+incomplete checks without exposing raw probe exceptions. Target metadata and
+storage/battery display budgets preserve room for the other sections. Partial
+audits are normal tool results, including when all post-resolution probes fail;
+they do not imply device readiness. The probes do not change device files or
+settings and do not send modem commands.
+
 ## Testing model
 
 Tests live in `tests/` as standalone `.mjs` suites discovered by
 `tests/run-all.mjs`. The shared harness (`tests/lib/harness.mjs`) spawns the
 compiled `build/index.js` over stdio and drives it as a real MCP client, so
-the suites exercise the actual server, not mocks.
+these suites exercise the actual server. Focused handler suites instead register
+the real handlers with synthetic bridge results to reproduce failures without
+device I/O.
 
 Suites fall into two groups:
 
@@ -233,7 +266,8 @@ Suites fall into two groups:
   port and does a real MCP round-trip), `test-sdk-compat` (v1/v2 clients,
   plugin APIs and schemas, auth, reconnects, and catalog compatibility),
   `test-sanitize-fuzz`, `test-browser-access`, `test-local-llm`,
-  `test-audit-hardening`, and `test-code-scanning`. Device-dependent assertions
+  `test-audit-hardening`, `test-code-scanning`, and `test-runtime-audit` (probe
+  failure isolation and tri-state readiness). Device-dependent assertions
   inside an otherwise device-free suite skip-guard
   themselves when no device is present, so the run stays green either way.
 - Device-dependent: require a connected device or emulator and are run locally.
@@ -264,14 +298,14 @@ tcpdump cases and the Windows file-symlink capability case. Every suite had
 an explicit successful summary; the aggregate runner exited zero. The run itself
 changed no repository files and did not deploy the build.
 
-Release preparation separately validates the production package on Termux Node
+The 1.1.5 release preparation separately validated the production package on Termux Node
 24.22.1 with SQLite 3.54.1. The staged LocalBridge passed strict schema/query
 reads, rejected SQL writes, runtime/health checks and the live Shannon handshake.
 Eight Chromium checks exercised its authenticated SSE/Streamable HTTP routes,
 Origin denial and repeated reloads; six optional WebSocket/GraphQL checks verified
 real device reads and token/Origin admission. Production installs need optional
 `ws`/`graphql` packages when those transports are enabled. The 1.1.4 rollback
-copy initializes successfully under the updated runtime and is retained. After
+copy initialized successfully under that updated runtime. After
 promotion to the normal device path, auto-detection selected LocalBridge and
 all eight strict device checks passed again. The 1.1.5 host hardware rerun passed
 728/0/18 (pass/fail/skip); device-free Node 24 coverage passed 295/0/17.
@@ -287,15 +321,46 @@ skips (704 total), including PIN-based screen recovery, request-ID/cancellation
 handling, and cancelled plugin callback guards. The released v1.1.4 baseline was 604 passed with
 the same 17 skips. Real phone-to-watch Wear validation remains deferred.
 
-Unreleased security hardening adds an eleventh device-free suite,
+The PR #62 security-hardening baseline adds an eleventh device-free suite,
 `test-code-scanning`, for bearer-parser limits, GraphQL error boundaries and the
 split-APK shell-alert data flow. These local fixture checks do not replace
 hosted CodeQL analysis or the release hardware baselines above.
 On Windows/Node 22.23.4, the eleven suites passed 322 checks under coverage with
 zero failures and 17 expected skips (339 total), including 26 security regressions
 and the delayed SSE close regression. Build, lint and all eight real Chromium
-compatibility checks passed. No hardware rerun or deployment was performed;
+compatibility checks passed. That initial security-only validation did not
+include a hardware rerun or deployment;
 hosted CodeQL results and remaining alert triage are tracked in the pull request.
+
+The 1.1.6 runtime-audit reliability work adds a twelfth device-free
+suite with 28 checks. After the portable oversized-header regression was added,
+Windows/Node 22.23.4 coverage passed 351 checks with zero failures and 17 expected
+skips (368 total); build and lint passed. Two targeted
+host-side Pixel 6a checks verified normal reporting and preserved successful
+results with a synthetic battery failure. A follow-up host-side Pixel audit
+verified the corrected SQLite backend selection. Those targeted checks did not
+test on-device installation, an AT handshake or Wear pairing.
+
+During 1.1.6 release preparation on November 1, 2026, the subsequent full
+Windows/Node 24.22.2 host/ADB run against the rooted Pixel 6a / Android 16 passed
+783 checks with zero failures and 18 expected skips (801 total) across 24 suites.
+This includes the runtime-audit suite, live SQLite and AT/OK checks, and PIN-based
+UI recovery. Five QEMU checks require on-device execution, twelve security checks
+require POSIX or `tcpdump`, and one requires Windows file-symlink privileges.
+All eight real Chromium checks also passed. Version metadata is aligned at
+1.1.6; the release remains unpublished.
+
+The subsequent on-device deployment and regression passed 836 checks with zero
+failures and three cached-VM setup skips (839 total) across all 24 suites using
+Termux Node 24.22.1 and SQLite 3.54.1. The validation checkout contained build
+files verified identical to the installed artifact, plus source/type fixtures
+and development dependencies; production retained runtime dependencies only,
+including the optional WebSocket/GraphQL libraries. Eight strict checks passed
+before and after promotion. Against the installed server, eight real Chromium
+checks and six authenticated WebSocket/GraphQL checks passed. The final
+documentation audit was followed by a verified 1.1.6 redeployment and removal
+of older device installations/rollback copies at the operator's request.
+A real phone-to-watch Wear run remains deferred.
 
 Model-driven validation with llama.cpp b11960 and Qwen3.5-4B Q4_K_M passed over
 native stdio and authenticated browser HTTP/SSE using `inspect`. Browser HTTP

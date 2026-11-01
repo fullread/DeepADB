@@ -35,6 +35,19 @@ SQLite snapshots are diagnostic copies, not transactional backups. Concurrent ap
 writes can make a snapshot inconsistent; stop the writer when a consistent view
 is necessary. Copy failures are reported rather than silently discarding the WAL.
 
+### Runtime Audit Reporting
+
+The read-only runtime audit keeps failed or incomplete probes inconclusive;
+nonzero exits, timeouts and captured-output overflow cannot establish capability
+availability. Its partial reports preserve successful checks without exposing
+raw probe exceptions. Unresolved targets remain tool errors, and modem node
+probing is skipped when root or device properties are inconclusive. The audit
+does not change device state, send AT commands or test Wear pairing.
+SQLite readiness checks the execution mode's backend: host Node SQLite or
+on-device `sqlite3`. The device binary cannot establish host-backend readiness,
+and backend availability does not verify app-database access or bypass the
+inspector's existing snapshot, permission and resource limits.
+
 ### Zod Parameter Bounds (always active)
 
 Every `z.number()` parameter across all 209 tools has explicit `.min()/.max()` constraints. This prevents resource exhaustion from extreme values — for example, requesting a 999999-second sleep or a buffer size of 2^31.
@@ -271,7 +284,7 @@ When installing DeepADB via npm, always pin the version:
 
 ```bash
 # Pinned (recommended)
-npm install -g deepadb@1.1.5
+npm install -g deepadb@1.1.6
 
 # Unpinned (not recommended — vulnerable to supply chain attacks)
 npx -y deepadb

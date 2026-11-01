@@ -11,7 +11,7 @@ MCP (Model Context Protocol) server for AI agents that need to inspect, control,
 
 ## Get started
 
-DeepADB runs as a local MCP server. It uses ADB by default and automatically switches to direct execution when it detects Termux on an Android device.
+DeepADB runs as a local MCP server. It uses ADB on a host computer and automatically switches to direct execution when running on Android (detected through `/system/build.prop`).
 
 ```bash
 git clone https://github.com/fullread/DeepADB.git
@@ -119,6 +119,27 @@ AI Agent (Termux) ←→ MCP (stdio/HTTP) ←→ DeepADB (Termux) ←→ sh/su (
 ```
 When DeepADB runs directly on the Android device (e.g., inside Termux), it auto-detects the environment and switches to `LocalBridge`. Commands execute directly via `sh`/`su` — no ADB server, no USB, no serialization overhead. The same 209-tool MCP surface is registered, with capability-aware guidance when an optional on-device binary such as `sqlite3` is unavailable.
 
+**1.1.6 device validation (November 1, 2026; not yet published):** the full
+on-device run passed **836 checks, 0 failed, 3 skipped (839 total)** across all
+24 suites on the rooted Pixel 6a / Android 16, using Termux Node 24.22.1 and
+SQLite 3.54.1. The three skips reuse the cached Alpine kernel, initrd and disk;
+the actual VM boot and shutdown checks passed. Coverage includes the 28
+runtime-audit regressions, device SQLite, live Shannon AT/OK, client/plugin
+compatibility, POSIX security cases and PIN-based UI recovery. The production
+installation passed eight strict checks before and after promotion, plus eight
+real Chromium checks and six authenticated WebSocket/GraphQL checks. Following
+the final documentation audit and verified redeployment, 1.1.6 is the only
+DeepADB installation retained on the validation Pixel; older installations
+and rollback copies were removed at the operator's request. Real phone-to-watch
+validation remains deferred.
+
+The earlier 1.1.6 host/ADB baseline on Windows/Node 24.22.2 passed **783 checks,
+0 failed, 18 expected skips (801 total)**. After the oversized-header test was
+split into a portable regression, Node 22.23.4 device-free coverage passed
+**351 checks, 0 failed, 17 expected skips (368 total)**. Host skips cover
+device-only or POSIX behavior, unavailable `tcpdump` and Windows file-symlink
+privileges; they are distinct from the on-device results above.
+
 v1.1.5 final audit-fix verification (Windows host): the ten device-free suites passed
 **295 checks, zero failures, and 17 expected skips (312 total)** under Node
 22.23.4 with coverage. The new hardening suite separately passed **41 checks**
@@ -149,7 +170,7 @@ authenticated SSE/Streamable HTTP, denied Origins and repeated page reloads.
 Six optional WebSocket/GraphQL checks passed with their production packages
 installed. The verified build was promoted to the normal installation path;
 Android auto-detection and all eight strict device checks passed again there.
-The 1.1.4 rollback copy is retained and also starts on the new runtime.
+At that release's validation, the 1.1.4 rollback copy also started on the new runtime.
 The final host hardware rerun passed 728 checks with zero failures and 18 skips;
 device-free Node 24 coverage passed 295 checks with zero failures and 17 skips.
 GitHub CI covers Node 22/24/26 builds and regressions, real-browser MCP
@@ -245,6 +266,23 @@ Start with the capability area that matches your task; the complete reference re
 
 ### Runtime Audit (1 tool)
 - `adb_runtime_audit` — Unified read-only readiness audit for transport, Android userspace, root, SELinux, storage, command capabilities, UI/network diagnostics, SQLite, modem nodes, and Wear prerequisites
+
+The audit retains successful checks when an independent probe fails. Its report
+labels readiness as **available**, **unavailable** (a confirmed negative result),
+or **inconclusive** (failed, timed out, incomplete, or not safely checked).
+`Audit status: partial` and the **Probe issues** section identify incomplete
+checks while preserving useful device information and snapshots. A partial
+report is returned normally; failure to resolve the requested device remains a
+tool error. `complete` means the checks completed, not that every capability is
+available. Modem node visibility does not verify an AT handshake, and Play
+services presence does not verify phone/watch pairing. Use the dedicated
+Shannon and Wear tools for those narrower checks.
+
+SQLite readiness follows the inspector's execution mode: host ADB uses the
+host's Node SQLite backend (Node 22.16+ with `node:sqlite` enabled), while
+on-device LocalBridge uses device `sqlite3`. A phone's SQLite binary cannot
+make a missing host backend available. Backend availability alone does not
+verify access to a particular app database.
 
 ### Device (3 tools)
 - `adb_devices` — List all connected devices with state, model, and product info
@@ -735,13 +773,13 @@ All 49 built-in tool modules receive a unified `BuiltinToolContext` dependency b
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DA_LOCAL` | Auto-detect | Force on-device mode (`true`/`false`). Auto-detects via `/system/build.prop` |
 | `ADB_PATH` | Auto-detect | Path to ADB binary (ignored in on-device mode) |
+| `DA_LOCAL` | Auto-detect | `true`/`1` forces LocalBridge; `false`/`0` forces ADB. Otherwise detect Android through `/system/build.prop`. |
 | `DA_TIMEOUT` | `30000` | Default command timeout in milliseconds |
 | `DA_MAX_OUTPUT` | `50000` | Max output characters before truncation |
 | `DA_MAX_LOGCAT` | `500` | Max logcat lines per snapshot |
 | `DA_DEVICE` | (auto) | Default device serial (auto-selects if single device) |
-| `DA_TEMP_DIR` | OS temp | Temp directory for screenshots, pulled files, bug reports, test sessions, snapshots |
+| `DA_TEMP_DIR` | Windows: `%TEMP%/deepadb`; POSIX host: `/tmp/deepadb`; Android: `$HOME/.deepadb` | Working directory for screenshots, pulled files, bug reports, test sessions and snapshots. On-device falls back to `/data/local/tmp/.deepadb` when `HOME` is unset. |
 | `DA_CACHE_TTL` | `5000` | Device list cache TTL in milliseconds (0 = disabled) |
 | `DA_RETRY_COUNT` | `1` | Number of retries for transient ADB failures |
 | `DA_RETRY_DELAY` | `500` | Base retry delay in ms (doubles each attempt) |
@@ -765,7 +803,7 @@ All 49 built-in tool modules receive a unified `BuiltinToolContext` dependency b
 | `DA_HTTP_SESSION_TTL_MS` | `1800000` | `/mcp` idle-session timeout; integer 1000–3600000 ms |
 | `DA_TOOL_PROFILE` | `full` | `full` preserves all tools/plugins; `inspect` exposes three device/property tools and disables alternate interfaces |
 | `DA_HTTP_HOST` | `127.0.0.1` | Bind address for HTTP/SSE, WebSocket, and GraphQL servers |
-| `DA_AUTH_TOKEN` | (none — open) | Bearer token for network transports. When set, all HTTP/SSE/WS/GraphQL requests require `Authorization: Bearer <token>` header. Health endpoints exempt. |
+| `DA_AUTH_TOKEN` | (none — open) | When set, MCP/GraphQL requests and WebSocket upgrades require `Authorization: Bearer <token>`. Health endpoints and validated CORS preflights are token-free; Origin checks still apply. |
 | `DA_HTTP_CORS_ORIGIN` | (none — deny Origins) | Exact HTTP(S) origins for HTTP/SSE; comma-separated; no paths or wildcards |
 | `DA_WS_PORT` | (disabled) | Set to a port number to enable WebSocket transport mode (requires `npm install ws`) |
 | `DA_WS_CORS_ORIGIN` | (none — deny Origins) | Exact HTTP(S) origins for WebSocket upgrades and health endpoint; comma-separated |
@@ -888,10 +926,11 @@ DeepADB/
     ├── test-supply-chain.mjs    # Supply-chain hardening checks for fetch and network paths (24 tests)
     ├── test-sanitize-fuzz.mjs   # Property-based fuzzing of shell sanitizers — shellQuote/shellEscape round-trip, validateShellArg rejection (19 tests)
     ├── test-transports.mjs      # Transport smoke — HTTP/SSE + WebSocket MCP round-trip, GraphQL devices query and introspection (8 tests)
-    ├── test-sdk-compat.mjs      # SDK v1/v2 clients, plugin compatibility, auth and reconnects (36 tests)
+    ├── test-sdk-compat.mjs      # SDK v1/v2 clients, plugin compatibility, auth and reconnects (37 tests)
     ├── test-browser-access.mjs  # Origin, CORS, auth and WebSocket upgrade checks (14 tests)
-    ├── test-local-llm.mjs       # Streamable HTTP lifecycle, clients, plugins and profile restrictions (33 tests)
+    ├── test-local-llm.mjs       # Streamable HTTP lifecycle, clients, plugins and profile restrictions (34 tests)
     ├── test-next-version.mjs    # Focused diagnostic validation and device-free boundaries
+    ├── test-runtime-audit.mjs   # Partial failures, backend readiness and retained results (28 checks)
     ├── test-next-version-device.mjs # Live runtime, SQLite, route, Wear and Shannon checks
     ├── test-audit-hardening.mjs # SQLite isolation, path guards, GraphQL budgets and runner failures
     ├── test-code-scanning.mjs   # Bounded auth, safe GraphQL errors and split-APK quoting

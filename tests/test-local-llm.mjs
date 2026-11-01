@@ -84,8 +84,8 @@ try {
       assert.equal((await request(base + "/mcp", { method, headers: { ...headers, Origin: "https://denied.example" }, ...(method === "POST" ? { body: init } : {}) })).status, 403);
     }
   });
-  await check("invalid and oversized initialization requests release the session slot", async () => {
-    for (const [body, status] of [["{", 400], ["x".repeat(1024 * 1024 + 1), 413], [JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }), 400], [JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }), 400]]) {
+  await check("invalid initialization requests release the session slot", async () => {
+    for (const [body, status] of [["{", 400], [JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }), 400], [JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }), 400]]) {
       assert.equal((await request(base + "/mcp", { method: "POST", headers, body })).status, status);
     }
     const notification = JSON.parse(init); delete notification.id;
@@ -95,6 +95,36 @@ try {
     }
     assert.equal((await request(base + "/mcp", { method: "PUT", headers })).status, 405);
     assert.equal((await request(base + "/mcp", { headers })).status, 400);
+  });
+  await check("oversized Content-Length is rejected before uploading or reserving a session", async () => {
+    // Assert the early header rejection without sending the doomed body.
+    // Android fetch can report EPIPE while uploading after the server's 413.
+    // The next test separately sends a real oversized chunked body.
+    const response = await new Promise((resolve, reject) => {
+      const upload = httpRequest(base + "/mcp", { method: "POST",
+        headers: { ...headers, "Content-Length": String(1024 * 1024 + 1) } }, response => {
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", chunk => { body += chunk; });
+        response.once("error", error => { clearTimeout(timer); reject(error); });
+        response.once("end", () => {
+          clearTimeout(timer);
+          resolve({ status: response.statusCode, headers: response.headers, body });
+          upload.destroy();
+        });
+      });
+      const timer = setTimeout(() => {
+        upload.destroy(); reject(new Error("Oversized Content-Length was not rejected before upload"));
+      }, 5000);
+      upload.on("error", error => { clearTimeout(timer); reject(error); });
+      upload.flushHeaders(); // No body or end: rejection must not wait for either.
+    });
+    assert.equal(response.status, 413);
+    assert.equal(response.headers["mcp-session-id"], undefined);
+    assert.match(JSON.parse(response.body).error.message, /exceeds 1 MiB/);
+    const active = await initialize(base + "/mcp");
+    const deleted = await request(base + "/mcp", { method: "DELETE", headers: active });
+    assert.equal(deleted.status, 200); await deleted.text();
   });
   await check("chunked and incomplete uploads obey size/deadline limits without reserving a session", async () => {
     const body = new ReadableStream({ start(controller) {

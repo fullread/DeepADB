@@ -35,11 +35,32 @@ node --test tests/ci/emulator-reporting.test.mjs # CI reporting, no device acces
 The device-free suites (`test-boundaries`, `test-next-version`,
 `test-result-handles`, `test-supply-chain`, `test-transports`,
 `test-sanitize-fuzz`, `test-sdk-compat`, `test-browser-access`, `test-local-llm`,
-`test-audit-hardening`, `test-code-scanning`) run without any hardware and are the fastest way to
-validate a change. A single suite can be run directly, e.g.
+`test-audit-hardening`, `test-code-scanning`, `test-runtime-audit`) run without
+any hardware and are the fastest way to validate a change. A single suite can be run directly, e.g.
 `node tests/test-next-version.mjs`. Device-facing changes should also run the
 relevant hardware suite; the focused diagnostics use
 `node tests/test-next-version-device.mjs`.
+
+For a full on-device run, use a complete validation checkout with `src/`,
+`tests/` (including fixtures), the compiled `build/`, and development dependencies.
+Run `node tests/run-all.mjs` under the device's Node runtime; set `DA_TEST_PIN`
+to enable lock/unlock recovery. To test a prebuilt deployment, use a separate
+validation checkout whose build files match the installed artifact, keeping
+test/development dependencies out of the production directory. Do not symlink
+`build/` into a different installation: Node can then load separate SDK copies,
+invalidating fixtures that patch the transport prototype. Type-compatibility
+fixtures also require the source files; the production package alone is insufficient.
+
+`node tests/test-runtime-audit.mjs` exercises the registered audit handler with
+synthetic bridge results and never contacts ADB. It covers independent failures,
+timeouts, nonzero exits, output overflow, incomplete capability rows, dependent
+modem checks, target-resolution errors and preservation of successful results.
+SQLite backend regressions run the handler and actual host query worker in
+child processes with `node:sqlite` disabled, and verify that a device binary
+cannot make host-mode inspection ready. All device probe results are synthetic;
+the disabled worker fails before opening a database.
+Keep failure distinct from confirmed absence, and check the complete report
+rather than treating its header or a normal MCP response as proof of readiness.
 
 Some device-free suites also run optional hardware assertions when an
 authorized device is visible. Disconnect USB and wireless devices, or use an
@@ -53,6 +74,12 @@ restricted tool calls, and rejected Origins/headers.
 Set `DA_TEST_BROWSER` to the browser executable if it is not found in a
 standard installation path. It uses no Android device and does not touch your
 normal browser profile.
+
+The oversized `Content-Length` regression sends headers without a body and
+requires an immediate 413, no session ID, and a successful subsequent session.
+Uploading the already-rejected body can surface `EPIPE` in Android's fetch
+client before it exposes the response. Keep the separate oversized chunked-body
+and unfinished-upload tests; do not treat arbitrary network errors as a pass.
 
 `test-sdk-compat` always isolates its child servers from ADB and user plugins.
 It covers existing protocol revisions, legacy plugin APIs (including Zod 3),
