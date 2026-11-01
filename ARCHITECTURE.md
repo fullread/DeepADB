@@ -49,7 +49,8 @@ APIs above, not SDK-private or experimental task APIs.
 
 ```
 MCP client (Claude Code / claude.ai / any MCP client)
-        |  stdio . HTTP/SSE . WebSocket   (+ optional GraphQL API)
+        |  stdio . Streamable HTTP / legacy SSE . WebSocket
+        |  (+ optional GraphQL API)
         v
 Transport            index.ts selects one; server.ts builds the McpServer
         v
@@ -77,12 +78,16 @@ That single seam is what keeps the tools uniform and testable.
 2. The MCP SDK `McpServer` validates the call against the tool's Zod schema.
    Out-of-range numbers and malformed input are rejected here, before any
    device command is constructed.
-3. The tool handler runs. Any user value destined for a shell command is
-   passed through `shellQuote()` (see SECURITY.md) so it cannot break out of
-   its argument position.
-4. The handler calls `ctx.bridge.shell(...)` or a higher-level helper. The
-   middleware layer applies command filtering and rate limiting (when
-   `DA_SECURITY=true`), audit logging, and output processing.
+3. The tool handler runs. User values used as shell arguments are quoted or
+   validated with the sanitizers described in SECURITY.md. Generic shell tools
+   intentionally accept commands; argument escaping does not authorize them.
+4. The handler calls `ctx.bridge.shell(...)` or a higher-level helper. Handlers
+   that explicitly call `SecurityMiddleware.checkCommand` apply command
+   filtering and rate limiting when `DA_SECURITY=true`, plus audit logging when
+   enabled. The bridge does not apply these checks globally: dedicated tools
+   such as `adb_reboot` and `adb_wifi` bypass that middleware. Use `inspect` for
+   the enforced three-tool catalog. Handlers use output-processing helpers as
+   appropriate for their results.
 5. The bridge dispatches to the device. `AdbBridge` shells out to the `adb`
    binary (USB or Wi-Fi); `LocalBridge` runs `sh`/`su` directly when DeepADB
    runs on the device (Termux). Serial routing, retries, timeouts, and caching
@@ -324,11 +329,14 @@ src/
   server.ts           createServer(): builds ToolContext, registers everything
   tool-context.ts     the injected dependency bundle
   plugin-compat.ts     legacy plugin registration and callback adapter
-  http-transport.ts   HTTP/SSE transport (official server-legacy bridge)
+  http-transport.ts   shared HTTP router and legacy SSE (server-legacy bridge)
+  streamable-http.ts  bounded /mcp session lifecycle (official Node adapter)
+  tool-profile.ts     startup profile validation and tool admission guards
   ws-transport.ts     WebSocket transport (optional ws package)
   graphql-api.ts      standalone GraphQL API (optional graphql package)
   config/             version and configuration
-  middleware/         bridge, sanitize, security, output, logger, auth, etc.
+  bridge/             ADB and on-device execution, device discovery and routing
+  middleware/         sanitize, security, output, logger, auth, Origin checks, etc.
   tools/              49 tool modules + resources.ts + prompts.ts
 build/                compiled output (tsc); what actually runs
 tests/                .mjs suites + run-all.mjs + lib/harness.mjs

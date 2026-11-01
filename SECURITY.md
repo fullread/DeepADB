@@ -10,7 +10,7 @@ DeepADB is a **local development and research tool**. Its threat model assumes:
 - **Untrusted input**: MCP clients (Claude, Cursor, etc.) may pass user-supplied parameters that could contain injection attempts.
 - **Trusted transport**: stdio mode communicates over local pipes. HTTP/SSE, WebSocket, and GraphQL transports bind to `127.0.0.1` by default and deny cross-origin requests.
 
-DeepADB is **not designed** for multi-tenant, internet-facing, or shared-server deployments without additional hardening. If you need to expose it over a network, enable the security middleware and restrict CORS origins.
+DeepADB is **not designed** for multi-tenant, internet-facing, or shared-server deployments without additional hardening. For remote access, use bearer authentication, exact browser Origin allowlists, and a TLS reverse proxy or SSH tunnel. Prefer `DA_TOOL_PROFILE=inspect` when device discovery and property reads are sufficient. Command filtering alone does not restrict the full tool catalog; follow the [deployment recipes](#recommended-configurations) below.
 
 ## Security Architecture
 
@@ -165,7 +165,18 @@ curl -H "Authorization: Bearer $DA_AUTH_TOKEN" http://localhost:3000/sse
 
 ### External Resource Fetching
 
-The plugin registry and workflow marketplace fetch from configurable URLs. All fetch operations use streaming body reads with a **5 MB size limit** to prevent memory exhaustion. Plugin downloads verify SHA-256 integrity hashes when provided by the registry manifest.
+The plugin registry and workflow marketplace have no default remote sources.
+Set `DA_REGISTRY_URL` or `DA_WORKFLOW_REGISTRY_URL` to a manifest URL you trust;
+the workflow URL can also be derived from `DA_REGISTRY_URL` by replacing
+`registry.json` with `workflows.json`. Search and installation report that no
+registry is configured when neither applicable setting is present.
+
+Fetch helpers use streaming body reads with a **5 MiB size limit** to bound
+responses. Plugin and workflow installation require a matching SHA-256 hash in
+the manifest; missing or mismatched hashes are rejected. A matching hash proves
+consistency with the manifest, not publisher authenticity: a compromised source
+could replace both the payload and its hash. Review the source and downloaded
+code or workflow actions before trusting them.
 
 ## Recommended Configurations
 
@@ -272,7 +283,11 @@ and transforms; it does not bypass the server's validation or sandbox plugins.
 Existing plugin trust and command restrictions still apply. The frozen legacy
 SSE package and v1 SDK must remain part of dependency auditing while retained.
 
-Optional peer dependencies (`ws` for WebSocket, `graphql` for GraphQL API) are loaded dynamically only when explicitly enabled via environment variables. They are never fetched or executed unless you set `DA_WS_PORT` or `DA_GRAPHQL_PORT`.
+The optional `ws` (WebSocket) and `graphql` (GraphQL API) packages are included
+as development dependencies for testing. Production installs using
+`npm ci --omit=dev` must install the applicable package explicitly when enabling
+those transports. DeepADB loads them dynamically when the transport is enabled
+and does not download missing packages automatically.
 
 ## AT Command Safety
 
