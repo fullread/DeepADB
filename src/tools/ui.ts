@@ -40,14 +40,7 @@ export function registerUiTools(ctx: ToolContext): void {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const fname = sanitizeFilename(filename ?? `screenshot_${Date.now()}.png`);
         const localPath = join(ctx.config.tempDir, fname);
-        const remoteDir = "/data/local/tmp";
-        const remotePath = `${remoteDir}/${fname}`;
-        try {
-          await ctx.bridge.shell(`screencap -p ${shellQuote(remotePath)}`, { device: resolved.serial, timeout: 15000 });
-          await ctx.bridge.exec(["pull", remotePath, localPath], { device: resolved.serial, timeout: 30000 });
-        } finally {
-          await ctx.bridge.shell(`rm ${shellQuote(remotePath)}`, { device: resolved.serial, ignoreExitCode: true }).catch(() => {});
-        }
+        await ctx.bridge.captureScreenshot(localPath, { device: resolved.serial });
         return { content: [{ type: "text", text: `Screenshot saved: ${localPath}` }] };
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
@@ -276,22 +269,12 @@ export function registerUiTools(ctx: ToolContext): void {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
         const ts = Date.now();
-        const remoteDir = "/data/local/tmp";
-        const remotePng = `${remoteDir}/DA_ann_${ts}.png`;
         const outName = filename
           ? sanitizeFilenameComponentDotted(filename)
           : `annotated_${ts}.png`;
         const localPath = join(ctx.config.tempDir, outName);
 
-        // Capture screenshot and UI hierarchy in parallel
-        await ctx.bridge.shell(`screencap -p ${shellQuote(remotePng)}`,
-          { device: serial, timeout: 15000 });
-        try {
-          await ctx.bridge.exec(["pull", remotePng, localPath], { device: serial, timeout: 30000 });
-        } finally {
-          await ctx.bridge.shell(`rm ${shellQuote(remotePng)}`,
-            { device: serial, ignoreExitCode: true }).catch(() => {});
-        }
+        await ctx.bridge.captureScreenshot(localPath, { device: serial });
 
         const xml = await captureUiDump(ctx.bridge, serial);
         if (!xml) {

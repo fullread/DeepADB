@@ -6,8 +6,42 @@
  * Covers discovery, value reading, category filtering, formatting, and edge cases.
  */
 import { createHarness } from "./lib/harness.mjs";
+import { profile, pixelContains, requireFixtureScreen, FIXTURE_PACKAGE } from "./lib/test-profile.mjs";
 
 const h = await createHarness("Sensors");
+let inventory = [];
+if (profile.emulator) {
+  await requireFixtureScreen(h, "sensors");
+  // The fixture writes this only after receiving a calibrated accelerometer
+  // event. Missing listener data is a failure, never an "unsupported" skip.
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const r = await h.callTool("adb_shell", { command: `run-as ${FIXTURE_PACKAGE} cat files/sensors.json` });
+    try { inventory = JSON.parse(h.getText(r)); } catch {}
+    if (Array.isArray(inventory) && inventory.length) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (!Array.isArray(inventory) || !inventory.some(s => s.type === "android.sensor.accelerometer")) {
+    throw new Error("Sensor fixture never received an accelerometer event");
+  }
+}
+const types = {
+  accelerometer: ["accelerometer"], gyroscope: ["gyroscope"], barometer: ["pressure"],
+  light: ["light"], proximity: ["proximity"], magnetometer: ["magnetic_field"],
+  rotation: ["rotation_vector", "game_rotation_vector"], orientation: ["orientation", "device_orientation"],
+  motion: ["significant_motion", "tilt_detector", "pick_up_gesture"],
+  step: ["step_counter", "step_detector"], temperature: ["ambient_temperature", "temperature"],
+};
+async function categoryCheck(label, category, pixelName, listOnly = false) {
+  if (!profile.emulator) return h.testContains(label, "adb_sensor_read", { category, listOnly }, pixelName);
+  const known = inventory.filter(s => types[category].some(t => s.type === `android.sensor.${t}`));
+  if (!known.length) {
+    await h.testContains(`${label}: reports absent category`, "adb_sensor_read", { category }, `No sensors found for category "${category}"`);
+    h.skip(label, `Android SensorManager inventory has no ${category} sensor`);
+    return;
+  }
+  // Exact device names come from the Android API, independently of our dump parser.
+  for (const sensor of known) await h.testContains(`${label}: ${sensor.name}`, "adb_sensor_read", { category, listOnly }, sensor.name);
+}
 
 // ── Sensor Discovery ───────────────────────────────────────
 
@@ -39,45 +73,33 @@ h.section("Category Filters");
 
 // Each filter checks for a known sensor name specific to that category,
 // proving the filter actually returns the right sensors (not just the header)
-await h.testContains("Accelerometer filter", "adb_sensor_read",
-  { category: "accelerometer" }, "LSM6DSR");
+await categoryCheck("Accelerometer filter", "accelerometer", "LSM6DSR");
 
-await h.testContains("Gyroscope filter", "adb_sensor_read",
-  { category: "gyroscope" }, "LSM6DSR");
+await categoryCheck("Gyroscope filter", "gyroscope", "LSM6DSR");
 
-await h.testContains("Barometer filter", "adb_sensor_read",
-  { category: "barometer" }, "ICP10101");
+await categoryCheck("Barometer filter", "barometer", "ICP10101");
 
-await h.testContains("Light filter", "adb_sensor_read",
-  { category: "light" }, "TMD3719");
+await categoryCheck("Light filter", "light", "TMD3719");
 
-await h.testContains("Proximity filter", "adb_sensor_read",
-  { category: "proximity" }, "TMD3719");
+await categoryCheck("Proximity filter", "proximity", "TMD3719");
 
-await h.testContains("Magnetometer filter", "adb_sensor_read",
-  { category: "magnetometer" }, "MMC56X3X");
+await categoryCheck("Magnetometer filter", "magnetometer", "MMC56X3X");
 
-await h.testContains("Rotation filter", "adb_sensor_read",
-  { category: "rotation" }, "Rotation Vector");
+await categoryCheck("Rotation filter", "rotation", "Rotation Vector");
 
-await h.testContains("Orientation filter", "adb_sensor_read",
-  { category: "orientation" }, "Orientation");
+await categoryCheck("Orientation filter", "orientation", "Orientation");
 
-await h.testContains("Motion filter", "adb_sensor_read",
-  { category: "motion" }, "Significant Motion");
+await categoryCheck("Motion filter", "motion", "Significant Motion");
 
-await h.testContains("Step filter", "adb_sensor_read",
-  { category: "step" }, "Step");
+await categoryCheck("Step filter", "step", "Step");
 
-await h.testContains("Temperature filter", "adb_sensor_read",
-  { category: "temperature" }, "Temperature");
+await categoryCheck("Temperature filter", "temperature", "Temperature");
 
 // ── List-only with Filter ──────────────────────────────────
 
 h.section("List-only with Filter");
 
-await h.testContains("List accelerometers only", "adb_sensor_read",
-  { category: "accelerometer", listOnly: true }, "LSM6DSR");
+await categoryCheck("List accelerometers only", "accelerometer", "LSM6DSR", true);
 
 // ── Value Formatting Regression ────────────────────────────
 
@@ -92,8 +114,12 @@ await h.testContains("Accelerometer shows z-axis", "adb_sensor_read",
 h.section("Rate Display Formatting");
 
 // One-shot sensors must show just the mode, not ugly "—–—" double-dash
-await h.testNotContains("One-shot has no trailing dash", "adb_sensor_read",
-  { category: "motion", listOnly: true }, "—–—");
+if (profile.emulator && !inventory.some(s => types.motion.some(t => s.type === `android.sensor.${t}`))) {
+  h.skip("One-shot has no trailing dash", "Android SensorManager inventory has no motion sensor; formatting is covered device-free");
+} else {
+  await h.testNotContains("One-shot has no trailing dash", "adb_sensor_read",
+    { category: "motion", listOnly: true }, "—–—");
+}
 
 // Continuous sensors with both rates show "min–max" range
 await h.testContains("Continuous shows rate range", "adb_sensor_read",
@@ -115,33 +141,39 @@ await h.testContains("Proximity is wake-up", "adb_sensor_read",
 
 h.section("IIO Subsystem — Discovery");
 
-await h.testContains("IIO list devices", "adb_iio_read",
+await pixelContains(h, "IIO list devices", "adb_iio_read",
   { listOnly: true }, "IIO device");
 
-await h.testContains("IIO detects ODPM", "adb_iio_read",
+await pixelContains(h, "IIO detects ODPM", "adb_iio_read",
   { listOnly: true }, "odpm");
 
 h.section("IIO Subsystem — Power Monitor");
 
-await h.testContains("IIO full read has power data", "adb_iio_read",
+await pixelContains(h, "IIO full read has power data", "adb_iio_read",
   {}, "Power Monitor");
 
-await h.testContains("IIO shows sampling rate", "adb_iio_read",
+await pixelContains(h, "IIO shows sampling rate", "adb_iio_read",
   {}, "Sampling rate:");
 
-await h.testContains("IIO shows channels", "adb_iio_read",
+await pixelContains(h, "IIO shows channels", "adb_iio_read",
   {}, "Channels:");
 
-await h.testContains("IIO shows total power", "adb_iio_read",
+await pixelContains(h, "IIO shows total power", "adb_iio_read",
   {}, "Total:");
 
-await h.testContains("IIO shows CPU subsystem", "adb_iio_read",
+await pixelContains(h, "IIO shows CPU subsystem", "adb_iio_read",
   {}, "CPU");
 
 // "W" alone matches any word containing W (Watch, Wait, etc). "mW" is the
 // actual unit emitted by sensors.ts formatChannelValue() for power channels.
-await h.testContains("IIO power has unit (mW)", "adb_iio_read",
+await pixelContains(h, "IIO power has unit (mW)", "adb_iio_read",
   {}, "mW");
+
+if (profile.emulator) {
+  // Avoid leaving a foreground sensor subscription running for later suites.
+  const stop = await h.callTool("adb_force_stop", { packageName: FIXTURE_PACKAGE });
+  h.assert("Stop fixture sensor listeners", !h.isError(stop));
+}
 
 const exitCode = h.finish();
 process.exit(exitCode);

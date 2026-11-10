@@ -19,7 +19,6 @@ import { createHash } from "crypto";
 import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
 import { resultHandleSchemaFields, withResultHandle } from "./result-handles.js";
-import { shellQuote } from "../middleware/sanitize.js";
 import { decodePngPixels } from "../middleware/png-utils.js";
 
 interface ScreenshotMeta {
@@ -38,37 +37,22 @@ function getBaselineDir(tempDir: string): string {
 
 /**
  * Capture a screenshot and return the local PNG path plus basic metadata.
- * Uses /data/local/tmp/ on-device to avoid scoped storage issues.
- * Cleans up the remote file in a finally block to prevent device file leaks.
+ * The bridge owns private device scratch allocation and checked cleanup.
  */
 async function captureScreenshot(
   ctx: ToolContext,
   serial: string,
   localPath: string,
 ): Promise<{ width: number; height: number; fileSize: number; sha256: string }> {
-  const remoteDir = "/data/local/tmp";
-  const remotePath = `${remoteDir}/DA_diff_${Date.now()}.png`;
+  await ctx.bridge.captureScreenshot(localPath, { device: serial });
 
-  try {
-    await ctx.bridge.shell(`screencap -p ${shellQuote(remotePath)}`, { device: serial, timeout: 15000 });
-    await ctx.bridge.exec(["pull", remotePath, localPath], { device: serial, timeout: 30000 });
-
-    // Get dimensions from device
-    const sizeResult = await ctx.bridge.shell("wm size", { device: serial, ignoreExitCode: true });
-    const sizeMatch = sizeResult.stdout.match(/(\d+)x(\d+)/);
-    const width = sizeMatch ? parseInt(sizeMatch[1], 10) : 0;
-    const height = sizeMatch ? parseInt(sizeMatch[2], 10) : 0;
-
-    // Compute hash and size
-    const fileData = readFileSync(localPath);
-    const sha256 = createHash("sha256").update(fileData).digest("hex");
-    const fileSize = fileData.length;
-
-    return { width, height, fileSize, sha256 };
-  } finally {
-    // Always clean up the device-side screenshot, even if pull/hash throws
-    await ctx.bridge.shell(`rm ${shellQuote(remotePath)}`, { device: serial, ignoreExitCode: true }).catch(() => {});
-  }
+  const sizeResult = await ctx.bridge.shell("wm size", { device: serial, ignoreExitCode: true });
+  const sizeMatch = sizeResult.stdout.match(/(\d+)x(\d+)/);
+  const width = sizeMatch ? parseInt(sizeMatch[1], 10) : 0;
+  const height = sizeMatch ? parseInt(sizeMatch[2], 10) : 0;
+  const fileData = readFileSync(localPath);
+  const sha256 = createHash("sha256").update(fileData).digest("hex");
+  return { width, height, fileSize: fileData.length, sha256 };
 }
 
 interface PixelDiffResult {

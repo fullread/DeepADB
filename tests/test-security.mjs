@@ -5,6 +5,7 @@
  * Tests that shell injection attempts are properly rejected by validateShellArg.
  */
 import { createHarness } from "./lib/harness.mjs";
+import { profile, expectedProperty } from "./lib/test-profile.mjs";
 
 const h = await createHarness("Security & Sanitization");
 
@@ -18,8 +19,8 @@ await h.test("SELinux Denials (with filter)", "adb_selinux_denials", { lines: 20
 // ── Permission Auditing ────────────────────────────────────
 
 h.section("Permission Auditing");
-await h.testContains("Permission Audit (Magisk)", "adb_permission_audit",
-  { packageName: "com.topjohnwu.magisk" }, "Permission Audit");
+await h.testContains(`Permission Audit (${profile.appLabel})`, "adb_permission_audit",
+  { packageName: profile.packageName }, "Permission Audit");
 
 // ── Input Sanitization — Shell Injection Rejection ─────────
 
@@ -63,10 +64,10 @@ await h.testRejects("Inject via modem_logs grep (pipe)",
 
 // Verify legitimate inputs still work after all the rejection tests
 await h.testContains("Legit package name after injections",
-  "adb_package_info", { packageName: "com.topjohnwu.magisk" }, "com.topjohnwu.magisk");
+  "adb_package_info", { packageName: profile.packageName }, profile.packageName);
 
 await h.testContains("Legit getprop after injections",
-  "adb_getprop", { key: "ro.product.model" }, "Pixel");
+  "adb_getprop", { key: "ro.product.model" }, await expectedProperty(h, "ro.product.model", "Pixel"));
 
 // ── Network tool (tcpdump filter validation) ───────────────
 

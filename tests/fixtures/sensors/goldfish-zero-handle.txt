@@ -1,0 +1,13 @@
+Sensor List:
+0000000000) Goldfish 3-axis Accelerometer | The Android Open Source Project | ver: 1 | type: android.sensor.accelerometer(1) | perm: n/a | flags: 0x00000050
+	continuous | minRate=2.00Hz | maxRate=100.00Hz | no batching | non-wakeUp | data-injection, has-additional-info,
+0x00000005) Goldfish Proximity sensor | The Android Open Source Project | ver: 1 | type: android.sensor.proximity(8) | perm: n/a | flags: 0x00000013
+	on-change | maxDelay=0us | minDelay=0us | no batching | wakeUp | data-injection,
+Fusion States:
+Recent Sensor events:
+Goldfish 3-axis Accelerometer: last 2 events
+	 1 (ts=174.025516800, wall=20:22:13.239) 0.00, 9.78, 0.81,
+	 2 (ts=174.092183800, wall=20:22:13.305) 0.01, 9.77, 0.82,
+Goldfish Proximity sensor: last 1 events
+	 1 (ts=174.025516800, wall=20:22:13.239) 5.00,
+Active sensors:

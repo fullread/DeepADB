@@ -8,8 +8,9 @@
  * of routing through adb over USB.
  *
  * Extends AdbBridge so it is type-compatible with the entire tool suite —
- * no tool module changes required. The override of exec() is the single
- * interception point; shell() and rootShell() flow through it automatically.
+ * no tool module changes required. shell() and rootShell() flow through exec();
+ * the screenshot lifecycle has a dedicated hook to keep all scratch operations
+ * under the same identity without broadening generic command elevation.
  *
  * Environment detection: see config.ts isOnDevice().
  */
@@ -92,6 +93,14 @@ export class LocalBridge extends AdbBridge {
   constructor(logger: Logger) {
     super(logger);
     this.localLogger = logger;
+  }
+
+  /** Keep screenshot allocation, capture and removal under the same identity. */
+  protected override async screenshotShell(command: string, options: AdbExecOptions): Promise<AdbResult> {
+    // A registered VM is an ADB target, never a path on the Termux host.
+    if (LocalBridge.isGuestDevice(options.device)) return this.shell(command, options);
+    const hasRoot = await this.checkRootAvailable();
+    return this.execLocal(hasRoot ? this.elevate(command) : command, options);
   }
 
 

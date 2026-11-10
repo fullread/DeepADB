@@ -25,21 +25,79 @@ npm run build   # compile src/ to build/ with tsc
 ## Running tests
 
 ```
-npm test          # full suite (device-dependent parts need a device)
+npm test          # strict rooted Pixel 6a / Android 16 hardware profile
+npm run test:emulator # portable stock-emulator profile; SDK + JDK required
 npm run test:ci   # device-free suites only (what CI runs)
 npm run test:browser # real Chromium CORS checks; Chrome/Edge/Chromium required
 npm run coverage  # full suite under c8; writes coverage/ (lcov + summary)
-node --test tests/ci/emulator-reporting.test.mjs # CI reporting, no device access
+node --test tests/ci/*.test.mjs # CI reporting and fixture safety, no device access
 ```
 
 The device-free suites (`test-boundaries`, `test-next-version`,
 `test-result-handles`, `test-supply-chain`, `test-transports`,
 `test-sanitize-fuzz`, `test-sdk-compat`, `test-browser-access`, `test-local-llm`,
-`test-audit-hardening`, `test-code-scanning`, `test-runtime-audit`) run without
+`test-audit-hardening`, `test-code-scanning`, `test-runtime-audit`,
+`test-sensor-parsing`, `test-ui-automation`, `test-screenshot-cleanup`) run without
 any hardware and are the fastest way to validate a change. A single suite can be run directly, e.g.
 `node tests/test-next-version.mjs`. Device-facing changes should also run the
 relevant hardware suite; the focused diagnostics use
 `node tests/test-next-version-device.mjs`.
+
+### Physical Pixel and portable emulator profiles
+
+`DA_TEST_PROFILE` defaults to `pixel`. This preserves the rooted Pixel 6a /
+Android 16 contract: exact model, bluejay/Shannon/dual-SIM firmware, Magisk,
+sensor part names, ODPM power rails and root `sendevent` must pass. Missing
+Pixel capabilities remain failures, not new automatic skips. `DA_TEST_PIN`
+still controls the four lock/unlock checks. Unknown profile names fail startup.
+This is a test setting, independent of the server's `DA_TOOL_PROFILE` policy.
+Use dedicated validation hardware: full suites exercise app lifecycle, clear
+the selected test package's data, grant/revoke its permission and interact with
+the screen. The Pixel profile still targets Magisk for its existing app checks.
+
+For a **disposable** stock emulator, install Android SDK platform-tools,
+platform 35, build-tools 35.0.0, an emulator/system image, and a JDK (17+).
+Set `ANDROID_HOME` (or `ANDROID_SDK_ROOT`) and put Java tools on PATH, or set
+`JAVA_HOME`. Boot one emulator and wait for Android startup to complete;
+disconnect other devices before running. For example, in PowerShell:
+
+```powershell
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+$env:ANDROID_SERIAL = 'emulator-5554' # use the serial shown by adb devices
+npm run test:emulator
+```
+
+The command builds a tiny test-only app. Its wrapper selects
+`DA_TEST_PROFILE=emulator`, verifies the target is an online, booted emulator,
+then installs the app. It refuses physical
+or ambiguous targets and existing installations of the fixture package
+`io.github.fullread.deepadb.fixture`. The app has no network permission and
+never opens the camera; CAMERA is declared only for grant/revoke/audit tests
+across API 30/33/35. Its temporary debug key and APK stay under ignored
+`.test-artifacts/`, outside the published package. Screenshots and other host
+outputs from each run are isolated in a fresh
+`.test-artifacts/emulator-run-*` directory, so an old baseline cannot satisfy a
+new test. These outputs are retained locally for diagnosis. The app is removed after the
+run, including test failures. Cleanup errors fail the run too. A forcibly killed
+host or disconnected emulator can prevent cleanup; inspect/remove only this
+test package before retrying if the wrapper reports an existing installation.
+
+Emulator lifecycle, intents, permission, data-clear and APK checks use that
+app instead of Magisk. UI tests verify navigation actually occurred and scroll
+to a target initially off screen, independent of Settings text, back stacks,
+Google account overlays or locale. Sensor tests activate the emulated calibrated
+accelerometer and compare results with Android's SensorManager inventory. An absent
+optional sensor gets a named skip; missing fixture data or a broken parser fails.
+Physical modem/firmware, ODPM/IIO and root-only assertions have explicit skips
+on this profile. Other failures remain failures. This does not substitute for
+the strict Pixel regression or the deferred real phone-to-watch Wear test.
+
+After `npm run build`, `node tests/fixtures/android/build.mjs` builds just the APK and
+`node .github/scripts/run-emulator-tests.mjs 33` runs the wrapper and records
+`emulator-api33.log` and `emulator-api33-summary.md`. The number labels the report;
+it does not create or select an API image. The scheduled workflow boots API
+30/33/35 images and runs this same wrapper. Keep fixture source and both test
+profiles in the validation checkout; do not deploy the fixture as part of DeepADB.
 
 For a full on-device run, use a complete validation checkout with `src/`,
 `tests/` (including fixtures), the compiled `build/`, and development dependencies.
@@ -128,6 +186,17 @@ paths. Linux runs file-symlink/race cases; Windows reports an explicit skip if
 its account cannot create file symlinks. Use Git for Windows' Bash for local
 POSIX guard checks. These tests use synthetic files and mock device I/O.
 
+`test-screenshot-cleanup` exercises the real host and local bridge routing with
+controlled device I/O, including concurrent captures, root/Termux ownership,
+guest targets, allocation refusal, capture/pull/cleanup failures and incomplete
+results. It also invokes all seven screenshot tool entry points and preserves
+workflow per-step error reporting. Keep screenshot operations on the shared
+`captureScreenshot` method; do not reintroduce caller-derived device paths or
+silently ignore cleanup errors. For hardware changes, rerun analysis, lifecycle
+and UI-control suites with the strict Pixel profile, then separately verify the
+LocalBridge path as the Termux app user: a root-only process cannot reproduce the
+original cleanup ownership mismatch.
+
 `test-code-scanning` adds bounded bearer parsing, safe GraphQL request/resolver
 errors and adversarial split-APK argument checks. It uses the real GraphQL HTTP
 handler with synthetic backend failures; no device is contacted. Keep known
@@ -160,7 +229,8 @@ turn a crashed suite green.
   completed, not that no alerts remain; inspect the code-scanning alert list.
 - The weekly emulator lane is informational, not a merge gate. Its job
   summary reports the actual pass/fail/skip counts and execution status;
-  unsupported physical-device capabilities can still fail assertions.
+  the emulator profile explicitly skips only its named physical-device checks
+  and sensor categories absent from Android's inventory.
   Failed assertions, missing/incomplete test summaries, interrupted tests and
   emulator boot failures mark the job failed. Logs and summaries are uploaded
   even after failure. The lane is not required by branch protection; investigate

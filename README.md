@@ -119,6 +119,14 @@ AI Agent (Termux) ←→ MCP (stdio/HTTP) ←→ DeepADB (Termux) ←→ sh/su (
 ```
 When DeepADB runs directly on the Android device (e.g., inside Termux), it auto-detects the environment and switches to `LocalBridge`. Commands execute directly via `sh`/`su` — no ADB server, no USB, no serialization overhead. The same 209-tool MCP surface is registered, with capability-aware guidance when an optional on-device binary such as `sqlite3` is unavailable.
 
+**Current test profiles:** `npm test` retains strict rooted Pixel 6a / Android 16
+coverage. `npm run test:emulator` uses a disposable fixture app for portable
+lifecycle/UI tests and verifies sensor readings against Android's actual inventory.
+Pixel-only hardware checks have explicit skips in the emulator profile; unexpected
+failures still fail its optional CI lane. See [test setup and profile boundaries](CONTRIBUTING.md#physical-pixel-and-portable-emulator-profiles).
+The release baselines below describe the published artifacts. See the
+[Unreleased changelog](CHANGELOG.md#unreleased) for subsequent changes and validation.
+
 **1.1.6 device validation (November 1, 2026):** the released build's full
 on-device run passed **836 checks, 0 failed, 3 skipped (839 total)** across all
 24 suites on the rooted Pixel 6a / Android 16, using Termux Node 24.22.1 and
@@ -199,6 +207,7 @@ browser HTTP reload recovery and its limits. Phone-to-watch Wear validation is d
 - **Command allowlist:** 16 system commands (`settings`, `dumpsys`, `am`, `input`, `screencap`, `screenrecord`, `uiautomator`, `app_process`, `getenforce`, `setenforce`, `cmd`, `pm`, `wm`, `svc`, `ip`, `ifconfig`) are routed through `su -c` to match ADB-mode behavior.
 - **Path-based elevation:** Commands referencing `/sdcard`, `/storage`, or `/system/` paths are elevated to bypass Android scoped storage restrictions.
 - **Root detection:** Cached after a single `su -c id` probe at first use. Graceful degradation when root is unavailable.
+- **Screenshot lifecycle:** Allocate, capture and remove private device scratch files under the same identity. LocalBridge uses root when available, while the pulled output remains owned by the Termux user. Registered VM targets use ADB on the guest.
 - The elevation allowlist is frozen (`ReadonlySet` + `Object.freeze`) — not configurable via environment variables or runtime API.
 
 **Auto-detection:** Checks for `/system/build.prop` (present on all Android devices, never on hosts). Override with `DA_LOCAL=true` or `DA_LOCAL=false`.
@@ -378,6 +387,13 @@ verify access to a particular app database.
 - `adb_screen_state` — Combined screen state in one call: foreground activity, screen dimensions and density, orientation, battery level, and a TSV list of interactive elements. Replaces 3–4 separate tool calls
 - `adb_screenrecord_start` — Start recording the device screen (1-180s, stored on device)
 - `adb_screenrecord_stop` — Stop recording and pull the mp4 video file locally
+
+All built-in screenshot tools and workflow screenshot steps use a fresh private
+device directory per capture. Output filenames still select the saved local
+file; they never select device scratch paths. Cleanup is attempted after capture
+or transfer failures, and a cleanup failure is reported with its path instead of
+being hidden. Concurrent calls should use distinct output filenames if both
+saved images must be retained. Legacy scratch files are not automatically deleted.
 
 ### Device Control (9 tools)
 - `adb_airplane_mode` — Toggle airplane mode with broadcast and verification
@@ -589,7 +605,7 @@ verify access to a particular app database.
 - `adb_network_auto_connect` — One-step discover + connect: scans for ADB devices and automatically runs adb connect on each found listener
 
 ### Hardware Sensor Access (2 tools)
-- `adb_sensor_read` — Read current hardware sensor values via dumpsys sensorservice. Enumerates all sensors with vendor, type, mode, rate range, and wake capability. Returns last-known readings with timestamps and axis-labeled formatting. Category filter (13 categories) and listOnly discovery mode. No root required
+- `adb_sensor_read` — Read hardware sensor inventory and last-known values via dumpsys sensorservice. Enumerates vendor, type, mode, rate range, and wake capability, including Android's zero-handle sensors. Returns timestamps and axis-labeled formatting when recent events exist; inactive sensors are identified explicitly. This is passive inspection, not a request to start sensor sampling. Category filter (13 categories) and listOnly discovery mode. No root required
 - `adb_iio_read` — Read raw hardware data from the Linux IIO subsystem. Auto-discovers IIO devices, classifies by kernel driver. On Tensor/Exynos: exposes per-rail ODPM power monitors showing real-time power consumption per SoC subsystem. Generic IIO path handles raw channels with calibrated scale+offset. Root required
 
 ### Result Handles (3 tools)
@@ -823,6 +839,7 @@ All 49 built-in tool modules receive a unified `BuiltinToolContext` dependency b
 | `DA_GRAPHQL_CORS_ORIGIN` | (none — deny Origins) | Exact HTTP(S) origins for GraphQL; comma-separated; no paths or wildcards |
 | `DA_WORKFLOW_REGISTRY_URL` | (not configured) | Trusted workflow manifest URL. Falls back to `DA_REGISTRY_URL` with `registry.json` replaced by `workflows.json` when that variable is set. Installation requires a matching SHA-256 hash. |
 | `DA_TEST_PIN` | (none) | Numeric PIN used by `tests/test-ui-control.mjs` to exercise screen-lock/unlock tests. Without it, the 4 lock-state tests skip. Format: `DA_TEST_PIN=0000 npm test`. |
+| `DA_TEST_PROFILE` | `pixel` | Test-only expectations: `pixel` retains strict hardware coverage; the `npm run test:emulator` wrapper selects `emulator` and provisions its disposable fixture. Unknown values fail startup. Separate from `DA_TOOL_PROFILE`. |
 
 ## Project Structure
 
@@ -928,6 +945,10 @@ DeepADB/
 ├── LICENSE                      # Apache 2.0 license
 └── tests/
     ├── run-all.mjs              # Run all test suites sequentially with summary (tracks skipped counts)
+    ├── run-emulator.mjs         # Verify emulator, provision/remove disposable fixture, run portable profile
+    ├── test-sensor-parsing.mjs  # Device-free sensor dump regressions, including handle zero
+    ├── test-ui-automation.mjs   # Device-free navigation, bounded waits/scrolls and failure paths
+    ├── test-screenshot-cleanup.mjs # Device-free screenshot ownership, concurrency, cleanup and tool contracts
     ├── test-hw.mjs              # Hardware core: health, identity, baseband, thermal, profiles, wireless firmware, crash analysis (34 tests)
     ├── test-shell-files.mjs     # Shell, filesystem, packages, diagnostics (24 tests)
     ├── test-ui-control.mjs      # UI hierarchy, screenshots, settings, input gestures, UI automation, device awareness, accessibility, screen lock/unlock, multi-touch (46 tests)

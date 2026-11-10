@@ -12,6 +12,7 @@ import { execFile, ExecFileOptions, spawn, ChildProcess } from "child_process";
 import { config } from "../config/config.js";
 import { Logger } from "../middleware/logger.js";
 import { shellQuote } from "../middleware/sanitize.js";
+import { randomBytes } from "crypto";
 
 export interface AdbResult {
   stdout: string;
@@ -178,6 +179,57 @@ export class AdbBridge {
   /** Execute a root shell command (via su). */
   async rootShell(command: string, options: AdbExecOptions = {}): Promise<AdbResult> {
     return this.exec(["shell", `su -c ${shellQuote(command)}`], options);
+  }
+
+  /**
+   * Capture into an exclusively created private device directory, then pull to
+   * the caller's local filename. Never derive device scratch paths from that
+   * filename or reuse a prior capture. All scratch commands use the same
+   * privilege context (LocalBridge overrides screenshotShell, including guests).
+   */
+  async captureScreenshot(localPath: string, options: Pick<AdbExecOptions, "device"> = {}): Promise<void> {
+    const directory = `/data/local/tmp/DA_screenshot_${randomBytes(16).toString("hex")}`;
+    const remotePath = `${directory}/capture.png`;
+    const checked = (result: AdbResult, operation: string): void => {
+      if (result.exitCode !== 0 || result.timedOut || result.bufferExceeded) {
+        throw new AdbError(`Screenshot ${operation} failed: ${result.stderr || result.stdout || "incomplete command"}`, result);
+      }
+    };
+    const shell = async (command: string, operation: string, timeout = 15000): Promise<void> => {
+      // No replay of allocation/capture after ambiguous transport failures.
+      checked(await this.screenshotShell(command, { ...options, timeout, retries: 0 }), operation);
+    };
+
+    // No -p: an existing directory or symlink must fail, without deleting it.
+    await shell(`mkdir -m 700 -- ${shellQuote(directory)}`, "allocation");
+    let captureFailed = false;
+    let captureError: unknown;
+    try {
+      await shell(`umask 077; screencap -p ${shellQuote(remotePath)}`, "capture");
+      checked(await this.exec(["pull", remotePath, localPath], {
+        ...options, timeout: 30000, retries: 0,
+      }), "pull");
+    } catch (error) {
+      captureFailed = true;
+      captureError = error;
+    }
+    // Run after success or failure without a finally throw masking the original.
+    try {
+      // Only the known file and its empty directory; no recursive deletion,
+      // wildcards, caller-supplied paths, or blanket rm elevation.
+      await shell(`rm -f -- ${shellQuote(remotePath)} && rmdir -- ${shellQuote(directory)}`, "cleanup", 10000);
+    } catch (cleanupError) {
+      const message = (error: unknown): string => error instanceof Error ? error.message : String(error);
+      throw new AggregateError(captureFailed ? [captureError, cleanupError] : [cleanupError],
+        `${captureFailed ? `${message(captureError)}; ` : ""}Screenshot cleanup failed for ${directory}: ${message(cleanupError)}`,
+        { cause: cleanupError });
+    }
+    if (captureFailed) throw captureError;
+  }
+
+  /** Internal screenshot lifecycle commands; not a generic elevated shell API. */
+  protected screenshotShell(command: string, options: AdbExecOptions): Promise<AdbResult> {
+    return this.shell(command, options);
   }
 
   /** Verify ADB is accessible and return version info. */

@@ -96,7 +96,9 @@ function parseSensorList(dump: string): SensorInfo[] {
   // Each sensor entry looks like:
   // 0x01010001) LSM6DSR Accelerometer     | STMicro         | ver: 1 | type: android.sensor.accelerometer(1) | ...
   // followed by a line with mode info: continuous | minRate=... | maxRate=... | ...
-  const entryRegex = /^(0x[\da-f]+)\)\s+(.+?)\s*\|\s*(.+?)\s*\|\s*ver:\s*(\d+)\s*\|\s*type:\s*(\S+?)(?:\(\d+\))?\s*\|/gm;
+  // Android formats handles with %#010x: zero is "0000000000", without
+  // the 0x prefix. Goldfish's calibrated accelerometer uses that handle.
+  const entryRegex = /^(0x[\da-fA-F]+|0{10})\)\s+(.+?)\s*\|\s*(.+?)\s*\|\s*ver:\s*(\d+)\s*\|\s*type:\s*(\S+?)(?:\(\d+\))?\s*\|/gm;
   let match: RegExpExecArray | null;
 
   while ((match = entryRegex.exec(block)) !== null) {

@@ -15,11 +15,13 @@
 import { spawn } from "child_process";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { profile, scopedToolArguments } from "./test-profile.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_PATH = join(__dirname, "..", "..", "build", "index.js");
 
 export async function createHarness(suiteName = "Test") {
+  console.log(`Test profile: ${profile.name}`);
   let reqId = 0;
   let proc;
   let buffer = "";
@@ -99,7 +101,7 @@ export async function createHarness(suiteName = "Test") {
   // ── Utilities ────────────────────────────────────────────
 
   function callTool(name, args = {}, timeoutMs = 30000) {
-    return sendRequest("tools/call", { name, arguments: args }, timeoutMs);
+    return sendRequest("tools/call", { name, arguments: scopedToolArguments(args) }, timeoutMs);
   }
 
   /** Read an MCP Resource by URI. Returns the full RPC response — caller

@@ -4,6 +4,9 @@ build/
 
 # Test runner output (npm test redirect target)
 test-output.log
+.test-artifacts/
+emulator-api*.log
+emulator-api*-summary.md
 
 # TypeScript compilation artifacts
 *.js

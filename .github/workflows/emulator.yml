@@ -4,8 +4,8 @@
 # suite against it, adding Android-version diversity that a single physical
 # device cannot. This lane is INFORMATIONAL: a stock emulator has no real
 # baseband/modem, no real IIO sensors, no Magisk root, and cannot run nested
-# QEMU/KVM, so the baseband, sensor, on-device-virtualization, and root tools
-# may fail or skip here. Failed assertions and emulator boot failures mark the
+# QEMU/KVM. The emulator test profile uses a disposable fixture app, discovers
+# actual sensors, and explicitly skips Pixel-only assertions. Failed tests mark the
 # job failed; this optional workflow is not a required branch-protection check.
 # It exists to catch regressions on a real Android runtime (see test.yml for
 # the required CI). No failure is automatically classified as expected.
@@ -43,6 +43,11 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Build disposable test fixture
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          node tests/fixtures/android/build.mjs
 
       # The emulator runner needs hardware acceleration (KVM) on the runner.
       - name: Enable KVM

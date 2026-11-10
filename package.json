@@ -13,6 +13,7 @@
     "start": "node build/index.js",
     "pretest": "npm run build",
     "test": "node tests/run-all.mjs",
+    "test:emulator": "npm run build && node tests/fixtures/android/build.mjs && node tests/run-emulator.mjs",
     "coverage": "npm run build && c8 node tests/run-all.mjs",
     "test:ci": "npm run build && node tests/run-all.mjs --ci",
     "test:browser": "npm run build && node tests/browser/cors.mjs",

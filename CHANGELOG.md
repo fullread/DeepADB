@@ -4,6 +4,114 @@ All notable changes to DeepADB are documented in this file.
 
 ## Unreleased
 
+### Emulator portability and sensor correctness
+
+- Preserve the strict rooted Pixel 6a / Android 16 test profile as the default.
+  Add an explicit emulator profile and a locally built, disposable fixture app
+  for lifecycle, permissions, data-clear, APK extraction and UI navigation.
+  Reject ambiguous/physical emulator targets and pre-existing fixture installs;
+  setup, test and cleanup failures retain a failing result.
+- Replace emulator-specific assumptions about Magisk, Settings navigation and
+  Pixel sensor names with controlled app state and Android SensorManager data.
+  Activate sensor listeners before expecting recent values. Retain explicit
+  skips for physical modem/firmware, ODPM/IIO and root-only assertions; absent
+  optional sensor categories are reported from the device inventory.
+- Fix `adb_sensor_read` dropping handle zero (`0000000000`), used by the
+  Goldfish calibrated accelerometer on API 30/33. Keep nonzero Pixel handles,
+  calibrated axis values, wake flags and rate formatting covered by regressions.
+- Add device-free UI navigation/wait/scroll and sensor parser regressions,
+  plus fixture lifecycle/target-selection tests. Keep the emulator workflow
+  optional with honest exit status, always-run reports and uploaded logs.
+- Pin implicit emulator tool calls to the verified serial and give every run
+  a fresh host output directory. Capture screenshot baselines on the stable
+  fixture screen instead of first-boot launcher state; retain failures from
+  unsuccessful captures rather than reusing previous run artifacts.
+
+#### Local validation — November 9, 2026
+
+- On Windows with Node 22.23.4, the full API 33 emulator run passed **780 checks,
+  zero failed, 44 explicit skips (824 total)** across 26 suites. The final
+  accelerometer-only fixture also passed its focused sensor recheck: **24
+  passed, zero failed, 11 skips**.
+- The eight previously failing suites on API 30 passed **336 checks, zero
+  failed, 38 explicit skips (374 total)** after the controlled screenshot
+  setup and output isolation. Earlier local screenshot timeouts were reported
+  as failures; the successful rerun did not suppress or relabel them.
+- A final full API 35 run with the scoped tool arguments, isolated host output
+  and accelerometer-only fixture passed **780 checks, zero failed, 44 explicit
+  skips (824 total)** across all 26 suites. Fixture removal succeeded and the
+  validation emulators were shut down. The full runs include 34 local-LLM
+  protocol checks, 37 SDK/plugin compatibility checks and eight transport
+  smoke checks; they are not new model-driven llama.cpp trials.
+- The device-free set passed **363 checks, zero failed, 17 expected skips
+  (380 total)** across 14 suites. All **23** separate runner/profile tests pass.
+  Build, lint, workflow syntax and package exclusion checks pass.
+- Follow-up full host/ADB regression on the rooted Pixel 6a / Android 16,
+  using the freshly compiled host build and Node 22.23.4 with
+  `DA_TEST_PROFILE=pixel` and PIN checks enabled: **796 passed, zero failed,
+  18 expected host/environment skips (814 total)** across all 26 suites.
+  All 34 hardware-core, 30 sensor and 46 UI checks passed, including exact
+  Pixel identity/firmware, ODPM/IIO, root shell and multi-touch, PIN recovery,
+  read-only SQLite access and the live Shannon AT/OK handshake. None of the
+  emulator-only skips applied. The 18 skips are five on-device-only QEMU
+  checks, twelve Windows/POSIX or unavailable-tcpdump security checks, and one
+  host symlink-capability check. The run did not modify source files.
+- Preserve the initial Pixel result: **794 passed, two failed, 18 skipped**.
+  The failures were screenshot writes to `/data/local/tmp/DA_test_001.png`
+  and `/data/local/tmp/DA_test_screenshot.png` returning permission denied.
+  Both files were absent after the tools' cleanup; the complete unchanged-code
+  rerun then passed. Their earlier ownership was not captured. Review found a
+  plausible cross-mode cleanup weakness: LocalBridge elevates `screencap`, but
+  does not elevate plain removal of these `/data/local/tmp` files. This led to
+  the screenshot lifecycle fix and separate validation below; the unchanged
+  successful rerun alone did not resolve that weakness.
+- These are local validation results, not hosted GitHub Actions results.
+  The Pixel run used the host/ADB build; it did not redeploy the on-device
+  installation or rerun LocalBridge/QEMU coverage. Real phone-to-watch Wear
+  validation remains deferred. No publication is part of this change.
+
+### Screenshot temporary files and cross-mode cleanup
+
+- Route all seven built-in screenshot tool entry points (including workflow
+  steps, annotations and baseline/diff captures) through one bridge operation.
+  Each capture exclusively allocates a private 0700 directory with a random
+  128-bit suffix, writes with umask 077, and removes only its PNG and empty
+  directory. Caller filenames no longer select device scratch paths.
+- Match allocation, capture and cleanup privileges in LocalBridge, retaining
+  guest ADB routing and Termux ownership of pulled output. Do not broaden generic
+  `rm` elevation, sweep legacy files or introduce recursive device cleanup.
+- Attempt cleanup after capture/transfer failures; report cleanup failures
+  rather than hiding them, preserving both errors when both operations fail.
+  Reject incomplete command results. Keep tool schemas, saved filenames and
+  workflow per-step reporting compatible; concurrent saved outputs still need
+  distinct local filenames when both images must be retained.
+- Add 30 device-free regressions for concurrency, failure cleanup, identity,
+  guest routing and all seven tool entry points. The complete device-free set
+  passes **393 checks, zero failed, 17 expected skips (410 total)** across
+  15 suites. Build and lint pass.
+- A temporary bridge-only check on the Pixel, running as the actual Termux app
+  user with Node 24.22.1, passes three checks: two valid, Termux-owned PNG outputs
+  from root-private captures and cleanup after an injected transfer failure.
+  Root scratch directories/files had modes 0700/0600 and all were removed.
+  The installed DeepADB package was not replaced.
+- The affected strict host/ADB Pixel suites pass **93 checks, zero failures or
+  skips**: analysis 23, lifecycle 24 and UI control 46, including PIN recovery
+  and root gestures. Two additional live collision checks created root-owned
+  0600 files at the old predictable paths; new captures succeeded and left both
+  sentinels unchanged. The sentinels were then removed. These targeted checks
+  preceded the full post-fix run below.
+- Full post-fix host/ADB regression on the rooted Pixel 6a / Android 16, with
+  the freshly compiled build, Node 22.23.4, `DA_TEST_PROFILE=pixel` and PIN
+  checks enabled: **826 passed, zero failed, 18 expected environment skips
+  (844 total)** across all **27 suites**, on the first run. All 34 hardware-core,
+  30 sensor, 46 UI/PIN/root-gesture and 30 screenshot-cleanup checks passed,
+  together with live SQLite/Shannon, local-LLM protocol and SDK/plugin coverage.
+  Skips remain five on-device-only QEMU checks, twelve Windows/POSIX or absent
+  tcpdump security checks, and one host file-symlink capability check. The run
+  changed no source files; no screenshot scratch directories or test ADB
+  forwards remained. The phone was left unlocked on Home. This used the host
+  build and did not replace the installed on-device package.
+
 ### Documentation and CI reporting
 
 - Make the general MCP setup, architecture and security guidance client-neutral.

@@ -73,6 +73,19 @@ remains appropriate only for an operator trusted with its entire catalog and plu
 
 When running in Termux, the LocalBridge uses a **frozen 16-command allowlist** to determine which commands get routed through `su`. This allowlist is a `ReadonlySet` wrapped in `Object.freeze()` — it cannot be modified via environment variables, runtime API, or configuration files.
 
+Built-in screenshot capture also uses a dedicated bridge lifecycle: exclusive
+0700 directories with random 128-bit names under `/data/local/tmp`, capture with
+umask 077, and cleanup under the same identity. In rooted Termux mode this
+prevents root-created screenshots from being left behind by unprivileged
+cleanup. The pulled output is created by the Termux user. Registered guests use
+their own ADB connection, not the host's root shell. Caller filenames select only
+the local output; no client-supplied path enters elevated scratch removal.
+Cleanup deletes only the known PNG and its empty directory. It does not widen
+the generic command/path elevation rules or recursively remove old files.
+Failures are visible, including both the capture/transfer and cleanup errors
+when both fail. Device disconnection or process termination can still prevent
+cleanup; retained screenshots should be treated as sensitive data.
+
 ### Process Lifecycle
 
 All modules that spawn child processes (logcat watchers, RIL interceptors, screen mirroring, QEMU VMs, emulators) register with a centralized cleanup registry. SIGINT, SIGTERM, and process exit trigger cleanup of all registered child processes, preventing orphans.
