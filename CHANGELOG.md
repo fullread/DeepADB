@@ -4,6 +4,58 @@ All notable changes to DeepADB are documented in this file.
 
 ## Unreleased
 
+## v1.1.7 — Screenshot and Sensor Reliability
+
+This patch preserves the 209-tool,
+49-module interface and existing client/plugin compatibility. It fixes private
+screenshot allocation and cross-mode cleanup, retains zero-valued sensor
+handles, and makes the optional emulator regression portable without weakening
+the strict Pixel profile. Validation below distinguishes the merged fixes from
+the versioned release build.
+
+#### 1.1.7 release verification — November 9, 2026
+
+- The versioned host/ADB build passed **826 checks, zero failures, 18 expected
+  skips** across 27 strict Pixel suites. After the network-test correction
+  below, the affected boundary suite passed **79 checks, zero failures**.
+- The final isolated device-free run passed **394 checks, zero failures,
+  17 expected skips (411 total)** across 15 suites with coverage collected.
+  All 23 runner/profile checks and eight real-browser host checks passed.
+  Build, lint and the dependency audit passed with zero vulnerabilities;
+  registry metadata passes the official JSON Schema.
+- The initial on-device run passed **877 checks with one failure and three
+  cached-QEMU skips**. Its negative discovery test assumed TEST-NET hosts
+  would refuse TCP and ignored the tool's additional ARP candidates; probes
+  from this phone actually succeeded. Replace that environment-dependent
+  assumption with an empty-range/no-anchor MCP check and a registered-handler
+  fixture that injects closed sockets, verifies both probes, and forbids
+  connect attempts. No production networking behavior is changed.
+- The complete on-device rerun passed **879 checks, zero failures, three
+  cached-QEMU setup skips (882 total)** across all 27 suites on the rooted
+  Pixel 6a / Android 16 with Termux Node 24.22.1. Actual VM boot/shutdown,
+  POSIX security, PIN recovery, calibrated sensors, screenshot cleanup,
+  SQLite/Shannon and client/plugin compatibility passed. This uses a complete
+  isolated validation checkout with the production package's matching build;
+  development/test dependencies are not installed in the production directory.
+- The staged and installed production server each passed **ten strict checks**:
+  version/catalog, health/audit, real SQLite schema/query/write rejection,
+  Shannon AT/OK, calibrated accelerometer values and concurrent private
+  Termux-owned screenshots. Three direct Termux-user bridge checks verified
+  root-private scratch permissions, valid PNG output and cleanup after an
+  injected transfer failure. Eight real-browser HTTP checks and six authenticated
+  WebSocket/GraphQL checks passed against the installed 1.1.7 server.
+- The verified 1.1.7 production package replaced the previous 1.1.6 installation,
+  preserving its optional transports, Termux ownership and shared user state/VM
+  cache. The previous installation, rollback copy and temporary validation/
+  transfer files were removed after verification. No persistent test
+  listener or screenshot scratch directory remains. Real phone-to-watch Wear
+  validation is still deferred; these are protocol tests, not a new
+  model-driven llama.cpp trial.
+- The underlying merged screenshot/sensor changes passed the hosted API
+  30/33/35 matrix: **832 passed, zero failures, 34 explicit skips** per lane,
+  plus Test and CodeQL on main. Those runs preceded the 1.1.7 metadata bump
+  and the additional deterministic boundary assertion.
+
 ### Emulator portability and sensor correctness
 
 - Preserve the strict rooted Pixel 6a / Android 16 test profile as the default.

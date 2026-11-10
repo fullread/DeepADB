@@ -297,7 +297,7 @@ When installing DeepADB via npm, always pin the version:
 
 ```bash
 # Pinned (recommended)
-npm install -g deepadb@1.1.6
+npm install -g deepadb@1.1.7
 
 # Unpinned (not recommended — vulnerable to supply chain attacks)
 npx -y deepadb

@@ -34,6 +34,26 @@ For a guided local connection, see [MCP Client Configuration](#mcp-client-config
 Using llama.cpp or another local model? See [Local LLM clients](LOCAL_LLMS.md)
 for direct stdio, authenticated browser HTTP, and small tool profiles. WebSocket is not required.
 
+### 1.1.7 release
+
+Version 1.1.7 fixes screenshot temporary-file isolation and root/Termux cleanup,
+retains Android sensor handle zero, and adds portable emulator regression coverage.
+The 209-tool interface and existing MCP clients/plugins remain compatible.
+
+For `deepadb-v1.1.7-prebuilt.zip`, extract its contents into a
+folder named `deepadb-v1.1.7`, then run:
+
+```bash
+cd deepadb-v1.1.7
+npm ci --omit=dev
+npm start
+```
+
+No TypeScript build is needed for the prebuilt archive.
+`npm install -g deepadb@1.1.7` installs the same patch from npm. For an HTTP client, use
+the authenticated [local LLM examples](LOCAL_LLMS.md); WebSocket/GraphQL remain
+optional and need their documented runtime dependencies.
+
 ## Architecture
 
 ```
@@ -124,8 +144,28 @@ coverage. `npm run test:emulator` uses a disposable fixture app for portable
 lifecycle/UI tests and verifies sensor readings against Android's actual inventory.
 Pixel-only hardware checks have explicit skips in the emulator profile; unexpected
 failures still fail its optional CI lane. See [test setup and profile boundaries](CONTRIBUTING.md#physical-pixel-and-portable-emulator-profiles).
-The release baselines below describe the published artifacts. See the
-[Unreleased changelog](CHANGELOG.md#unreleased) for subsequent changes and validation.
+The older release baselines below describe their published artifacts. See the
+[1.1.7 changelog](CHANGELOG.md#v117--screenshot-and-sensor-reliability) for the
+current release and validation.
+
+**1.1.7 validation (November 9, 2026):** the full on-device regression passed
+**879 checks, zero failures, three cached-QEMU setup skips (882 total)** across
+27 suites on the rooted Pixel 6a / Android 16 with Termux Node 24.22.1. Actual
+VM boot/shutdown, all 30 sensor checks, 30 screenshot-cleanup checks, 46 UI/PIN
+checks, SQLite/Shannon diagnostics and existing client/plugin compatibility
+passed. The suite used an isolated validation checkout with the production
+build's matching files. Host/ADB coverage passed 826 checks with 18 expected
+skips; after the network-negative test correction, its boundary suite passed
+79 checks. The final device-free set passed 394 checks with 17 expected skips.
+These are distinct test configurations; their counts are not interchangeable.
+Production-build verification also includes ten strict smoke checks before
+and after installation, three direct Termux-user capture/cleanup checks,
+eight real-browser HTTP checks and six authenticated WebSocket/GraphQL checks.
+The previous 1.1.6 installation and
+temporary test/rollback copies were removed; shared user state and VM images
+were preserved. The production directory contains runtime dependencies and
+the optional transport libraries, without the test/development checkout.
+Real phone-to-watch Wear validation remains deferred.
 
 **1.1.6 device validation (November 1, 2026):** the released build's full
 on-device run passed **836 checks, 0 failed, 3 skipped (839 total)** across all
@@ -136,8 +176,8 @@ runtime-audit regressions, device SQLite, live Shannon AT/OK, client/plugin
 compatibility, POSIX security cases and PIN-based UI recovery. The production
 installation passed eight strict checks before and after promotion, plus eight
 real Chromium checks and six authenticated WebSocket/GraphQL checks. Following
-the final documentation audit and verified redeployment, 1.1.6 is the only
-DeepADB installation retained on the validation Pixel; older installations
+the final documentation audit and verified redeployment, 1.1.6 was the only
+DeepADB installation retained on the validation Pixel at that time; older installations
 and rollback copies were removed at the operator's request. Real phone-to-watch
 validation remains deferred.
 
