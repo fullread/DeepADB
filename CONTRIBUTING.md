@@ -124,6 +124,12 @@ Some device-free suites also run optional hardware assertions when an
 authorized device is visible. Disconnect USB and wireless devices, or use an
 isolated ADB configuration, when you need a strictly device-free local run.
 
+Network-discovery negative tests must not assume TEST-NET addresses refuse TCP
+connections or that an explicit range excludes ARP neighbors. The boundary
+suite uses an empty range with an unavailable anchor over MCP, then synthetic
+closed sockets to test the no-listener result and absence of connect attempts.
+These checks never depend on or auto-connect to the developer's LAN.
+
 For browser transport changes, also run `npm run test:browser`. It launches an
 isolated headless browser with normal browser security enabled and exercises
 real CORS preflights, authenticated SSE and Streamable HTTP initialization,

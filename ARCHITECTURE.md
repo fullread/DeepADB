@@ -304,6 +304,20 @@ Useful commands:
 - `npm run test:ci` runs only the device-free suites (`run-all.mjs --ci`).
 - `npm run coverage` runs the suite under c8 and writes `coverage/` (lcov + summary).
 
+For 1.1.7, the device-free baseline is **394 passed, zero failures, 17 expected
+skips** across 15 suites on Node 22.23.4, with coverage collected. Separate
+runner/profile tests pass all 23 checks. The boundary suite now separates a
+no-candidate MCP request from synthetic closed-probe coverage, so VPN/proxy
+behavior or live ARP neighbors cannot turn a negative test into a LAN connection.
+The versioned strict host/ADB Pixel run passed 826 checks with 18 expected skips;
+the subsequent boundary-only rerun passed 79 checks after the test correction.
+The full on-device rerun passed **879 checks, zero failures, three cached-QEMU
+setup skips** across all 27 suites on Termux Node 24.22.1. Actual VM boot/shutdown
+and all strict Pixel assertions ran. It used a separate complete test checkout
+whose compiled files match the production installation, keeping development
+dependencies out of the deployed directory. See the 1.1.7 changelog for the
+initial network-test failure, correction and installed-server verification.
+
 The v1.1.5 final audit baseline on Windows/Node 22.23.4 passed 295
 checks with zero failures and 17 skips (312 total) across ten suites. Sixteen
 skips require hardware; one requires file-symlink creation privileges. The new
