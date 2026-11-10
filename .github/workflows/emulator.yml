@@ -46,7 +46,8 @@ jobs:
 
       - name: Build disposable test fixture
         run: |
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:?Android SDK root is required}}"
+          "$sdk_root/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
           node tests/fixtures/android/build.mjs
 
       # The emulator runner needs hardware acceleration (KVM) on the runner.

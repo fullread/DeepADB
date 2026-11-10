@@ -26,6 +26,9 @@ All notable changes to DeepADB are documented in this file.
   a fresh host output directory. Capture screenshot baselines on the stable
   fixture screen instead of first-boot launcher state; retain failures from
   unsuccessful captures rather than reusing previous run artifacts.
+- Resolve `sdkmanager` from the configured Android SDK when building the CI
+  fixture. GitHub's Ubuntu image provides the binary outside the default PATH;
+  a missing tool must remain a setup failure rather than a passing empty run.
 
 #### Local validation — November 9, 2026
 
