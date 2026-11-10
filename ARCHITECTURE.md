@@ -104,6 +104,22 @@ allowlist through `su` (the allowlist is `Object.freeze()`d and cannot be
 widened at runtime). Both expose the same interface, so tools never know which
 bridge they run against.
 
+Built-in screenshot capture is centralized in `AdbBridge.captureScreenshot`.
+Each call exclusively creates a directory under `/data/local/tmp` with a random
+128-bit suffix and mode 0700, captures with umask 077, and pulls the PNG to the
+requested local destination. LocalBridge overrides the internal lifecycle shell
+to use the same root context for allocation, capture and cleanup when root is
+available; guest targets retain ADB routing. Its pull redirect remains outside
+`su`, preserving Termux ownership of the local output.
+
+Cleanup removes only the known PNG and its empty directory, even after capture
+or transfer errors. No recursive deletion, broad filename sweep, or generic
+`rm` elevation is added. Cleanup errors retain the original failure as well as
+the cleanup diagnostic. Allocation failure never triggers deletion of a path
+the call did not acquire. Timeouts, output truncation and nonzero results cannot
+be reported as successful captures. A killed process or unavailable device can
+still leave scratch data; there is no automatic orphan-file scavenger.
+
 ## Transports
 
 `index.ts` reads environment variables and selects exactly one MCP transport:
@@ -266,8 +282,12 @@ Suites fall into two groups:
   port and does a real MCP round-trip), `test-sdk-compat` (v1/v2 clients,
   plugin APIs and schemas, auth, reconnects, and catalog compatibility),
   `test-sanitize-fuzz`, `test-browser-access`, `test-local-llm`,
-  `test-audit-hardening`, `test-code-scanning`, and `test-runtime-audit` (probe
-  failure isolation and tri-state readiness). Device-dependent assertions
+  `test-audit-hardening`, `test-code-scanning`, `test-runtime-audit` (probe
+  failure isolation and tri-state readiness), `test-sensor-parsing` (zero/nonzero
+  handles and recent values), and `test-ui-automation` (navigation, bounded
+  waits/scrolls and capture failures), plus `test-screenshot-cleanup` (concurrent
+  scratch allocation, bridge identity/guest routing, failure cleanup and all
+  seven screenshot tool entry points). Device-dependent assertions
   inside an otherwise device-free suite skip-guard
   themselves when no device is present, so the run stays green either way.
 - Device-dependent: require a connected device or emulator and are run locally.
@@ -278,7 +298,9 @@ Suites fall into two groups:
 
 Useful commands:
 
-- `npm test` runs the full suite (needs a device for the device-dependent parts).
+- `npm test` runs the full suite with strict rooted Pixel 6a / Android 16 expectations.
+- `npm run test:emulator` builds a disposable test app and runs the portable
+  emulator profile; SDK/JDK and a single booted emulator are required.
 - `npm run test:ci` runs only the device-free suites (`run-all.mjs --ci`).
 - `npm run coverage` runs the suite under c8 and writes `coverage/` (lcov + summary).
 
@@ -380,9 +402,12 @@ cancellation, and the security guide's shared/network deployment recipes.
 
 GitHub also runs dependency-advisory auditing and CodeQL analysis. The weekly
 emulator lane is informational: it preserves execution failures and publishes
-pass/fail/skip counts, but unavailable physical-device capabilities can still
-cause test failures. Its green workflow status must not be interpreted as an
-all-tests-pass result. See CONTRIBUTING.md for CI and merge requirements.
+pass/fail/skip counts. Explicit test profiles retain the physical Pixel assertions
+while using a disposable app and Android-reported sensor inventory on emulators.
+Named hardware skips are distinct from failures: failed assertions, fixture
+setup/cleanup errors and incomplete runs still fail the job. Historical green
+runs using `continue-on-error` did not guarantee passing tests. See CONTRIBUTING.md
+for profile setup, CI and merge requirements.
 The reporting helper has separate mocked process tests under `tests/ci/`;
 these validate CI infrastructure and do not replace the real-server suites.
 

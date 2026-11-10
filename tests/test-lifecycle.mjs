@@ -6,6 +6,7 @@
  * test sessions, UI input, and activity launch.
  */
 import { createHarness } from "./lib/harness.mjs";
+import { profile } from "./lib/test-profile.mjs";
 import { existsSync } from "fs";
 
 const h = await createHarness("Lifecycle & Interaction");
@@ -16,17 +17,17 @@ const onDevice = existsSync("/data/data/com.termux");
 
 // ── App Lifecycle ──────────────────────────────────────────
 
-h.section("App Lifecycle (Magisk)");
+h.section(`App Lifecycle (${profile.appLabel})`);
 await h.testContains("Force Stop", "adb_force_stop",
-  { packageName: "com.topjohnwu.magisk" }, "Force-stopped");
+  { packageName: profile.packageName }, "Force-stopped");
 
 await h.testContains("Start App", "adb_start_app",
-  { packageName: "com.topjohnwu.magisk" }, "Launched");
+  { packageName: profile.packageName }, "Launched");
 
 await new Promise(r => setTimeout(r, 1500));
 
 await h.testContains("Restart App", "adb_restart_app",
-  { packageName: "com.topjohnwu.magisk", delayMs: 500 }, "Restarted");
+  { packageName: profile.packageName, delayMs: 500 }, "Restarted");
 
 await new Promise(r => setTimeout(r, 1000));
 
@@ -71,8 +72,8 @@ await new Promise(r => setTimeout(r, 500));
 // ── Performance Snapshot ───────────────────────────────────
 
 h.section("Performance Snapshot");
-await h.testContains("Perf Snapshot (Magisk)", "adb_perf_snapshot",
-  { packageName: "com.topjohnwu.magisk" }, "Memory");
+await h.testContains(`Perf Snapshot (${profile.appLabel})`, "adb_perf_snapshot",
+  { packageName: profile.packageName }, "Memory");
 
 // ── Port Forwarding Lifecycle ──────────────────────────────
 

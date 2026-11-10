@@ -6,6 +6,7 @@
  * Tests tools that capture baselines then compare against them.
  */
 import { createHarness } from "./lib/harness.mjs";
+import { profile, pixelContains, requireFixtureScreen } from "./lib/test-profile.mjs";
 
 const h = await createHarness("Analysis & Comparison");
 
@@ -46,7 +47,7 @@ h.section("Regression Check");
 
 // Capture a baseline then immediately check against it
 const regRes = await h.testContains("Regression baseline (for check)", "adb_regression_baseline",
-  { packageName: "com.topjohnwu.magisk", label: "DA_check_test" }, "Saved");
+  { packageName: profile.packageName, label: "DA_check_test" }, "Saved");
 
 const regText = h.getText(regRes);
 const regPath = regText?.match(/Saved:\s*(.+\.json)/)?.[1];
@@ -70,6 +71,7 @@ await h.testContains("Firmware diff (current vs current)", "adb_firmware_diff",
 
 h.section("Screenshot Diff Lifecycle");
 
+if (profile.emulator) await requireFixtureScreen(h);
 await h.testContains("Screenshot baseline capture", "adb_screenshot_baseline",
   { name: "DA_test_baseline" }, "baseline saved");
 
@@ -89,11 +91,12 @@ h.section("Test Generation");
 await h.callTool("adb_shell", { command: "input keyevent KEYCODE_HOME" });
 await new Promise(r => setTimeout(r, 1000));
 
+if (profile.emulator) await requireFixtureScreen(h);
 await h.testContains("Test gen from UI", "adb_test_gen_from_ui",
-  { packageName: "com.google.android.apps.nexuslauncher" }, "Generated test workflow");
+  { packageName: profile.emulator ? profile.packageName : "com.google.android.apps.nexuslauncher" }, "Generated test workflow");
 
-await h.testContains("Test gen from intents (Magisk)", "adb_test_gen_from_intents",
-  { packageName: "com.topjohnwu.magisk" }, "Generated intent test");
+await h.testContains(`Test gen from intents (${profile.appLabel})`, "adb_test_gen_from_intents",
+  { packageName: profile.packageName }, "Generated intent test");
 
 // Save a generated workflow
 const simpleWf = JSON.stringify({
@@ -126,32 +129,33 @@ await h.testContains("RIL stop", "adb_ril_stop",
 
 h.section("AT Modem Detection");
 
-await h.testContains("AT detect (Shannon)", "adb_at_detect", {}, "shannon");
+await pixelContains(h, "AT detect (Shannon)", "adb_at_detect", {}, "shannon");
 await h.testContains("AT cross-validate", "adb_at_cross_validate", { timeout: 8000 }, "Cross-Validation", 60000);
 
 // ── Permission Management ─────────────────────────────────
 
 h.section("Permission Management");
 
-// Grant a runtime permission to Magisk (safe, idempotent)
-await h.test("Grant permission (Magisk)", "adb_grant_permission",
-  { packageName: "com.topjohnwu.magisk", permission: "android.permission.POST_NOTIFICATIONS" });
+// Use a permission supported across the emulator API matrix. The strict Pixel
+// profile retains its original Magisk / POST_NOTIFICATIONS checks.
+await h.test(`Grant permission (${profile.appLabel})`, "adb_grant_permission",
+  { packageName: profile.packageName, permission: profile.permission });
 
 // List permissions — verify output contains the summary header
-await h.testContains("List permissions (Magisk)", "adb_list_permissions",
-  { packageName: "com.topjohnwu.magisk", filter: "all" }, "permissions granted");
+await h.testContains(`List permissions (${profile.appLabel})`, "adb_list_permissions",
+  { packageName: profile.packageName, filter: "all" }, "permissions granted");
 
 // List granted only — verify the filter param works
 await h.testContains("List permissions → granted filter", "adb_list_permissions",
-  { packageName: "com.topjohnwu.magisk", filter: "granted" }, "permissions granted");
+  { packageName: profile.packageName, filter: "granted" }, "permissions granted");
 
-// Revoke the permission we just granted (idempotent — Magisk works without it)
-await h.test("Revoke permission (Magisk)", "adb_revoke_permission",
-  { packageName: "com.topjohnwu.magisk", permission: "android.permission.POST_NOTIFICATIONS" });
+// Revoke the permission we just granted (neither target needs it for this test).
+await h.test(`Revoke permission (${profile.appLabel})`, "adb_revoke_permission",
+  { packageName: profile.packageName, permission: profile.permission });
 
 // Re-grant to leave Magisk in original state
 await h.test("Re-grant permission (cleanup)", "adb_grant_permission",
-  { packageName: "com.topjohnwu.magisk", permission: "android.permission.POST_NOTIFICATIONS" });
+  { packageName: profile.packageName, permission: profile.permission });
 
 const exitCode = h.finish();
 process.exit(exitCode);

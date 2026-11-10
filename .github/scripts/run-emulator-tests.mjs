@@ -58,7 +58,7 @@ export function formatSummary(apiLevel, result) {
     lines.push("No valid final aggregate summary was found; counts are unknown, not zero.", "");
   }
   lines.push(
-    "Stock emulators lack physical Pixel hardware, Magisk, a real modem, and some sensors. Those assertions may fail or skip; this does not classify every failure as expected.",
+    "The emulator test profile uses a disposable app and checks the emulator's actual sensor inventory. Pixel-only modem, silicon and root checks are explicitly skipped; this does not classify every failure as expected.",
     "",
     "Inspect the uploaded emulator log to distinguish unsupported hardware checks from regressions.",
     "",
@@ -83,8 +83,8 @@ export async function runEmulatorTests({
   apiLevel,
   logPath,
   summaryPath,
-  command = "npm",
-  args = ["test"],
+  command = process.execPath,
+  args = ["tests/run-emulator.mjs"],
   stdout = process.stdout,
   stderr = process.stderr,
   spawnChild = spawn,

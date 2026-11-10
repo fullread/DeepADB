@@ -192,6 +192,8 @@ try {
 
   const runnerDir = join(fixture.root, "runner"); mkdirSync(runnerDir);
   copyFileSync(fileURLToPath(new URL("./run-all.mjs", import.meta.url)), join(runnerDir, "run-all.mjs"));
+  mkdirSync(join(runnerDir, "lib"));
+  copyFileSync(fileURLToPath(new URL("./lib/test-profile.mjs", import.meta.url)), join(runnerDir, "lib", "test-profile.mjs"));
   for (const [label, text, exitCode, expected] of [
     ["normal summary", "Fixture: 1 passed, 0 failed, 0 skipped (1 total)", 0, 0],
     ["nonzero exit with passing counts", "Fixture: 1 passed, 0 failed, 0 skipped (1 total)", 1, 1],

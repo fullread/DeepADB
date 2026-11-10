@@ -11,6 +11,7 @@
  * when no authorized device is attached — see the deviceAvailable probe below.
  */
 import { createHarness } from "./lib/harness.mjs";
+import { profile } from "./lib/test-profile.mjs";
 import { existsSync } from "fs";
 
 const h = await createHarness("Boundaries & Error Handling");
@@ -163,26 +164,26 @@ h.section("Previously Untested Tools");
 // We test that the tool runs without crashing, even if the package has no data.
 // AP5 fix: now requires `confirm` parameter matching packageName.
 if (deviceAvailable) {
-  await h.test("Clear data (Magisk — safe, idempotent)", "adb_clear_data",
-    { packageName: "com.topjohnwu.magisk", confirm: "com.topjohnwu.magisk" });
+  await h.test(`Clear data (${profile.appLabel})`, "adb_clear_data",
+    { packageName: profile.packageName, confirm: profile.packageName });
 } else {
-  h.skip("Clear data (Magisk — safe, idempotent)", "no device authorized");
+  h.skip(`Clear data (${profile.appLabel})`, "no device authorized");
 }
 
 // AP5 regression: clear_data must reject when confirm omitted
 await h.testRejects("Clear data without confirm rejected (AP5)", "adb_clear_data",
-  { packageName: "com.topjohnwu.magisk" });
+  { packageName: profile.packageName });
 
 // AP5 regression: clear_data must reject when confirm doesn't match packageName
 await h.testRejects("Clear data with mismatched confirm rejected (AP5)", "adb_clear_data",
-  { packageName: "com.topjohnwu.magisk", confirm: "com.different.package" });
+  { packageName: profile.packageName, confirm: "com.different.package" });
 
 // adb_extract_apks — extract splits for a known package
 if (deviceAvailable) {
-  await h.testContains("Extract APKs (Magisk)", "adb_extract_apks",
-    { packageName: "com.topjohnwu.magisk" }, "base.apk");
+  await h.testContains(`Extract APKs (${profile.appLabel})`, "adb_extract_apks",
+    { packageName: profile.packageName }, "base.apk");
 } else {
-  h.skip("Extract APKs (Magisk)", "no device authorized");
+  h.skip(`Extract APKs (${profile.appLabel})`, "no device authorized");
 }
 
 // adb_snapshot_restore_settings — verify graceful error on nonexistent file

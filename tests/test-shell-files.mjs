@@ -5,6 +5,7 @@
  * Tests: shell, root_shell, ls, cat, push/pull, packages, permissions.
  */
 import { createHarness } from "./lib/harness.mjs";
+import { profile, pixelContains } from "./lib/test-profile.mjs";
 
 const h = await createHarness("Shell, Files & Packages");
 
@@ -15,8 +16,8 @@ await h.testContains("Shell → id", "adb_shell", { command: "id" }, "uid=");
 // testMatch (not testContains): `date` output embeds the year, but hardcoding it
 // would make this test fail every January 1st. The pattern matches any 20xx year.
 await h.testMatch("Shell → date", "adb_shell", { command: "date" }, /\b20\d\d\b/);
-await h.testContains("Root Shell → id", "adb_root_shell", { command: "id" }, "uid=0");
-await h.testContains("Root Shell → whoami", "adb_root_shell", { command: "whoami" }, "root");
+await pixelContains(h, "Root Shell → id", "adb_root_shell", { command: "id" }, "uid=0");
+await pixelContains(h, "Root Shell → whoami", "adb_root_shell", { command: "whoami" }, "root");
 
 h.section("Filesystem Operations");
 await h.test("ls /sdcard", "adb_ls", { path: "/sdcard" });
@@ -35,10 +36,10 @@ await h.test("Shell → remove temp file", "adb_shell", { command: "rm /sdcard/D
 h.section("Package Management");
 await h.testContains("List all packages", "adb_list_packages", { type: "all" }, "android");
 await h.testContains("List system packages", "adb_list_packages", { type: "system" }, "com.android");
-await h.testContains("List third-party packages", "adb_list_packages", { type: "third-party" }, "magisk");
-await h.testContains("Package info (Magisk)", "adb_package_info", { packageName: "com.topjohnwu.magisk" }, "com.topjohnwu.magisk");
-await h.testContains("Filter packages → magisk", "adb_list_packages", { filter: "magisk" }, "magisk");
-await h.test("Resolve intents (Magisk)", "adb_resolve_intents", { packageName: "com.topjohnwu.magisk" });
+await h.testContains("List third-party packages", "adb_list_packages", { type: "third-party" }, profile.packageName);
+await h.testContains(`Package info (${profile.appLabel})`, "adb_package_info", { packageName: profile.packageName }, profile.packageName);
+await h.testContains("Filter packages → test package", "adb_list_packages", { filter: profile.packageName }, profile.packageName);
+await h.test(`Resolve intents (${profile.appLabel})`, "adb_resolve_intents", { packageName: profile.packageName });
 
 h.section("Diagnostics");
 await h.testContains("Dumpsys battery", "adb_dumpsys", { service: "battery" }, "level");

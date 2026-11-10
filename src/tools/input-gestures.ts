@@ -16,6 +16,7 @@ import { shellQuote } from "../middleware/sanitize.js";
 import { sanitizeFilenameComponentDotted } from "../middleware/fs-utils.js";
 import { captureUiDump, parseUiNodes } from "../middleware/ui-dump.js";
 import { join } from "path";
+import { statSync } from "fs";
 
 export function registerInputGestureTools(ctx: ToolContext): void {
 
@@ -629,10 +630,7 @@ export function registerInputGestureTools(ctx: ToolContext): void {
       try {
         const resolved = await ctx.deviceManager.resolveDevice(device);
         const serial = resolved.serial;
-        const remoteDir = "/data/local/tmp";
         const timestamp = Date.now();
-        const remotePng = `${remoteDir}/DA_cap_${timestamp}.png`;
-        const remoteJpg = `${remoteDir}/DA_cap_${timestamp}.jpg`;
 
         // Sanitize filename
         const outName = filename
@@ -640,40 +638,25 @@ export function registerInputGestureTools(ctx: ToolContext): void {
           : `screenshot_compressed_${timestamp}.jpg`;
         const localPath = join(ctx.config.tempDir, outName);
 
-        try {
-          // Capture full-resolution PNG
-          await ctx.bridge.shell(`screencap -p '${remotePng}'`, { device: serial, timeout: 15000 });
+        // Pull the full-resolution PNG; compression remains client-side.
+        await ctx.bridge.captureScreenshot(localPath, { device: serial });
 
-          // Get screen dimensions for scaling
-          const sizeResult = await ctx.bridge.shell("wm size", { device: serial });
-          const sizeMatch = sizeResult.stdout.match(/(\d+)x(\d+)/);
-          const origW = sizeMatch ? parseInt(sizeMatch[1], 10) : 1080;
-          const origH = sizeMatch ? parseInt(sizeMatch[2], 10) : 2400;
-          const newW = Math.round(origW * scale);
-          const newH = Math.round(origH * scale);
+        // Get screen dimensions for scaling
+        const sizeResult = await ctx.bridge.shell("wm size", { device: serial });
+        const sizeMatch = sizeResult.stdout.match(/(\d+)x(\d+)/);
+        const origW = sizeMatch ? parseInt(sizeMatch[1], 10) : 1080;
+        const origH = sizeMatch ? parseInt(sizeMatch[2], 10) : 2400;
+        const newW = Math.round(origW * scale);
+        const newH = Math.round(origH * scale);
 
-          // Try device-side JPEG conversion via Android's built-in tools
-          // Method: use screencap raw + toybox/convert, or pull PNG and note size
-          // Most reliable: pull the PNG, report dimensions for the LLM to understand scale
-          // Android doesn't have imagemagick, so we capture and report sizing info
-          await ctx.bridge.exec(["pull", remotePng, localPath], { device: serial, timeout: 30000 });
+        const fileSizeKB = Math.round(statSync(localPath).size / 1024);
 
-          // Get file size for reporting
-          const sizeCheck = await ctx.bridge.shell(`stat -c %s '${remotePng}' 2>/dev/null || wc -c < '${remotePng}'`, {
-            device: serial, ignoreExitCode: true,
-          });
-          const fileSize = parseInt(sizeCheck.stdout.trim(), 10) || 0;
-          const fileSizeKB = Math.round(fileSize / 1024);
-
-          return {
-            content: [{
-              type: "text",
-              text: `Screenshot saved: ${localPath}\nOriginal: ${origW}x${origH} (${fileSizeKB} KB PNG)\nTarget scale: ${scale}x (${newW}x${newH})\nNote: For JPEG compression, post-process with imagemagick: convert "${localPath}" -resize ${newW}x${newH} -quality ${quality} output.jpg`,
-            }],
-          };
-        } finally {
-          await ctx.bridge.shell(`rm -f '${remotePng}' '${remoteJpg}'`, { device: serial, ignoreExitCode: true }).catch(() => {});
-        }
+        return {
+          content: [{
+            type: "text",
+            text: `Screenshot saved: ${localPath}\nOriginal: ${origW}x${origH} (${fileSizeKB} KB PNG)\nTarget scale: ${scale}x (${newW}x${newH})\nNote: For JPEG compression, post-process with imagemagick: convert "${localPath}" -resize ${newW}x${newH} -quality ${quality} output.jpg`,
+          }],
+        };
       } catch (error) {
         return { content: [{ type: "text", text: OutputProcessor.formatError(error) }], isError: true };
       }

@@ -8,6 +8,7 @@ import { execFileSync } from "child_process";
 import { readdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { profile } from "./lib/test-profile.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -28,6 +29,9 @@ const CI_SAFE = new Set([
   "test-audit-hardening.mjs",
   "test-code-scanning.mjs",
   "test-runtime-audit.mjs",
+  "test-sensor-parsing.mjs",
+  "test-ui-automation.mjs",
+  "test-screenshot-cleanup.mjs",
 ]);
 
 const ciMode = process.argv.includes("--ci");
@@ -40,6 +44,7 @@ console.log("╔═════════════════════�
 console.log("║          DeepADB — Full Test Suite                 ║");
 console.log("╚══════════════════════════════════════════════════════════╝");
 console.log(`\nMode: ${ciMode ? "CI (device-free suites only)" : "full"}`);
+console.log(`Test profile: ${profile.name}`);
 console.log(`Suites: ${suites.join(", ")}\n`);
 
 let totalPassed = 0;

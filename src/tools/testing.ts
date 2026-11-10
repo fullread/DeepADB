@@ -13,7 +13,6 @@ import { writeFileSync } from "fs";
 import { ensurePrivateDir, sanitizeFilenameComponent } from "../middleware/fs-utils.js";
 import { BuiltinToolContext as ToolContext } from "../tool-context.js";
 import { OutputProcessor } from "../middleware/output-processor.js";
-import { shellQuote } from "../middleware/sanitize.js";
 
 interface TestSession {
   name: string;
@@ -122,21 +121,8 @@ export function registerTestingTools(ctx: ToolContext): void {
         // Screenshot
         if (captureScreenshot) {
           const screenshotFile = `${stepPrefix}.png`;
-          const remoteDir = "/data/local/tmp";
-          // BE7 note: step screenshot remote path does NOT include PID or
-        // `Date.now()` uniqueness. Safe because activeSession is enforced
-        // to be single (BE6 above), so two concurrent sessions cannot exist
-        // and therefore cannot collide on stepNum. If multi-session support
-        // is ever added, this path must adopt the collision-defense pattern
-        // from middleware/ui-dump.ts captureUiDump (process.pid + Date.now + randomBytes).
-        const remotePath = `${remoteDir}/DA_test_${stepNum}.png`;
           const localPath = join(session.directory, screenshotFile);
-          try {
-            await ctx.bridge.shell(`screencap -p ${shellQuote(remotePath)}`, { device: session.device, timeout: 15000 });
-            await ctx.bridge.exec(["pull", remotePath, localPath], { device: session.device, timeout: 30000 });
-          } finally {
-            await ctx.bridge.shell(`rm ${shellQuote(remotePath)}`, { device: session.device, ignoreExitCode: true }).catch(() => {});
-          }
+          await ctx.bridge.captureScreenshot(localPath, { device: session.device });
           results.push(`Screenshot: ${screenshotFile}`);
         }
 

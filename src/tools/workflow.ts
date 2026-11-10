@@ -347,15 +347,8 @@ export function registerWorkflowTools(ctx: ToolContext): void {
                 }
                 case "screenshot": {
                   const fname = `workflow_${Date.now()}.png`;
-                  const remoteDir = "/data/local/tmp";
-                  const remotePath = `${remoteDir}/${fname}`;
                   const localPath = join(ctx.config.tempDir, fname);
-                  try {
-                    await ctx.bridge.shell(`screencap -p ${shellQuote(remotePath)}`, { device: serial, timeout: 15000 });
-                    await ctx.bridge.exec(["pull", remotePath, localPath], { device: serial, timeout: 30000 });
-                  } finally {
-                    await ctx.bridge.shell(`rm ${shellQuote(remotePath)}`, { device: serial, ignoreExitCode: true }).catch(() => {});
-                  }
+                  await ctx.bridge.captureScreenshot(localPath, { device: serial });
                   result = localPath;
                   break;
                 }

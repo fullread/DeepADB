@@ -5,13 +5,15 @@
  * Tests: screencap, ui_dump, ui_find, current_activity, settings, screen, control toggles.
  */
 import { createHarness } from "./lib/harness.mjs";
+import { profile, pixelContains, requireFixtureScreen } from "./lib/test-profile.mjs";
 
 const h = await createHarness("UI & Device Control");
 
 // ── Pre-flight: recover from locked state left by prior failed run ──
 // If the device is locked (keyguard active) and we have a PIN, unlock first.
 // Without this guard, all UI tests would fail behind the keyguard.
-const testPin = process.env.DA_TEST_PIN;
+// A disposable stock AVD has no configured PIN; never borrow a phone's PIN.
+const testPin = profile.emulator ? undefined : process.env.DA_TEST_PIN;
 {
   const preflight = await h.callTool("adb_shell", {
     command: "dumpsys window | grep -c keyguard", timeout: 5000,
@@ -96,28 +98,43 @@ await h.testContains("Orientation get", "adb_orientation", { action: "get" }, "O
 await h.testContains("Clipboard read", "adb_clipboard", { action: "read" }, "Clipboard");
 
 h.section("UI Automation Helpers");
-// Launch Settings, then dismiss any GMS account overlay that may appear post-OS-reinstall
-await h.callTool("adb_shell", { command: "am force-stop com.android.chrome" });
-await h.callTool("adb_input", { type: "keyevent", args: "KEYCODE_HOME" });
-await new Promise(r => setTimeout(r, 500));
-await h.callTool("adb_shell", { command: "am start -n com.android.settings/.Settings" });
-await new Promise(r => setTimeout(r, 2000));
-// Dismiss any overlay: press BACK to clear GMS dialogs, then re-launch Settings
-await h.callTool("adb_input", { type: "keyevent", args: "KEYCODE_BACK" });
-await new Promise(r => setTimeout(r, 300));
-await h.callTool("adb_input", { type: "keyevent", args: "KEYCODE_BACK" });
-await new Promise(r => setTimeout(r, 300));
-await h.callTool("adb_shell", { command: "am start -n com.android.settings/.Settings" });
-await new Promise(r => setTimeout(r, 3000));
-await h.testContains("Wait stable", "adb_wait_stable", { stableCount: 2, timeoutMs: 10000, pollMs: 600 }, "stable");
-await h.testContains("Tap element (by text)", "adb_tap_element", { text: "Network" }, "Tapped");
-// Go back to main Settings after tap navigated into sub-screen
-await h.callTool("adb_input", { type: "keyevent", args: "KEYCODE_BACK" });
-await new Promise(r => setTimeout(r, 1500));
-await h.testContains("Wait element appear", "adb_wait_element", { text: "Network", condition: "appear", timeoutMs: 8000 }, "appeared");
-// Ensure Settings is fully rendered before scrolling
-await h.callTool("adb_wait_stable", { stableCount: 2, timeoutMs: 5000, pollMs: 400 });
-await h.testContains("Scroll until", "adb_scroll_until", { text: "About", direction: "down", maxScrolls: 15 }, "Found", 90000);
+if (profile.emulator) {
+  await requireFixtureScreen(h);
+  await h.testContains("Wait stable", "adb_wait_stable", { stableCount: 2, timeoutMs: 10000, pollMs: 600 }, "stable");
+  await h.testContains("Tap fixture navigation", "adb_tap_element", { text: "Fixture Open Detail" }, "Tapped");
+  await h.testContains("Tap actually navigated", "adb_wait_element", { text: "Fixture Detail Ready", timeoutMs: 10000 }, "appeared");
+  await h.testContains("Old screen disappears", "adb_wait_element", { text: "Fixture Open Detail", condition: "disappear", timeoutMs: 10000 }, "disappeared");
+  await h.test("Back from fixture detail", "adb_input", { type: "keyevent", args: "KEYCODE_BACK" });
+  await h.testContains("Wait element appear", "adb_wait_element", { text: "Fixture Open Detail", condition: "appear", timeoutMs: 10000 }, "appeared");
+  await h.testRejects("Scroll target starts off screen", "adb_wait_element", { text: "Fixture Scroll Target", timeoutMs: 1000, pollMs: 200 });
+  await h.testMatch("Scroll until (must perform a scroll)", "adb_scroll_until",
+    { text: "Fixture Scroll Target", direction: "down", maxScrolls: 10 }, /Found .* after [1-9]\d* scroll/, 90000);
+  await h.testRejects("Absent target still reports failure", "adb_scroll_until",
+    { text: "DeepADB nonexistent target", direction: "down", maxScrolls: 1 }, 30000);
+} else {
+  // Launch Settings, then dismiss any GMS account overlay that may appear post-OS-reinstall
+  await h.callTool("adb_shell", { command: "am force-stop com.android.chrome" });
+  await h.callTool("adb_input", { type: "keyevent", args: "KEYCODE_HOME" });
+  await new Promise(r => setTimeout(r, 500));
+  await h.callTool("adb_shell", { command: "am start -n com.android.settings/.Settings" });
+  await new Promise(r => setTimeout(r, 2000));
+  // Dismiss any overlay: press BACK to clear GMS dialogs, then re-launch Settings
+  await h.callTool("adb_input", { type: "keyevent", args: "KEYCODE_BACK" });
+  await new Promise(r => setTimeout(r, 300));
+  await h.callTool("adb_input", { type: "keyevent", args: "KEYCODE_BACK" });
+  await new Promise(r => setTimeout(r, 300));
+  await h.callTool("adb_shell", { command: "am start -n com.android.settings/.Settings" });
+  await new Promise(r => setTimeout(r, 3000));
+  await h.testContains("Wait stable", "adb_wait_stable", { stableCount: 2, timeoutMs: 10000, pollMs: 600 }, "stable");
+  await h.testContains("Tap element (by text)", "adb_tap_element", { text: "Network" }, "Tapped");
+  // Go back to main Settings after tap navigated into sub-screen
+  await h.callTool("adb_input", { type: "keyevent", args: "KEYCODE_BACK" });
+  await new Promise(r => setTimeout(r, 1500));
+  await h.testContains("Wait element appear", "adb_wait_element", { text: "Network", condition: "appear", timeoutMs: 8000 }, "appeared");
+  // Ensure Settings is fully rendered before scrolling
+  await h.callTool("adb_wait_stable", { stableCount: 2, timeoutMs: 5000, pollMs: 400 });
+  await h.testContains("Scroll until", "adb_scroll_until", { text: "About", direction: "down", maxScrolls: 15 }, "Found", 90000);
+}
 
 h.section("Efficiency");
 await h.testContains("Screenshot compressed", "adb_screenshot_compressed", { quality: 50, scale: 0.5 }, "Screenshot saved");
@@ -150,7 +167,7 @@ await h.testContains("Pinch (swipe method)", "adb_input_pinch",
   { cx: 540, cy: 1200, startRadius: 300, endRadius: 100, durationMs: 400, method: "swipe" },
   "pinch");
 await new Promise(r => setTimeout(r, 500));
-await h.testContains("Spread (sendevent method)", "adb_input_pinch",
+await pixelContains(h, "Spread (sendevent method)", "adb_input_pinch",
   { cx: 540, cy: 1200, startRadius: 100, endRadius: 300, durationMs: 400, method: "sendevent", steps: 15 },
   "spread");
 await new Promise(r => setTimeout(r, 500));
@@ -177,7 +194,7 @@ await h.test("A11y Touch Targets", "adb_a11y_touch_targets", {});
 await h.test("A11y Tree", "adb_a11y_tree", {});
 
 h.section("Split APK");
-await h.test("List Splits (Magisk)", "adb_list_splits", { packageName: "com.topjohnwu.magisk" });
+await h.test(`List Splits (${profile.appLabel})`, "adb_list_splits", { packageName: profile.packageName });
 await h.test("APEX List", "adb_apex_list", {});
 
 const exitCode = h.finish();
