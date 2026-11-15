@@ -89,6 +89,9 @@ the versioned release build.
 - All **34 runner/profile/diagnostic tests pass**, including 11 new checks for
   error preservation, output/time limits, emulator scoping, directory-link
   rejection and cleanup. Build, lint and the diff whitespace check pass.
+- Keep the aggregate-runner test fixture's helper imports intact when copying
+  it into isolation. Require actual synthetic-suite execution and final
+  reporting, so an import failure cannot satisfy an expected negative exit.
 - Keep hosted API 35 readiness unresolved pending a run with these diagnostics.
   Required Test and CodeQL checks on the preceding dependency-refresh commit
   passed; they do not substitute for completing this investigation before merge.
