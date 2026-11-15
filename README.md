@@ -1010,7 +1010,7 @@ DeepADB/
     ├── test-security.mjs        # Input sanitization, shell injection, AT command safety, QEMU shell escaping, heap-dump validation (116 on-device, 105 host)
     ├── test-lifecycle.mjs       # App lifecycle, file push/pull, input, port forwarding, screen recording, test sessions (24 tests)
     ├── test-analysis.mjs        # Thermal/snapshot/regression comparison, firmware diff, screenshot diff, test gen, RIL intercept, AT cross-validation, permission management (23 tests)
-    ├── test-boundaries.mjs      # Zod bounds enforcement, input injection, error paths, sensitive data protection, wireless ADB coverage, multi-device basics, tunnel automation, device-free coverage boundaries (78 tests)
+    ├── test-boundaries.mjs      # Zod bounds enforcement, input injection, error paths, sensitive data protection, wireless ADB coverage, multi-device basics, tunnel automation, device-free coverage boundaries (79 tests)
     ├── test-sensors.mjs         # HAL sensors, IIO power monitors, category filters, formatting, wake-up, rate display (30 tests)
     ├── test-files-extended.mjs  # File tool coverage — write, find, stat, checksum, mkdir, rm, move, copy, chmod, touch, fsinfo, chown, grep, replace; push safety; sed-escape regression (95 tests)
     ├── test-result-handles.mjs # Result handle store — listing, retrieval, drop, isolation, eviction (19 tests)
