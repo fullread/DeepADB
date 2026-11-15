@@ -92,9 +92,12 @@ the versioned release build.
 - Keep the aggregate-runner test fixture's helper imports intact when copying
   it into isolation. Require actual synthetic-suite execution and final
   reporting, so an import failure cannot satisfy an expected negative exit.
-- Keep hosted API 35 readiness unresolved pending a run with these diagnostics.
-  Required Test and CodeQL checks on the preceding dependency-refresh commit
-  passed; they do not substitute for completing this investigation before merge.
+- The final pre-merge hosted [emulator matrix](https://github.com/fullread/DeepADB/actions/runs/43659696129)
+  completed on API 30, 33 and 35, each with **833 passed, zero failures and 34
+  explicit skips**. Post-merge Test and CodeQL checks also passed.
+  The final matrix did not reproduce the earlier intermittent API 35 fixture-readiness
+  timeout, so its root cause remains **unconfirmed**. The diagnostics remain
+  available for recurrence; the passing run does not establish a root-cause fix.
 
 #### 1.1.7 release verification — November 9, 2026
 
