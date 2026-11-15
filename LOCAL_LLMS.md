@@ -47,6 +47,11 @@ allowlists and compact output are separate future work.
 Build DeepADB with `npm ci` and `npm run build`. Configure your MCP client to
 launch the resulting `build/index.js` using Node.js.
 
+For the 1.1.7 prebuilt ZIP, extract it into `deepadb-v1.1.7` and run
+`npm ci --omit=dev` there; compilation is unnecessary. Point the examples below
+at that folder's absolute `build/index.js` path. The 1.1.7 screenshot/sensor
+fixes do not change the transport settings or the three-tool `inspect` profile.
+
 Recent llama.cpp source supports `--mcp-servers-config` and `--mcp-servers-json`.
 Check `llama-server --help` first: older builds may expose browser MCP support
 without these native stdio flags. For example, the locally checked build 9878
@@ -266,6 +271,34 @@ Origin allowlist for the client you intend to use.
 
 ## Validated client matrix
 
+November 14, 2026: the dependency refresh includes GraphQL 17.1.0 and ws 8.23.0,
+with unchanged transport configuration and access controls. Eight real-browser
+checks pass on the Windows host with Node 22.23.4, alongside the isolated
+device-free suites covering local-LLM profiles, SDK/client/plugin compatibility
+and optional transports (394 passed, zero failures, 17 expected skips overall).
+The refreshed production build is now installed on the Pixel 6a. It passes eight
+real-browser HTTP checks and six authenticated WebSocket/GraphQL checks, including
+Origin enforcement; staged and installed copies each pass ten strict smoke checks.
+Three direct Termux-user capture checks also pass, including cleanup after an
+injected pull failure. Full isolated on-device regression passes 879 checks with
+zero failures and three cached-QEMU setup skips on Android 16 / Termux Node 24.22.1.
+See the [validation record](CHANGELOG.md#dependency-refresh--november-14-2026).
+Hosted verification for the refresh is tracked in
+[PR #66 checks](https://github.com/fullread/DeepADB/pull/66/checks). These protocol/compatibility checks
+are not a new model-driven llama.cpp trial, and Wear pairing remains deferred.
+The older installed-server and model-driven results below apply to their dated builds.
+
+November 9, 2026: 1.1.7 passed all 34 local-LLM protocol/profile checks and
+37 SDK/client/plugin checks on the Windows host and Pixel. The installed
+on-device server passed eight real Chromium HTTP/CORS/session checks and six
+authenticated WebSocket/GraphQL checks. Its ten strict smoke checks include
+the expected version/catalog, live diagnostics, calibrated sensor readings
+and concurrent screenshots. Full on-device validation passed 879 checks with
+zero failures and three cached-QEMU setup skips. The previous installation
+was removed after verification; the validation Pixel now retains 1.1.7.
+These transport checks are not a new model-driven llama.cpp trial; the model
+results below remain the documented baseline. Wear pairing remains deferred.
+
 November 1, 2026: the 1.1.6 release-candidate build passed all 34 local-LLM
 protocol/profile regressions and 37 SDK/client/plugin compatibility checks on
 Windows and the Pixel. Against the installed on-device server, eight real
@@ -274,7 +307,7 @@ These verify transport behavior and access controls; they are not a new
 model-driven llama.cpp trial. Device validation used Termux Node 24.22.1,
 SQLite 3.54.1 and an isolated validation workspace with the deployed build's
 matching files. After the final documentation audit and verified redeployment,
-only 1.1.6 remains installed on the validation Pixel; older installations and
+only 1.1.6 remained installed on the validation Pixel at that time; older installations and
 rollback copies were removed at the operator's request.
 
 October 31, 2026: Windows host, Chrome, rooted Pixel 6a / Android 16, portable

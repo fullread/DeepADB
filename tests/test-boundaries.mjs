@@ -13,6 +13,7 @@
 import { createHarness } from "./lib/harness.mjs";
 import { profile } from "./lib/test-profile.mjs";
 import { existsSync } from "fs";
+import { verifyClosedDiscovery } from "./lib/network-discovery-fixture.mjs";
 
 const h = await createHarness("Boundaries & Error Handling");
 
@@ -390,12 +391,18 @@ await h.testRejects("profile_save rejects invalid JSON",
 await h.testRejects("tcpdump_stop when not running",
   "adb_tcpdump_stop", {});
 
-// adb_network_auto_connect with a small TEST-NET-1 range (RFC 5737, never routable)
-// won't find any ADB listeners — the tool should return a graceful
-// "No ADB listeners found" message, not crash. It's not a rejection
-// because the tool succeeds in reporting no devices found.
-await h.testContains("network_auto_connect (empty range) reports none",
-  "adb_network_auto_connect", { ipRange: "192.0.2.1-2", port: 5555 }, "No ADB listeners found", 15000);
+// A reserved IP range is not proof that probes fail: VPNs/proxies can accept
+// connections, and this tool also includes live ARP neighbors. Exercise an
+// actually empty range with no anchor through MCP, then inject closed sockets
+// into the registered handler to verify the no-listener path without scanning.
+await h.testContains("network_auto_connect (empty range and no anchor) reports no candidates",
+  "adb_network_auto_connect", { ipRange: "192.0.2.2-1", port: 5555, device: "__deepadb_no_anchor__" }, "No candidate IPs", 15000);
+try {
+  await verifyClosedDiscovery();
+  h.assert("network_auto_connect closed probes report none and never connect", true);
+} catch (error) {
+  h.assert("network_auto_connect closed probes report none and never connect", false, error.message);
+}
 
 // ══════════════════════════════════════════════════════════
 // Tunnel automation (adb_tunnel_open / list / close)

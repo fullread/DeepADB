@@ -82,6 +82,21 @@ run, including test failures. Cleanup errors fail the run too. A forcibly killed
 host or disconnected emulator can prevent cleanup; inspect/remove only this
 test package before retrying if the wrapper reports an existing installation.
 
+If fixture launch or the 15-second UI readiness check fails, the wrapper retains
+bounded evidence under that run's `fixture-diagnostics/failure-*` directory:
+launch/wait output, the original error, window/activity/power state, raw UI dump
+stdout and stderr, a screenshot, and filtered recent system logcat. Each of the
+six probes has a six-second timeout; probes run in parallel, with 256 KiB text
+and 4 MiB screenshot limits and at most eight captures per run. The manifest
+records command success, timeouts and truncation; command success alone does
+not validate XML or PNG content. `ui.stdout.txt` deliberately retains the raw
+hierarchy and any status text. Partial evidence remains available if a probe
+fails. The original test failure and fixture cleanup are preserved; collection
+does not retry, unlock or relaunch the app, or change Pixel expectations.
+The always-running CI upload includes this diagnostics subtree alongside the
+log and summary, so an API-specific readiness failure can be inspected before
+changing fixture setup. No diagnostic artifacts are included in release packages.
+
 Emulator lifecycle, intents, permission, data-clear and APK checks use that
 app instead of Magisk. UI tests verify navigation actually occurred and scroll
 to a target initially off screen, independent of Settings text, back stacks,
@@ -123,6 +138,12 @@ rather than treating its header or a normal MCP response as proof of readiness.
 Some device-free suites also run optional hardware assertions when an
 authorized device is visible. Disconnect USB and wireless devices, or use an
 isolated ADB configuration, when you need a strictly device-free local run.
+
+Network-discovery negative tests must not assume TEST-NET addresses refuse TCP
+connections or that an explicit range excludes ARP neighbors. The boundary
+suite uses an empty range with an unavailable anchor over MCP, then synthetic
+closed sockets to test the no-listener result and absence of connect attempts.
+These checks never depend on or auto-connect to the developer's LAN.
 
 For browser transport changes, also run `npm run test:browser`. It launches an
 isolated headless browser with normal browser security enabled and exercises

@@ -4,6 +4,141 @@ All notable changes to DeepADB are documented in this file.
 
 ## Unreleased
 
+## v1.1.7 — Screenshot and Sensor Reliability
+
+This patch preserves the 209-tool,
+49-module interface and existing client/plugin compatibility. It fixes private
+screenshot allocation and cross-mode cleanup, retains zero-valued sensor
+handles, and makes the optional emulator regression portable without weakening
+the strict Pixel profile. Validation below distinguishes the merged fixes from
+the versioned release build.
+
+#### Dependency refresh — November 14, 2026
+
+- Update the compatible development and optional-transport dependencies to
+  ESLint 10.15.0, GraphQL 17.1.0, typescript-eslint 8.72.2 and ws 8.23.0.
+  Refresh the transitive lockfile, including Hono 4.13.18 and
+  `@hono/node-server` 2.1.8. Runtime requirements, tool interfaces and transport
+  configuration remain unchanged.
+- Remove the ESLint/config-array overrides now resolved by upstream packages.
+  Retarget the remaining typescript-estree override to 8.72.2 with minimatch
+  11.0.8; retain the test-exclude 8 override with minimatch 11.0.8 and glob
+  14.0.6. Keep TypeScript 6.0.3: the current lint stack still requires
+  TypeScript below 6.1, so the 7.0.2 major upgrade remains deferred.
+- Move both CodeQL action steps together to v4.39.3, pinned to commit
+  `33d7b85da1a04171e211befe2c739303b9a4c066`.
+- On Windows with Node 22.23.4, build and lint pass; full and production-only
+  audits report zero vulnerabilities, and the installed dependency tree is
+  consistent. The only remaining direct update is the deferred TypeScript
+  major. All 23 runner/profile tests and eight real-browser checks pass.
+- The refreshed tree passes the isolated device-free suite with coverage:
+  **394 passed, zero failures, 17 expected skips (411 total)** across 15 suites.
+  Coverage remains 42% statements/lines, 67.69% branches and 56.12% functions;
+  these device-free figures are not full hardware coverage. A fresh isolated
+  `npm ci --ignore-scripts` also succeeds with zero audit vulnerabilities.
+- Verify the glob overrides against the prior validated dependency tree:
+  the same 84 source files are linted and 83 compiled files are eligible for
+  coverage. Synchronous/asynchronous selection agrees and all eight focused
+  matching boundary cases pass.
+- The refreshed tree also passes the full isolated on-device regression:
+  **879 passed, zero failures, three cached-QEMU setup skips (882 total)**
+  across 27 suites on the rooted Pixel 6a / Android 16 with Termux Node 24.22.1.
+  PIN checks and actual QEMU boot/shutdown pass. The separate validation
+  checkout keeps test/development dependencies out of the production install.
+- The staged and installed production copies each pass **ten strict smoke
+  checks**, including real SQLite schema/query/write rejection, Shannon AT/OK,
+  calibrated sensor values and concurrent screenshots. All three direct
+  Termux-user capture checks pass, including cleanup after an injected pull
+  failure. The installed server passes eight real-browser HTTP checks and six
+  authenticated WebSocket/GraphQL checks, including Origin enforcement.
+- Replace the previous on-device 1.1.7 dependency tree with the refreshed
+  production package and optional transports: Hono 4.13.18,
+  `@hono/node-server` 2.1.8, ws 8.23.0 and GraphQL 17.1.0. Verify all 5,994
+  installed files against the deployment manifest, Termux ownership (UID/GID
+  10287) and the installation directory's 0700 mode. Remove the old rollback
+  copy, validation checkout, check helpers and transfer files after verification;
+  preserve shared user state and VM cache. No test ADB forwards remain.
+- These refreshed-tree results are separate from the November 9 baselines
+  below. Hosted verification for this dependency refresh is tracked in
+  [PR #66 checks](https://github.com/fullread/DeepADB/pull/66/checks). Real
+  phone-to-watch Wear validation is deferred, and these transport checks are
+  not a new model-driven llama.cpp trial.
+
+#### Emulator readiness diagnostics
+
+- Investigate recurring first-launch fixture timeouts on hosted API 35.
+  In [run 43657470145](https://github.com/fullread/DeepADB/actions/runs/43657470145),
+  API 30 and 33 each passed **833 checks, zero failures, 34 skips**. API 35
+  reported **811 passed, one failure, 33 skips**, but its analysis suite crashed
+  before its summary, so those are incomplete totals. A prior unchanged retry
+  passed; that does not establish the cause or resolve the recurring failure.
+- Add failure-only, test-only diagnostics for fixture launch and UI readiness:
+  original launch/wait output, window/activity/power state, raw UI dump,
+  screenshot and filtered system logcat. Bound probe duration, output and
+  capture count; retain partial evidence, the original failure and fixture
+  cleanup. Upload only the diagnostic subtree with the existing CI log/summary.
+  No retry, readiness timeout extension, Pixel assertion or production code
+  change is introduced.
+- A fresh local API 35 default/x86_64 image passed the focused analysis suite:
+  **22 passed, zero failures, one explicit Pixel-only skip**. Its Windows
+  emulator 36.5.10 differs from hosted emulator 37.2.13; the hosted failure has
+  not been reproduced locally. A separately induced wrong-foreground failure
+  retained the six-poll timeout, captured launcher focus, actual hierarchy XML
+  and a valid screenshot, and still removed the disposable fixture. This
+  verifies evidence collection, not the cause of the hosted failure.
+- All **34 runner/profile/diagnostic tests pass**, including 11 new checks for
+  error preservation, output/time limits, emulator scoping, directory-link
+  rejection and cleanup. Build, lint and the diff whitespace check pass.
+- Keep the aggregate-runner test fixture's helper imports intact when copying
+  it into isolation. Require actual synthetic-suite execution and final
+  reporting, so an import failure cannot satisfy an expected negative exit.
+- Keep hosted API 35 readiness unresolved pending a run with these diagnostics.
+  Required Test and CodeQL checks on the preceding dependency-refresh commit
+  passed; they do not substitute for completing this investigation before merge.
+
+#### 1.1.7 release verification — November 9, 2026
+
+- The versioned host/ADB build passed **826 checks, zero failures, 18 expected
+  skips** across 27 strict Pixel suites. After the network-test correction
+  below, the affected boundary suite passed **79 checks, zero failures**.
+- The final isolated device-free run passed **394 checks, zero failures,
+  17 expected skips (411 total)** across 15 suites with coverage collected.
+  All 23 runner/profile checks and eight real-browser host checks passed.
+  Build, lint and the dependency audit passed with zero vulnerabilities;
+  registry metadata passes the official JSON Schema.
+- The initial on-device run passed **877 checks with one failure and three
+  cached-QEMU skips**. Its negative discovery test assumed TEST-NET hosts
+  would refuse TCP and ignored the tool's additional ARP candidates; probes
+  from this phone actually succeeded. Replace that environment-dependent
+  assumption with an empty-range/no-anchor MCP check and a registered-handler
+  fixture that injects closed sockets, verifies both probes, and forbids
+  connect attempts. No production networking behavior is changed.
+- The complete on-device rerun passed **879 checks, zero failures, three
+  cached-QEMU setup skips (882 total)** across all 27 suites on the rooted
+  Pixel 6a / Android 16 with Termux Node 24.22.1. Actual VM boot/shutdown,
+  POSIX security, PIN recovery, calibrated sensors, screenshot cleanup,
+  SQLite/Shannon and client/plugin compatibility passed. This uses a complete
+  isolated validation checkout with the production package's matching build;
+  development/test dependencies are not installed in the production directory.
+- The staged and installed production server each passed **ten strict checks**:
+  version/catalog, health/audit, real SQLite schema/query/write rejection,
+  Shannon AT/OK, calibrated accelerometer values and concurrent private
+  Termux-owned screenshots. Three direct Termux-user bridge checks verified
+  root-private scratch permissions, valid PNG output and cleanup after an
+  injected transfer failure. Eight real-browser HTTP checks and six authenticated
+  WebSocket/GraphQL checks passed against the installed 1.1.7 server.
+- The verified 1.1.7 production package replaced the previous 1.1.6 installation,
+  preserving its optional transports, Termux ownership and shared user state/VM
+  cache. The previous installation, rollback copy and temporary validation/
+  transfer files were removed after verification. No persistent test
+  listener or screenshot scratch directory remains. Real phone-to-watch Wear
+  validation is still deferred; these are protocol tests, not a new
+  model-driven llama.cpp trial.
+- The underlying merged screenshot/sensor changes passed the hosted API
+  30/33/35 matrix: **832 passed, zero failures, 34 explicit skips** per lane,
+  plus Test and CodeQL on main. Those runs preceded the 1.1.7 metadata bump
+  and the additional deterministic boundary assertion.
+
 ### Emulator portability and sensor correctness
 
 - Preserve the strict rooted Pixel 6a / Android 16 test profile as the default.

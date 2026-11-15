@@ -304,6 +304,36 @@ Useful commands:
 - `npm run test:ci` runs only the device-free suites (`run-all.mjs --ci`).
 - `npm run coverage` runs the suite under c8 and writes `coverage/` (lcov + summary).
 
+The November 9, 2026 1.1.7 device-free baseline is **394 passed, zero failures,
+17 expected skips** across 15 suites on Node 22.23.4, with coverage collected.
+Separate runner/profile tests pass all 23 checks. The boundary suite now separates a
+no-candidate MCP request from synthetic closed-probe coverage, so VPN/proxy
+behavior or live ARP neighbors cannot turn a negative test into a LAN connection.
+The versioned strict host/ADB Pixel run passed 826 checks with 18 expected skips;
+the subsequent boundary-only rerun passed 79 checks after the test correction.
+The full on-device rerun passed **879 checks, zero failures, three cached-QEMU
+setup skips** across all 27 suites on Termux Node 24.22.1. Actual VM boot/shutdown
+and all strict Pixel assertions ran. It used a separate complete test checkout
+whose compiled files match the production installation, keeping development
+dependencies out of the deployed directory. See the 1.1.7 changelog for the
+initial network-test failure, correction and installed-server verification.
+
+The November 14 dependency refresh preserves the architecture and runtime
+requirements. Its isolated device-free rerun on Node 22.23.4 also passes
+394 checks with zero failures and 17 expected skips; all 23 runner/profile
+checks and eight host browser checks pass. The full isolated on-device run also
+passes 879 checks with zero failures and three cached-QEMU setup skips across
+27 suites on Termux Node 24.22.1, including PIN checks and actual VM boot/shutdown.
+The refreshed production tree is installed with Termux ownership and production
+dependencies plus the optional transports. Both staged and installed copies pass
+ten strict smoke checks; three direct Termux capture checks, eight installed-server
+browser checks and six WebSocket/GraphQL checks also pass. The previous install
+and temporary validation/transfer copies are removed; shared state and VM cache
+are preserved. See the [changelog](CHANGELOG.md#dependency-refresh--november-14-2026)
+for this separate validation. Hosted verification for the refresh is tracked in
+[PR #66 checks](https://github.com/fullread/DeepADB/pull/66/checks);
+the November 9 results above apply to the earlier dependency tree.
+
 The v1.1.5 final audit baseline on Windows/Node 22.23.4 passed 295
 checks with zero failures and 17 skips (312 total) across ten suites. Sixteen
 skips require hardware; one requires file-symlink creation privileges. The new
@@ -406,7 +436,11 @@ pass/fail/skip counts. Explicit test profiles retain the physical Pixel assertio
 while using a disposable app and Android-reported sensor inventory on emulators.
 Named hardware skips are distinct from failures: failed assertions, fixture
 setup/cleanup errors and incomplete runs still fail the job. Historical green
-runs using `continue-on-error` did not guarantee passing tests. See CONTRIBUTING.md
+runs using `continue-on-error` did not guarantee passing tests. Fixture launch
+and readiness failures retain bounded, emulator-scoped window/activity/power,
+raw UI, screenshot and logcat evidence alongside the original tool output.
+Diagnostic failures cannot replace the primary test error or bypass cleanup;
+the workflow uploads this evidence even when the suite fails. See CONTRIBUTING.md
 for profile setup, CI and merge requirements.
 The reporting helper has separate mocked process tests under `tests/ci/`;
 these validate CI infrastructure and do not replace the real-server suites.

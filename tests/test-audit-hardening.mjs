@@ -3,7 +3,7 @@
 /** Seven audit findings: real handlers/transports, synthetic data, no ADB. */
 import assert from "node:assert/strict";
 import { fork, spawn, spawnSync, execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, readdirSync, symlinkSync, linkSync, unlinkSync, copyFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readdirSync, symlinkSync, linkSync, unlinkSync, copyFileSync, cpSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -192,8 +192,9 @@ try {
 
   const runnerDir = join(fixture.root, "runner"); mkdirSync(runnerDir);
   copyFileSync(fileURLToPath(new URL("./run-all.mjs", import.meta.url)), join(runnerDir, "run-all.mjs"));
-  mkdirSync(join(runnerDir, "lib"));
-  copyFileSync(fileURLToPath(new URL("./lib/test-profile.mjs", import.meta.url)), join(runnerDir, "lib", "test-profile.mjs"));
+  // Preserve the runner helpers' transitive imports without copying any real
+  // suites into the discovery directory: only the synthetic suite may execute.
+  cpSync(fileURLToPath(new URL("./lib/", import.meta.url)), join(runnerDir, "lib"), { recursive: true });
   for (const [label, text, exitCode, expected] of [
     ["normal summary", "Fixture: 1 passed, 0 failed, 0 skipped (1 total)", 0, 0],
     ["nonzero exit with passing counts", "Fixture: 1 passed, 0 failed, 0 skipped (1 total)", 1, 1],
@@ -205,10 +206,19 @@ try {
     writeFileSync(join(runnerDir, "test-fixture.mjs"), `console.log(${JSON.stringify(text)});process.exit(${exitCode})`);
     const r = spawnSync(process.execPath, [join(runnerDir, "run-all.mjs")], { encoding: "utf8", timeout: 10000, windowsHide: true });
     assert.equal(r.status, expected, r.stdout + r.stderr);
+    // A startup/import crash must not satisfy a negative case's expected exit 1.
+    assert.match(r.stdout, /Running: test-fixture\.mjs/);
+    assert.ok(r.stdout.includes(text), "the synthetic suite must actually execute");
+    assert.match(r.stdout, /FINAL RESULTS/);
+    assert.doesNotMatch(r.stderr, /ERR_MODULE_NOT_FOUND/);
   });
   await check("Aggregate runner rejects an empty suite selection", () => {
     unlinkSync(join(runnerDir, "test-fixture.mjs"));
-    assert.equal(spawnSync(process.execPath, [join(runnerDir, "run-all.mjs")], { windowsHide: true }).status, 1);
+    const r = spawnSync(process.execPath, [join(runnerDir, "run-all.mjs")], { encoding: "utf8", timeout: 10000, windowsHide: true });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout, /FINAL RESULTS/);
+    assert.match(r.stderr, /Incomplete\/failed suites: no suites selected/);
+    assert.doesNotMatch(r.stderr, /ERR_MODULE_NOT_FOUND/);
   });
 
   const token = "audit-regression-token-0123456789abcdef", origin = "http://localhost:8080";
