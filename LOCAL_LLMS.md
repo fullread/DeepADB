@@ -271,6 +271,23 @@ Origin allowlist for the client you intend to use.
 
 ## Validated client matrix
 
+November 14, 2026: the dependency refresh includes GraphQL 17.1.0 and ws 8.23.0,
+with unchanged transport configuration and access controls. Eight real-browser
+checks pass on the Windows host with Node 22.23.4, alongside the isolated
+device-free suites covering local-LLM profiles, SDK/client/plugin compatibility
+and optional transports (394 passed, zero failures, 17 expected skips overall).
+The refreshed production build is now installed on the Pixel 6a. It passes eight
+real-browser HTTP checks and six authenticated WebSocket/GraphQL checks, including
+Origin enforcement; staged and installed copies each pass ten strict smoke checks.
+Three direct Termux-user capture checks also pass, including cleanup after an
+injected pull failure. Full isolated on-device regression passes 879 checks with
+zero failures and three cached-QEMU setup skips on Android 16 / Termux Node 24.22.1.
+See the [validation record](CHANGELOG.md#dependency-refresh--november-14-2026).
+Hosted verification for the refresh is tracked in
+[PR #66 checks](https://github.com/fullread/DeepADB/pull/66/checks). These protocol/compatibility checks
+are not a new model-driven llama.cpp trial, and Wear pairing remains deferred.
+The older installed-server and model-driven results below apply to their dated builds.
+
 November 9, 2026: 1.1.7 passed all 34 local-LLM protocol/profile checks and
 37 SDK/client/plugin checks on the Windows host and Pixel. The installed
 on-device server passed eight real Chromium HTTP/CORS/session checks and six

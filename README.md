@@ -148,6 +148,20 @@ The older release baselines below describe their published artifacts. See the
 [1.1.7 changelog](CHANGELOG.md#v117--screenshot-and-sensor-reliability) for the
 current release and validation.
 
+**Dependency refresh (November 14, 2026):** compatible development,
+optional-transport and transitive dependencies were updated. Build, lint,
+394 device-free checks, 23 runner/profile checks and eight host browser checks
+pass; full and production-only audits report zero vulnerabilities. The refreshed
+tree also passes **879 on-device checks, zero failures and three cached-QEMU
+setup skips** across 27 suites on the Pixel 6a, including PIN checks and actual
+VM boot/shutdown. It replaces the previous on-device installation while preserving
+shared state and VM cache. Staged and installed production copies each pass ten
+strict smoke checks; three direct Termux capture checks, eight installed-server
+browser checks and six WebSocket/GraphQL checks also pass. Hosted verification
+for this refresh is tracked in [PR #66 checks](https://github.com/fullread/DeepADB/pull/66/checks). See the
+[refresh record](CHANGELOG.md#dependency-refresh--november-14-2026) for details;
+the November 9 results below remain the earlier dependency-tree baseline.
+
 **1.1.7 validation (November 9, 2026):** the full on-device regression passed
 **879 checks, zero failures, three cached-QEMU setup skips (882 total)** across
 27 suites on the rooted Pixel 6a / Android 16 with Termux Node 24.22.1. Actual

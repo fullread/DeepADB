@@ -13,6 +13,57 @@ handles, and makes the optional emulator regression portable without weakening
 the strict Pixel profile. Validation below distinguishes the merged fixes from
 the versioned release build.
 
+#### Dependency refresh — November 14, 2026
+
+- Update the compatible development and optional-transport dependencies to
+  ESLint 10.15.0, GraphQL 17.1.0, typescript-eslint 8.72.2 and ws 8.23.0.
+  Refresh the transitive lockfile, including Hono 4.13.18 and
+  `@hono/node-server` 2.1.8. Runtime requirements, tool interfaces and transport
+  configuration remain unchanged.
+- Remove the ESLint/config-array overrides now resolved by upstream packages.
+  Retarget the remaining typescript-estree override to 8.72.2 with minimatch
+  11.0.8; retain the test-exclude 8 override with minimatch 11.0.8 and glob
+  14.0.6. Keep TypeScript 6.0.3: the current lint stack still requires
+  TypeScript below 6.1, so the 7.0.2 major upgrade remains deferred.
+- Move both CodeQL action steps together to v4.39.3, pinned to commit
+  `33d7b85da1a04171e211befe2c739303b9a4c066`.
+- On Windows with Node 22.23.4, build and lint pass; full and production-only
+  audits report zero vulnerabilities, and the installed dependency tree is
+  consistent. The only remaining direct update is the deferred TypeScript
+  major. All 23 runner/profile tests and eight real-browser checks pass.
+- The refreshed tree passes the isolated device-free suite with coverage:
+  **394 passed, zero failures, 17 expected skips (411 total)** across 15 suites.
+  Coverage remains 42% statements/lines, 67.69% branches and 56.12% functions;
+  these device-free figures are not full hardware coverage. A fresh isolated
+  `npm ci --ignore-scripts` also succeeds with zero audit vulnerabilities.
+- Verify the glob overrides against the prior validated dependency tree:
+  the same 84 source files are linted and 83 compiled files are eligible for
+  coverage. Synchronous/asynchronous selection agrees and all eight focused
+  matching boundary cases pass.
+- The refreshed tree also passes the full isolated on-device regression:
+  **879 passed, zero failures, three cached-QEMU setup skips (882 total)**
+  across 27 suites on the rooted Pixel 6a / Android 16 with Termux Node 24.22.1.
+  PIN checks and actual QEMU boot/shutdown pass. The separate validation
+  checkout keeps test/development dependencies out of the production install.
+- The staged and installed production copies each pass **ten strict smoke
+  checks**, including real SQLite schema/query/write rejection, Shannon AT/OK,
+  calibrated sensor values and concurrent screenshots. All three direct
+  Termux-user capture checks pass, including cleanup after an injected pull
+  failure. The installed server passes eight real-browser HTTP checks and six
+  authenticated WebSocket/GraphQL checks, including Origin enforcement.
+- Replace the previous on-device 1.1.7 dependency tree with the refreshed
+  production package and optional transports: Hono 4.13.18,
+  `@hono/node-server` 2.1.8, ws 8.23.0 and GraphQL 17.1.0. Verify all 5,994
+  installed files against the deployment manifest, Termux ownership (UID/GID
+  10287) and the installation directory's 0700 mode. Remove the old rollback
+  copy, validation checkout, check helpers and transfer files after verification;
+  preserve shared user state and VM cache. No test ADB forwards remain.
+- These refreshed-tree results are separate from the November 9 baselines
+  below. Hosted verification for this dependency refresh is tracked in
+  [PR #66 checks](https://github.com/fullread/DeepADB/pull/66/checks). Real
+  phone-to-watch Wear validation is deferred, and these transport checks are
+  not a new model-driven llama.cpp trial.
+
 #### 1.1.7 release verification — November 9, 2026
 
 - The versioned host/ADB build passed **826 checks, zero failures, 18 expected
