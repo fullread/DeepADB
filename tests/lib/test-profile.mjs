@@ -1,6 +1,8 @@
 // Copyright 2026 Jason <fullread@github>
 // SPDX-License-Identifier: Apache-2.0
 /** Test policy only; never changes the server's tool/security profile. */
+import { collectFixtureDiagnostics } from "./fixture-diagnostics.mjs";
+
 export const FIXTURE_PACKAGE = "io.github.fullread.deepadb.fixture";
 export function readTestProfile(env = process.env) {
   const name = env.DA_TEST_PROFILE ?? "pixel";
@@ -35,9 +37,25 @@ export async function expectedProperty(h, key, pixelValue) {
   return value;
 }
 
-export async function requireFixtureScreen(h, screen = "main") {
-  const r = await h.callTool("adb_shell", { command: `am start -W -S -n ${FIXTURE_PACKAGE}/.MainActivity --es screen ${screen}` });
-  if (h.isError(r) || !/Status: ok/.test(h.getText(r))) throw new Error(`Fixture launch failed: ${h.getText(r)}`);
-  const ready = await h.callTool("adb_wait_element", { text: "DeepADB Fixture", timeoutMs: 15000 });
-  if (h.isError(ready)) throw new Error(`Fixture UI not ready: ${h.getText(ready)}`);
+export async function requireFixtureScreen(h, screen = "main", collectDiagnostics = collectFixtureDiagnostics) {
+  let launchOutput = "";
+  let waitOutput = "";
+  try {
+    const r = await h.callTool("adb_shell", { command: `am start -W -S -n ${FIXTURE_PACKAGE}/.MainActivity --es screen ${screen}` });
+    launchOutput = h.getText(r);
+    if (h.isError(r) || !/Status: ok/.test(launchOutput)) throw new Error(`Fixture launch failed: ${launchOutput}`);
+    const ready = await h.callTool("adb_wait_element", { text: "DeepADB Fixture", timeoutMs: 15000 });
+    waitOutput = h.getText(ready);
+    if (h.isError(ready)) throw new Error(`Fixture UI not ready: ${waitOutput}`);
+  } catch (error) {
+    if (profile.emulator) {
+      try {
+        const diagnostics = await collectDiagnostics({ error, screen, launchOutput, waitOutput });
+        console.error(`Fixture diagnostics: ${diagnostics.directory ?? diagnostics.skipped}`);
+      } catch (diagnosticError) {
+        console.error(`Fixture diagnostics unavailable: ${String(diagnosticError?.message ?? diagnosticError).slice(0, 4096)}`);
+      }
+    }
+    throw error;
+  }
 }

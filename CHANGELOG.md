@@ -64,6 +64,35 @@ the versioned release build.
   phone-to-watch Wear validation is deferred, and these transport checks are
   not a new model-driven llama.cpp trial.
 
+#### Emulator readiness diagnostics
+
+- Investigate recurring first-launch fixture timeouts on hosted API 35.
+  In [run 43657470145](https://github.com/fullread/DeepADB/actions/runs/43657470145),
+  API 30 and 33 each passed **833 checks, zero failures, 34 skips**. API 35
+  reported **811 passed, one failure, 33 skips**, but its analysis suite crashed
+  before its summary, so those are incomplete totals. A prior unchanged retry
+  passed; that does not establish the cause or resolve the recurring failure.
+- Add failure-only, test-only diagnostics for fixture launch and UI readiness:
+  original launch/wait output, window/activity/power state, raw UI dump,
+  screenshot and filtered system logcat. Bound probe duration, output and
+  capture count; retain partial evidence, the original failure and fixture
+  cleanup. Upload only the diagnostic subtree with the existing CI log/summary.
+  No retry, readiness timeout extension, Pixel assertion or production code
+  change is introduced.
+- A fresh local API 35 default/x86_64 image passed the focused analysis suite:
+  **22 passed, zero failures, one explicit Pixel-only skip**. Its Windows
+  emulator 36.5.10 differs from hosted emulator 37.2.13; the hosted failure has
+  not been reproduced locally. A separately induced wrong-foreground failure
+  retained the six-poll timeout, captured launcher focus, actual hierarchy XML
+  and a valid screenshot, and still removed the disposable fixture. This
+  verifies evidence collection, not the cause of the hosted failure.
+- All **34 runner/profile/diagnostic tests pass**, including 11 new checks for
+  error preservation, output/time limits, emulator scoping, directory-link
+  rejection and cleanup. Build, lint and the diff whitespace check pass.
+- Keep hosted API 35 readiness unresolved pending a run with these diagnostics.
+  Required Test and CodeQL checks on the preceding dependency-refresh commit
+  passed; they do not substitute for completing this investigation before merge.
+
 #### 1.1.7 release verification — November 9, 2026
 
 - The versioned host/ADB build passed **826 checks, zero failures, 18 expected

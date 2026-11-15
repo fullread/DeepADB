@@ -54,7 +54,9 @@ async function main() {
   process.exitCode = await withFixture(adb, apk, () => new Promise((resolveRun, reject) => {
     const child = spawn(process.execPath, [join(root, "tests", "run-all.mjs")], {
       cwd: root, stdio: "inherit", windowsHide: true,
-      env: { ...process.env, DA_LOCAL: "false", DA_TEST_PROFILE: "emulator", DA_TEMP_DIR: outputDirectory, ADB_PATH: binary, DA_DEVICE: serial, ANDROID_SERIAL: serial },
+      env: { ...process.env, DA_LOCAL: "false", DA_TEST_PROFILE: "emulator", DA_TEMP_DIR: outputDirectory,
+        DA_EMULATOR_DIAGNOSTICS_DIR: join(outputDirectory, "fixture-diagnostics"),
+        ADB_PATH: binary, DA_DEVICE: serial, ANDROID_SERIAL: serial },
     });
     const interrupt = () => child.kill("SIGTERM");
     process.once("SIGINT", interrupt);

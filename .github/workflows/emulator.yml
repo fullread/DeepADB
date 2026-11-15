@@ -80,4 +80,7 @@ jobs:
           path: |
             emulator-api${{ matrix.api-level }}.log
             emulator-api${{ matrix.api-level }}-summary.md
+            .test-artifacts/emulator-run-*/fixture-diagnostics/**
+          # Only the explicit failure-evidence subtree above is included.
+          include-hidden-files: true
           if-no-files-found: warn

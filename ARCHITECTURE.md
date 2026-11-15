@@ -436,7 +436,11 @@ pass/fail/skip counts. Explicit test profiles retain the physical Pixel assertio
 while using a disposable app and Android-reported sensor inventory on emulators.
 Named hardware skips are distinct from failures: failed assertions, fixture
 setup/cleanup errors and incomplete runs still fail the job. Historical green
-runs using `continue-on-error` did not guarantee passing tests. See CONTRIBUTING.md
+runs using `continue-on-error` did not guarantee passing tests. Fixture launch
+and readiness failures retain bounded, emulator-scoped window/activity/power,
+raw UI, screenshot and logcat evidence alongside the original tool output.
+Diagnostic failures cannot replace the primary test error or bypass cleanup;
+the workflow uploads this evidence even when the suite fails. See CONTRIBUTING.md
 for profile setup, CI and merge requirements.
 The reporting helper has separate mocked process tests under `tests/ci/`;
 these validate CI infrastructure and do not replace the real-server suites.
